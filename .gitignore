@@ -1,0 +1,11 @@
+# Supabase local state
+backend/supabase/.branches
+backend/supabase/.temp
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# macOS
+.DS_Store
