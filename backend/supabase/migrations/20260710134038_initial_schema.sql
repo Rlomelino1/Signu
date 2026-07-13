@@ -1,6 +1,6 @@
 -- ============================================================
 -- Subscription Tracker — Migration #1: initial schema
--- Source of truth: subscription-tracker-data-model.md (v2, 2026-07-08)
+-- Source of truth: subscription-tracker-data-model.md (v4, 2026-07-13)
 --
 -- Locked decisions implemented here:
 --   * text + CHECK constraints (no enums)
@@ -148,6 +148,15 @@ create table public.subscription_run (
                      check (billing_interval in ('monthly', 'annual')),
   status             text not null
                      check (status in ('possible', 'active', 'overdue', 'ended')),
+  detected_by        text not null
+                     check (detected_by in ('R1', 'R3', 'R4')),
+                                               -- engine-stated, no default; powers
+                                               -- expected-exact (R1) vs
+                                               -- expected-approximate (R3) predictions.
+                                               -- R4 runs are possible-only until a
+                                               -- confirming pattern re-stamps R1/R3.
+                                               -- R2 is backfill, never creation —
+                                               -- it never appears here.
   next_expected_date date,                     -- engine cache; powers renewal alerts
   created_at         timestamptz not null default now()
 );
