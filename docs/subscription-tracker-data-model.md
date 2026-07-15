@@ -1,6 +1,6 @@
 # Subscription Tracker — Data Model
 
-> **Living document** · Last updated **2026-07-14** (v6) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-07-15** (v8) · See [changelog](#changelog) at the bottom.
 
 ## Entity relationship diagram
 
@@ -112,7 +112,7 @@ Managed entirely by Supabase Auth — not part of our schema.
 | `start_date` | date | Corrected retroactively by R2 backfill |
 | `end_date` | date | Null = active; = last charge + 1 interval (**paid-through**); recomputed if R5 trailing charge appends |
 | `cancelled_date` | date | Nullable; null on non-cancelled runs; when the user asserted cancellation; `date` not `timestamptz` (date-granularity doctrine) |
-| `billing_interval` | string | monthly / annual (more later if needed) |
+| `billing_interval` | string | monthly / annual (more later if needed); R4 runs: provisional monthly at creation, user-stated at confirmation — see [R4 billing interval](#r4-billing-interval-locked-2026-07-15) |
 | `status` | string | possible / active / overdue / ended / cancelled; no default, writer states it (engine or cancel Edge Function) |
 | `detected_by` | string | R1 / R3 / R4; engine-stated, no default; powers expected-exact vs expected-approximate |
 | `next_expected_date` | date | Engine cache: last charge + interval; powers renewal alerts; **always NULL on cancelled runs** (never in "Coming up", never overdue) |
@@ -186,7 +186,7 @@ Replayable over full history, date granularity only. **Strict to create, generou
 | **R1 — anchor** | auto | 2 charges, same merchant+amount, one cadence apart (monthly = 28–33d, ±3d window). Continuation is amount-flexible (price hikes never split a run). |
 | **R2 — backfill** | auto | On confirmation, claim an unclaimed same-merchant charge ~1 interval before run start, any amount; fix `start_date`. |
 | **R3 — cadence-beats-amount** | suggest-only | 3+ date-aligned charges, varying amounts (FX-priced subs, utilities). User confirms/ignores. On BR credit cards, international (USD-priced) subs post converted to BRL with fluctuating amounts — **R3 is what catches them**; the currency column does not (it will read BRL). |
-| **R4 — catalog fast path** | suggest-only | 1 charge from a known subscription-only merchant ⇒ "possible" immediately. |
+| **R4 — catalog fast path** | suggest-only | 1 charge from a known subscription-only merchant ⇒ "possible" immediately. Interval is asked, not guessed — see [R4 billing interval](#r4-billing-interval-locked-2026-07-15). |
 | **R5 — trailing charge on cancelled runs** | auto | See below. |
 
 ### R5 — trailing charge on cancelled runs
@@ -199,6 +199,15 @@ A cancelled run may claim **at most one** continuation charge — `merchant_key`
 - Stated as a **replay rule** on purpose: incremental sync and full replay must converge on identical state.
 
 > **Note:** this is the **only** place a charge ever moves between runs — un-claiming is a required engine capability; replayability is what makes it safe.
+
+### R4 billing interval (locked 2026-07-15)
+
+R4 creates a run from a **single charge** — cadence cannot be measured, so the engine cannot honestly state an interval. Resolution: **ask the user at confirmation.**
+
+- **At creation**: the engine writes a provisional `billing_interval = 'monthly'`. Keeps the column NOT NULL, keeps the pre-confirmation "renews ~\<date\>" prediction renderable (`next_expected_date` computable), and monthly is the overwhelmingly common case. Same shape as `detected_by` re-stamping: a provisional engine write, overwritten by better information at confirmation.
+- **At confirmation ("Track it")**: the confirm flow asks *monthly or annual?* — the user's answer overwrites `billing_interval`. This is the authoritative write.
+- **R3 confirmations never ask**: 3+ date-aligned charges already *measure* the cadence; asking would be the system pretending not to know something it proved. The extra step is R4-only.
+- **Engine test case (flagged for implementation)**: a confirmed R4 run that never receives a second charge must die quietly through the normal machinery — expected date passes ⇒ overdue ⇒ ended at +10. No special casing; the lifecycle already covers it, but it warrants an explicit test.
 
 ### Possible state
 
@@ -241,6 +250,45 @@ The user can assert "I cancelled this" from the detail screen.
 
 ---
 
+## Subscriptions tab contract
+
+*Locked 2026-07-15 — design 7a (groups + /yr hero) with 8a (inactive view) and 9a/9b (suggested flow); supersedes 6a/6b, which merged into one screen (6b's cost view became a per-group sort mode). UI reads state, never guesses.*
+
+### Hero & totals
+
+- **Hero = /yr total**, the number with **no invented math**: Σ(monthly last-charges × 12) + Σ(annual last-charges × 1) — every term derived from a stated contract price. The **/mo companion = /yr ÷ 12**, always rendered with a tilde (it's a derived approximation by construction).
+  - This inverts an earlier same-day decision (amortize annual ÷ 12 into a /mo hero) — superseded because the /yr direction needs no invisible division and gives the /yr slot a real job.
+- **Per-subscription amount source**: the **last charge of the latest run** — the same number the prediction rows use. One source of truth; no averaging, ever.
+- **Hero is invariant**: the All / Active / Inactive chips filter the **list only, never the hero**. The hero always answers "current cost rate"; dead subs never enter it, suggestions never enter it. (Locked by 8a's rendering — resist the future temptation to make it react to the filter.)
+- **Tilde propagation**: R3/R4 rows render predicted amounts with a tilde; any total an R3/R4 run contributes to (the /yr hero, the affected group subtotal) inherits it. **One marker, one meaning** — "this number is approximate" — whether the cause is R3 amount variance or the /mo unit conversion. Never stack markers; there is only the tilde.
+- **Copy rule (Home vs Subs)**: two heroes coexist in one session — Home = *landed spend* ("spent in July"), Subs = *cost rate* ("monthly/yearly cost"). Labels must carry the difference or the mismatch reads as a bug. Different questions, different math — no conflict with Home's no-amortization stance, which is about landed spend.
+- **Primary-currency footnote rule** (inherited from the home contract): applies to these totals too — a sub charged outside the primary currency is excluded from the sums but surfaced, never silently hidden.
+
+### Grouping & sorting
+
+- Subscriptions group into **MONTHLY and ANNUAL sections**, each with a **subtotal in its native unit** (R$ X /mo, R$ Y /yr) — no cross-unit blending anywhere below the hero. Rows always show the **real charge amount** ("R$ 349,00 · Annual") — never an amortized figure.
+- **Sort modes: By date / By cost**, applied **within groups** (a global cost sort would compare /mo against /yr numbers — unit-dishonest by construction).
+  - *By date* = next-charge order; overdue runs float to the top for free (expected date is in the past — emergent, no special-casing).
+  - *By cost* adds share-of-total bars; percentages are **per-group** (share of the group subtotal). Copy says "% of total" — accepted as-is, the surrounding bars make the reference frame obvious.
+  - The toggle is a **global control** for both groups despite sitting on the MONTHLY header row (accepted placement).
+
+### Inactive view (8a)
+
+- Selecting **Inactive** shows a **flat list** — no MONTHLY/ANNUAL grouping, no sort toggle (neither concept earns its place on dead subs). Hero stays put (invariance rule above).
+- **Row copy encodes the ended/cancelled distinction**: *"Was R$ X /mo · last charge \<date\>"* + **Ended** badge (engine-inferred) vs *"Was R$ X /mo · cancelled by you \<date\>"* + **Cancelled** badge (user-asserted) — the same split as the detail screen's "Charges stopped" / "You cancelled this". "Was" framing = historical fact, so **no tilde ever** on inactive rows.
+- Both rows show **"Paid through \<end_date\>"** — grouping reflects **billing state, not access state**; a cancelled sub with a future paid-through date still lives under Inactive, the paid-through copy carries the access story.
+- **Footer copy**: *"If charges come back, two in a row start a new run."* — true for both statuses (ended: plain R1 restart; cancelled: R5 trailing charge then un-claim + new R1 run) and honest about the one-cycle blind spot. Satisfies the detail contract's footer-honesty rule.
+
+### Suggested flow (9a/9b)
+
+- **SUGGESTED section** (9b, final shape): surfaces above MONTHLY **only when non-empty**; compressed evidence per row ("3 charges · looks monthly · ~R$ 112"); rows are **pure tap-throughs to the review screen (9a) — no inline actions**. Suggestions are **excluded from the hero and from chip counts** (they are neither active nor inactive).
+  - *Supersession note*: an earlier iteration had inline Track/✕ on 9b rows — cut. All confirm/dismiss actions live on 9a only, so every decision is made with the charge evidence visible (evidence-before-decision as a rule, not a preference), the mis-tap-dismiss hazard is deleted rather than mitigated, and the R4 monthly/annual sheet attaches to exactly one button in one place. Accepted cost: dismissing a certain false positive takes two taps instead of one.
+- **Review screen** (9a, reached from Home "Review →" and by tapping a SUGGESTED row): full **charge evidence** per suggestion — dates, cards, amounts — plus the predicted renewal line; **Track it / Not a subscription** actions per suggestion. Two-surface split, now strict: **9b informs, 9a decides.**
+- Actions map to doctrine: **Track it** ⇒ run `active` (R4 path additionally asks monthly/annual — see [R4 billing interval](#r4-billing-interval-locked-2026-07-15)); **Not a subscription / ✕** ⇒ `subscription.ignored = true`, recoverable in Settings (footer states this).
+- **Copy honesty rule**: prediction copy states only what the engine measured. *"(foreign price, converted)" was cut* — the engine knows *amounts vary*, not *why*; the FX explanation would require a merchant-catalog flag that doesn't exist yet. Use "amount varies month to month"-class copy.
+
+---
+
 ## Subscription detail contract
 
 *Locked 2026-07-14 — design 4b: ink hero card + self-narrating timeline; UI reads state, never guesses.*
@@ -250,26 +298,31 @@ The user can assert "I cancelled this" from the detail screen.
   - landed charge (*"Charged"*),
   - price change (*"Price raised · was R$ X"* — continuation is amount-flexible, so raises live **inside** a run and the history narrates them),
   - trailing charge (*"Charged · after cancellation"*, from R5),
-  - run start (*"First charge · start of run"* — the oldest charge of a run, marks the boundary),
+  - run start (*"Started · new run · charged"* — the oldest charge of a run marks the boundary; rendered as a distinct boundary event on runs after the first),
+  - subscription gap (*"NOT SUBSCRIBED · \<ended date\> – \<new start\> · N months"* — synthesized from the span between a dead run's end and the next run's start; see run segmentation below),
   - user cancellation (*"Cancelled by you · paid through \<end_date\>"* — synthesized from `cancelled_date`),
   - missed charge (*"Expected charge missed"* — synthesized from the expected date that passed unclaimed),
-  - run death (*"Ended · charges stopped · N days past expected"* — synthesized from `status = ended` + `end_date`).
+  - run death (*"Ended · charges stopped · paid through \<end_date\>"* — synthesized from `status = ended` + `end_date`; copy amended 2026-07-15 by 11a: paid-through replaces "N days past expected" — user-meaningful date over engine trivia).
 
   **Endpoint-synthesis note**: the timeline is **not** a pure CHARGE query. The last four event types are synthesized by the **endpoint** from run state (`cancelled_date`, `end_date` + `status`, expected-date arithmetic) and interleaved with charge rows by date. "UI reads state, never guesses" therefore means the *endpoint* derives these rows — the client renders a pre-assembled event stream and computes nothing.
 
   Lifetime totals in the hero (THIS YEAR / SINCE \<start\>) are pure CHARGE aggregations — the permanent-history promise made visible.
 - **Tilde rule** (inherited from the home contract, applies here too): the "Renews" row amount is a prediction from the last charge; R1-stable runs render exact, R3 cadence-matched runs render approximate ("~R$ 21,90"). `detected_by` powers it; **detail and home must never disagree**.
-- **Hero date slot is uniform per run state** (locked 2026-07-14, fixes 5c): active/overdue runs show **RENEWS + `next_expected_date`**; dead runs — both `cancelled` **and** `ended` — show **PAID THROUGH + `end_date`**. Never "last charge" (derivable from charges, and easily confused with the expected date). One slot, one meaning, powered by one column; "paid through" also tells the user when access actually lapsed.
+- **Hero date slot is uniform per run state** (locked 2026-07-14; label refined 2026-07-15 by 10a): one slot, one date column, **three labels by state** — active runs show **RENEWS + `next_expected_date`**; overdue runs show **EXPECTED + `next_expected_date` + "not seen"** (same column; "RENEWS" on a passed date would read as a lie); dead runs — both `cancelled` **and** `ended` — show **PAID THROUGH + `end_date`**. Never "last charge" (derivable from charges, and easily confused with the expected date). "Paid through" also tells the user when access actually lapsed.
 - **Card row**: means "card of the **most recent** charge", derived at query time — nothing stored on subscription, no "preferred card" concept ever (the data decides, same philosophy as primary currency).
-  - If the latest charge's `transaction_id` resolves: join charge → transaction → bank_account for the rich row (brand icon, "Visa – 4821", "Nubank · credit", chevron, tap-through).
+  - If the latest charge's `transaction_id` resolves: join charge → transaction → bank_account for the rich row (brand icon, "Visa – 4821", "Nubank · credit", chevron, tap-through). **Tap destination locked (2026-07-15): the connection detail screen (12b)** of the bank the card belongs to — no new screen; 12b is *the* bank/card surface, and the tap-through doubles as the path to Reconnect when that card's connection needs action.
   - If `transaction_id` is NULL (raw data deleted): degrade to the `card_label` snapshot alone — no subtitle, no chevron. The row never disappears, it loses depth (self-sufficient history rendering, literally).
   - Card-hopping is implicit: the row tracks the newest charge; older charges keep their own `card_label`.
   - **Card-change rendering (locked 2026-07-14, from 5d — un-defers the polish)**: history rows show inline `card_label` **only when it differs from the current card** ("Charged · Tue, Apr 15 · Visa 4821"); the switch-point charge additionally carries a transition annotation (*"card changed to Master 7730"*). The redundant section-header note ("card changed in May") is **cut** — two renderings of the fact, not three.
-- **Cancel action**: "Mark cancelled" triggers the [user cancellation](#user-cancellation-locked-2026-07-14) flow (Edge Function). The "Active" badge is **derived** from the latest run's status — the screen needs possible / active / overdue / ended / cancelled variants, not just the happy path.
+- **Cancel action**: "Mark cancelled" triggers the [user cancellation](#user-cancellation-locked-2026-07-14) flow (Edge Function). The badge is **derived** from the latest run's status; the screen needs active / overdue / ended / cancelled variants.
+- **No `possible` detail variant** (locked 2026-07-15): possible runs surface **only** on the review screen (9a) — confirmation is the moment a subscription earns a detail screen. Once tracked, it's a subscription like any other.
+- **Overdue variant locked** (2026-07-15, screen 10a): Overdue badge on the hero; EXPECTED label per the slot rule above; missed-charge timeline row rendered with an **open ring** marker (vs filled dots for landed events — the marker itself distinguishes "hasn't happened" from "happened"); footer states the exact deadline and consequence (*"If no charge arrives by \<expected + 10\>, we'll mark this run ended."*) — plain fact, no vague "soon".
+- **Tilde stays `detected_by`-only** (reaffirmed 2026-07-15): overdue does **not** downgrade prediction confidence — an R1 run's expected amount renders exact even while overdue. What's uncertain about an overdue run is *whether* the charge lands, not *how much* — and the "not seen" copy carries that. The tilde keeps its one meaning; a screen must never make two confidence claims about one number.
 - **"Since \<date\>" copy** pins to the first run's `start_date` (R2-corrected, *actual* since), **not** `subscription.created_at` (tracking since).
 - **Reminder toggle**: maps to `subscription.remind_before_days` (see push skeleton below); toggle on = 2 for now. Renders today, delivers later.
 - **Ended-run footer copy** must stay honest about R1's two-charge requirement: a resubscription is invisible for up to one full cycle (first post-ended charge sits unclaimed until the second anchors R1). Copy along the lines of *"if charges resume, tracking restarts after two"* — never promise instant restart.
-- **Known screen still to design**: run segmentation (ended run → gap → new run) — how the timeline visually separates runs and treats gaps.
+- **Run segmentation locked** (2026-07-15, screen 11a): the gap between runs is a **first-class timeline event**, not whitespace — *"NOT SUBSCRIBED · Nov 15 – May 05 · 6 months"* with a **dashed connector line and open marker** (solid line = covered, dashes = no coverage; open marker consistent with 10a's "didn't happen" semantics). Boundary semantics: the gap's start = the dead run's ended/cancelled date; its end = the next run's `start_date` — which R1 backdates to the first charge, so replay renders the resubscription from its true beginning even though the run was only *created* when the second charge anchored it. The new run's first charge renders as the *"Started · new run"* boundary event; price differences across the gap narrate themselves (each run's charges show their own amounts). The hero's SINCE stat gains a **run count** when > 1 (*"SINCE SEP 25 · 2 RUNS"*) — explains the gap before the user scrolls.
+- **Tilde is amounts-only — dates never carry tildes** (locked 2026-07-15): every predicted date has the same −3/+3 matching window, so marking dates approximate adds noise without information; relative copy ("in 3w") already reads soft. RENEWS/EXPECTED dates render bare everywhere.
 
 ---
 
@@ -283,10 +336,72 @@ The user can assert "I cancelled this" from the detail screen.
 
 ---
 
+## Settings contract
+
+*Locked 2026-07-15 — designs 12a–12d: single scrollable screen + one sub-page (connection detail). UI reads state, never guesses.*
+
+### Structure
+
+- **Single scrollable screen** (12a) with exactly **one sub-page**: connection detail (12b). Everything else lives inline or in confirmation sheets.
+- Sections: **Profile** (name, email, sign-in method chips — read from `auth.users` identities), **Connected banks**, **Dismissed suggestions**, **Data** (delete account). No Notifications section yet — `remind_before_days` is per-subscription and its toggle lives on the detail screen; a global section has nothing real to control until delivery infrastructure exists.
+- **No Appearance/currency section**: primary currency is derived, never stored/configured (home contract) — a currency setting would either violate that doctrine or be a dead toggle.
+
+### Connected banks (12a rows → 12b detail)
+
+- Rows: bank + status chip + one-line context. Chips map to schema: **Active** (`status = active`, subtitle "Synced \<ago\> · N cards"), **Needs action** (`needs_action`/`expired`, subtitle "Sign in again to resume syncing"), **Expiring** (`consent_expires_at` near — the warn-before-lapse behavior, subtitle "Consent expires \<date\> · renew soon").
+- **Connection detail (12b) is also the Home banner's tap destination** — one screen serves both entry points; the banner-destination gap from the home contract is closed here.
+- Detail hero (ink card, same language as the subscription detail screen): institution, connected-since, status badge, LAST SYNCED (`last_synced_at`) + CONSENT EXPIRES (`consent_expires_at`) stat slots, **Reconnect** primary action, and reassurance copy stating the connection-death doctrine in user terms: *"Signing in again resumes syncing — nothing was lost."*
+- Below the hero: **cards on this link** (bank_account rows, "N subscriptions billed here" per card) and a summary row (*"N subscriptions found via this bank · R$ X tracked since \<date\>"*) — counts use the attribution rule below.
+
+### Remove-bank-link flow (12c) — deletion tier (b) made concrete
+
+- The **history choice is captured up front** in the removal sheet, before the destructive tap — required by the sequencing rule (the Edge Function must delete affected subscriptions *before* the connection; after it, `transaction_id`s are NULL and the linkage is gone).
+- **"Keep their history" is the pre-selected default.** Copy is generic, no service names (*"They stay in your list with their charge history — they just stop updating from this bank."*) — "their" scopes the promise to the subscriptions, avoiding a read of "we keep your bank's data" that would contradict the header's deletion statement; "from this bank" because subscriptions belong to the user, not the card — a sub that card-hops to another connection keeps updating. Delete option mirrors the vocabulary (*"Erases those 6 subscriptions (including dismissed ones) and their charge history."*) so the two options read as opposites of the same thing.
+  - *Amended same-day*: an earlier iteration named affected services in the sheet ("Globoplay, Smart Fit and 4 more"). Cut — the sheet states the count and the consequence; **the names live one level up**, see the tap-through requirement below.
+- **Attribution rule (locked)**: a subscription counts as *"found via this bank"* iff the **latest charge of its latest run** resolves (via `transaction_id`) to a transaction under this connection. Same doctrine as the card row: most recent charge wins, the data decides.
+  - Consequence, accepted with eyes open: a mixed-evidence subscription (latest charge here, older charges on another bank) **is counted** — and "Delete them too" erases those other-bank charges as well. With the sheet copy now generic, **the 12b tap-through list is the load-bearing visibility surface** (below), not the sheet.
+  - Inverse: a sub that card-hopped *away* is not counted; its old charges under this connection survive **on either path** with `transaction_id = NULL` + `card_label` (standard SET NULL degradation) — which is why the generic keep copy is safe: "subscriptions that once touched this bank keep those charges" holds universally.
+- **Tap-through requirement (now mandatory, not polish)**: the 12b summary row (*"N subscriptions found via this bank"*) **must** open the attributed-subscriptions list — designed as **13a**, contract below. It is the user's only pre-delete view of exactly what "Delete them too" takes — the eyes-open safeguard moved here when the sheet went generic.
+
+### Attributed-subscriptions list (13a)
+
+*Locked 2026-07-15 — the load-bearing eyes-open surface behind 12b's summary row; back returns to 12b.*
+
+- **Richer than the original "name + last charge" spec — amended to match the build**: the screen's job is showing what "Delete them too" would take, so rows carry real state: name, status/renewal line (Overdue · expected \<date\> / Renews \<date\> / Ended · paid through \<date\>), amount + unit. All existing rendering rules apply unchanged — tilde on R3 amounts, copy-honesty (no FX explanations; the tilde or "amount varies"-class copy only), overdue tinting, annual unit shown.
+- **Grouped by card** (bank_account rows of this connection), section headers "VISA ···· 4821 · N". Dead subs (ended/cancelled) appear under the card of their latest charge like any other.
+- **DISMISSED section** (`ignored = true` attributed subs) sits below the card groups, outside them — a dismissed sub's card is irrelevant to its status. Row mirrors 12a's dismissed row copy ("Not a subscription · \<date\>") **without the Restore button**.
+- **Fully read-only, no actions** — strict 9b precedent (informing surface, not acting surface). Restore lives in 12a only.
+- **Header count arithmetic is checkable on-screen**: "N subscriptions · R$ X since \<date\>" where N = total attributed **including dismissed** (card-group counts + dismissed count = N). The same N appears on 12b's summary row and in 12c's sheet ("those N subscriptions (including dismissed ones)") — three surfaces, one number, never diverging.
+- **Tracked-total definition (locked)**: R$ X = the **full charge history of the N attributed subscriptions** — including mixed-evidence subs' other-bank charges and dismissed subs' charges. Chosen over "charges resolving to this connection" because the number's job is to equal exactly what "Delete them too" erases. Same figure on 12b's summary row.
+- **Footer** connects the list to the flow that gives it purpose: *"Removing this bank link decides what happens to these."* (Shortened from an earlier "— see Remove this bank link" pointer; the button lives one back-tap away on 12b, so naming it duplicated navigation the layout already provides.)
+- **The count includes ignored subscriptions.** Dismissed suggestions have charges too; "Delete them too" takes their data with it — silently keeping ghost data the user can't see would be the worst outcome.
+- The final destructive button restates the choice (*"Remove link, keep history"* / *"Remove link and history"*) — the last tap carries the decision, not just the radio above it.
+
+### Dismissed suggestions (12a)
+
+- Flat list of `ignored = true` subscriptions ("Not a subscription · \<dismissed date\>") with a per-row **Restore** action. This is the "recoverable in Settings" surface promised by the subscriptions-tab and review-screen contracts.
+- **Restore = `ignored = false`, nothing more.** The run returns to `possible` and resurfaces via SUGGESTED/9a; footer copy states it: *"Restoring puts the suggestion back in review — nothing is tracked until you confirm it."* Restore never auto-tracks.
+
+### Edge states
+
+- **Empty state (12d)**: no banks connected ⇒ Connected banks section renders an explainer (*"Subscriptions are detected from your card charges — connect a bank to start"*) + **Connect a bank** CTA. Doubles as the first-run landing shape for the (still undesigned) onboarding flow.
+- Needs-action and expiring states render **inline on the rows** (12a) — no separate screen variants; the row chip + subtitle carry the state, the detail page resolves it.
+
+### Delete account (12a/12d Data section → 14a)
+
+- Tier (a): one `auth.admin.deleteUser()` call, cascade wipes everything. Row subtitle states scope plainly: *"Everything, permanently — banks, history, profile."*
+- **Confirmation sheet locked (14a): type-to-confirm.** The heavier-than-standard pattern is earned — the most irreversible action in the app gets its friction exactly once. Header copy is honest to the implementation: *"This is permanent. There's no grace period and no undo."* (accurate: hard cascade, nothing soft-deleted).
+- **Concrete scope list, real counts from the user's data** (same checkable-arithmetic instinct as 13a — never generic "all your data"): *"N bank links and their transactions · M subscriptions and every charge since \<date\> · Your profile and sign-in methods."*
+  - **M = total subscriptions including `ignored = true`** — the no-ghost-data principle; nothing the cascade takes is uncounted.
+- **Button disabled until the input matches** "DELETE"; match is **case-insensitive** (the field renders uppercase regardless — implementation note).
+
+---
+
 ## User deletion tiers
 
 - **(a) Delete account** = `auth.users` cascade wipes everything.
 - **(b) Delete a bank link** = connection → bank_accounts → transactions removed; the user chooses whether associated subscription history (charges/runs/subs) survives or goes with it. `card_label` + duplicated date/amount/currency keep surviving history self-sufficient.
+  - **"Associated" is now defined** — see the [remove-bank-link flow](#remove-bank-link-flow-12c--deletion-tier-b-made-concrete): latest charge of the latest run resolves to this connection; count includes `ignored = true` subscriptions.
 
 ---
 
@@ -312,6 +427,10 @@ The user can assert "I cancelled this" from the detail screen.
 ---
 
 ## Changelog
+
+- **v8** — SETTINGS CONTRACT locked (designs 12a–12d + 13a + 14a): single scrollable screen + one sub-page (connection detail, which doubles as the Home connection-banner destination — that gap is closed). Sections: Profile / Connected banks / Dismissed suggestions / Data; no Notifications section yet (per-sub toggle lives on detail; nothing global to control pre-delivery); no currency setting ever (derived-currency doctrine). Remove-bank-link flow makes deletion tier (b) concrete: history choice captured up front (sequencing rule), keep-history pre-selected, copy names affected services and says "stop updating **from this bank**". **Attribution rule locked**: "found via this bank" = latest charge of latest run resolves to this connection (most-recent-charge doctrine, same as the card row); mixed-evidence subs are counted — "Delete them too" erases their other-bank charges as well, accepted with eyes open; **count includes `ignored` subscriptions** (no invisible ghost data). *Same-day amendment*: sheet copy went generic (named services cut); the eyes-open safeguard moved to the **12b tap-through list** ("N subscriptions found via this bank" must open the attributed list — now mandatory). **13a locked** as that list: grouped by card, real state per row (renewal/overdue/ended lines, tilde rules apply), DISMISSED section outside the card groups (no Restore — fully read-only, strict 9b precedent; Restore lives in 12a only); header count = total **including dismissed**, checkable on-screen (card groups + dismissed = N), same N on 12b and 12c — three surfaces, one number; **tracked total = full charge history of the N attributed subs** (incl. other-bank and dismissed charges) — defined to equal exactly what "Delete them too" erases. Destructive button restates the choice. Dismissed-suggestions surface fulfills the "recoverable in Settings" promise; restore = `ignored = false` only, back to review, never auto-tracks. Empty state (12d) doubles as first-run landing shape. **14a locked**: delete-account confirmation = type-to-confirm sheet (no longer deferred); concrete scope list with real counts (subscriptions count **includes dismissed** — no-ghost-data principle); "no grace period and no undo" copy accurate to the hard cascade; button disabled until case-insensitive "DELETE" match. **Detail-screen card row tap destination locked**: opens 12b (the card's connection detail) — the last dangling chevron in the app; no new screen.
+
+- **v7** — SUBSCRIPTIONS TAB CONTRACT locked (design 7a + 8a + 9a/9b; supersedes 6a/6b): /yr hero with exact composition, ~/mo = ÷12 derived, hero invariant under filter chips; per-subscription amount = last charge of latest run; tilde propagation unified (one marker, one meaning); MONTHLY/ANNUAL groups with native-unit subtotals; per-group By date / By cost sorting; inactive flat list with ended/cancelled copy split and paid-through rendering (billing state, not access state); SUGGESTED section + review screen (excluded from hero and chip counts; 9b rows tap through to 9a — all confirm/dismiss actions on the evidence screen only; dismiss ⇒ `ignored`, recoverable). R4 billing interval rule locked: provisional monthly at creation, user asked monthly/annual at confirmation (R3 never asks — cadence is measured); confirmed-R4-never-charges-again flagged as engine test case. "(foreign price, converted)" copy cut — engine states only what it measured. Detail-screen additions (10a): overdue variant locked (EXPECTED · not seen hero label — hero slot rule refined to three labels by state; open-ring timeline marker for the missed charge; exact +10 deadline in footer copy); no `possible` detail variant — possible runs live on 9a only, confirmation is the moment a subscription earns a detail screen; tilde reaffirmed as `detected_by`-only (overdue never downgrades amount confidence). Run segmentation locked (11a): gap = first-class NOT SUBSCRIBED timeline event (dashed connector + open marker; boundaries = dead run's end date → next run's R1-backdated `start_date`); run count added to SINCE stat when > 1; run-death copy amended to "paid through \<end_date\>"; run-start copy amended to "Started · new run"; tilde ruled amounts-only — dates never carry tildes. Detail contract complete: every state and transition designed.
 
 - **v6** — Detail contract refined from screens 5a–5d: four new timeline event types (run start, cancelled-by-you, expected-charge-missed, ended) + endpoint-synthesis note (timeline is no longer a pure CHARGE query; the endpoint interleaves synthesized run-state events). Hero date slot made uniform (RENEWS on live runs, PAID THROUGH on dead runs — both cancelled and ended; never "last charge"). Card-change rendering locked (inline `card_label` on differing rows + transition annotation; header note cut) — un-defers the v5 polish. Ended-run footer copy honesty rule (no instant-restart promise).
 - **v5** — SUBSCRIPTION DETAIL CONTRACT locked (design 4b: ink hero + self-narrating timeline). User cancellation added (status `cancelled` + `cancelled_date`; `end_date` stays paid-through). R5 trailing-charge rule added to detection doctrine. Push notification skeleton added (DEVICE_TOKEN table + `subscription.remind_before_days`; delivery job deferred). Card row contract locked (derived from most recent charge, degrades to `card_label` snapshot). Tilde rule extended to detail screen.
