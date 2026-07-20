@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-07-17** (v11) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-07-20** (v13) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -100,7 +100,6 @@ Managed entirely by Supabase Auth — not part of our schema.
 | `merchant_key` | string | Matching attribute; **non-unique** |
 | `dedupe_key` | string | Identity; `UNIQUE(user_id, dedupe_key)`; engine-assigned |
 | `category` | string | Seeded by detection, user-editable after |
-| `logo_url` | string | Nullable; from merchant catalog |
 | `identification` | string | auto / user_confirmed / user_renamed; default `auto` |
 | `ignored` | boolean | User said not-a-subscription; remembered across syncs; default `false` |
 | `remind_before_days` | int | Nullable; null = reminders off; user-owned (RLS UPDATE grant); delivery deferred |
@@ -176,7 +175,7 @@ Managed entirely by Supabase Auth — not part of our schema.
   - one merchant / several instances (`netflix`, `netflix:2` — forked when two charges land in one cycle), and
   - one descriptor / several services (`apple:4.90`, `apple:34.90`).
 - Ambiguous splits are resolved by the user via merge/split actions (later UI).
-- **Future app-level table — MERCHANT_CATALOG** (patterns → service, logo, category, subscription-only flag). Feeds R4 and `logo_url`.
+- **Future app-level table — MERCHANT_CATALOG** (patterns → service, **domain**, category, subscription-only flag). Feeds R4 and the [logo sourcing contract](#logo-sourcing-contract) — the nullable `domain` field is what drives logo resolution (v12).
 
 ---
 
@@ -326,6 +325,35 @@ The user can assert "I cancelled this" from the detail screen.
 - **Ended-run footer copy** must stay honest about R1's two-charge requirement: a resubscription is invisible for up to one full cycle (first post-ended charge sits unclaimed until the second anchors R1). Copy along the lines of *"if charges resume, tracking restarts after two"* — never promise instant restart.
 - **Run segmentation locked** (2026-07-15, screen 11a): the gap between runs is a **first-class timeline event**, not whitespace — *"NOT SUBSCRIBED · Nov 15 – May 05 · 6 months"* with a **dashed connector line and open marker** (solid line = covered, dashes = no coverage; open marker consistent with 10a's "didn't happen" semantics). Boundary semantics: the gap's start = the dead run's ended/cancelled date; its end = the next run's `start_date` — which R1 backdates to the first charge, so replay renders the resubscription from its true beginning even though the run was only *created* when the second charge anchored it. The new run's first charge renders as the *"Started · new run"* boundary event; price differences across the gap narrate themselves (each run's charges show their own amounts). The hero's SINCE stat gains a **run count** when > 1 (*"SINCE SEP 25 · 2 RUNS"*) — explains the gap before the user scrolls.
 - **Tilde is amounts-only — dates never carry tildes** (locked 2026-07-15): every predicted date has the same −3/+3 matching window, so marking dates approximate adds noise without information; relative copy ("in 3w") already reads soft. RENEWS/EXPECTED dates render bare everywhere.
+
+---
+
+## Tab bar & navigation contract
+
+*Locked 2026-07-20, during Home screen implementation review. Deliberate deviation from the mockups, which show the floating capsule bar always present — do not "fix" implementations back to the static mockup rendering.*
+
+- **Safari-style auto-hiding tab bar**: visible by default; scrolling down slides it out of view (ease-out, ~250ms); **any upward scroll immediately brings it back**. Reaching the very bottom of the content also reveals it — without this, a user parked at the end of a list would have no scroll-down gesture left and no bar.
+  - Chosen over reveal-only-at-bottom (Rafael's first instinct, superseded same discussion): bottom-reveal makes tab switching require scrolling to the end of every screen — real friction on long lists like the Subscriptions tab. Safari-style keeps navigation one gesture away while still clearing the last rows.
+- **Short-content rule**: if a screen's content doesn't scroll (empty states like the connected-syncing Home, short screens), the bar is **always visible** — it must never be unreachable.
+- **Reduce Motion**: crossfade instead of slide (same accessibility posture as the welcome carousel).
+- **Bottom content inset**: scroll content clears the bar when visible — exactly bar height + small margin + safe area, nothing more (oversized clearance was the bug that prompted this contract).
+- **Applies uniformly to all three tab screens** (Home / Subs / Settings); previews must render tab screens inside RootView with the bar overlaid so clearance and hide/show behavior are reviewable.
+
+---
+
+## Logo sourcing contract
+
+*Locked 2026-07-20 (from the 21r logo discussion). A frontend/cross-cutting contract: how merchant logos are resolved for every row and hero that renders one.*
+
+- **Three-tier fallback chain, freshness-first** (order deliberately inverted from the first proposal — Rafael's call: logos should track merchant rebrands without manual asset maintenance):
+  1. **Runtime fetch by domain, cached.** Primary path. Source: **logo.dev** — `https://img.logo.dev/{domain}?token={key}&size=128&format=png`. Chosen over Google's favicon endpoint for the primary tier on quality grounds (128px favicons read poorly at row-icon size; logo.dev serves proper square marks). Free tier covers the deployment's volume by orders of magnitude. The API key is a **publishable key, embedded client-side by design** — no Edge Function proxy, no secret handling.
+  2. **Bundled assets, deferred.** Insurance tier: first-launch-offline, logo.dev outage, uncovered domain. **Deliberately not populated at the start** — "don't build it until it hurts": bundled assets are only added if tier 1 fails in practice.
+  3. **Monogram tile** (the existing colored-initial design). Final fallback: no known `domain`, or both fetches fail. Needs no data at all — same graceful-degradation philosophy as the `card_label` snapshot.
+- **Cache contract**: fetched logos cached **to disk, keyed by domain**, TTL **30 days** (drop to 7 if rebrand latency ever bothers — request volume is trivial either way). Within TTL: offline behavior and instant renders (what bundling would have bought). On expiry: re-fetch picks up rebrands automatically — the point of the tier swap. Accepted consequence, eyes open: a rebrand can take up to one TTL to appear. Implementation: `URLCache` with long TTL, or a tiny custom disk cache keyed by domain (more predictable; barely more work).
+- **Schema impact: one field.** Nullable **`domain`** on the future MERCHANT_CATALOG table drives tiers 1 and 2; tier 3 needs nothing. No new tables, no image storage in Supabase — bytes live in the app bundle and the iOS disk cache only.
+- **`subscription.logo_url` dropped** (same-day amendment): the column predated this contract as a denormalized landing spot for a catalog-provided URL — a mechanism that was never designed. The locked chain gives it no writer (detection copies nothing), no reader (the client resolves from `domain` at render time), and one liability (a stored URL goes stale on rebrand — the frozen-asset failure mode the tier inversion exists to avoid). Migration #1 hasn't been written, so removal is free. The keep-as-override reading (user-supplied logos) was rejected as a speculative feature with no design; if it ever materializes, re-adding a nullable column is a one-line additive migration.
+- **Legal posture** (settled before the mechanism): displaying real merchant marks to identify the merchant's own charges is nominative-fair-use territory — the pattern every finance app uses — and the personal-only deployment removes even the theoretical exposure (no commerce, no App Store review gate). Constraints kept anyway, as-if-public standard: marks rendered undistorted, never used in Signu's own icon or as branding.
+- **Rendering treatment locked (same-day amendment): full-color mark inside a neutral tile.** Real logos arrive at full brand saturation and would turn the muted-palette list into competing billboards; a uniform neutral container (paper/white tile, mark rendered smaller within it) re-imposes the tile-grid calm while keeping the mark's color — recognition is the point of fetching real logos, so grayscale was ruled out (pays the fetch complexity, loses the recognition value). The neutral container is also the robust choice for runtime-fetched images: logo.dev marks vary in shape and background, and the container absorbs all of it with zero per-merchant styling. **Open check, not a blocker**: white tiles on the ink-dark detail hero will pop brighter than the current monograms — verify on that screen; a surface-matched off-white tile is the known fix if it bothers. Judged against a three-treatment comparison (monogram / naked full-color / neutral tile), not a re-rendered 21r.
 
 ---
 
@@ -512,6 +540,10 @@ The user can assert "I cancelled this" from the detail screen.
 ---
 
 ## Changelog
+
+- **v13** — TAB BAR & NAVIGATION CONTRACT locked (2026-07-20, from Home implementation review; deliberate mockup deviation — mockups show the bar static). Safari-style auto-hiding floating capsule: hides on scroll-down, returns on any scroll-up, also revealed at content bottom; always visible when content is too short to scroll (never unreachable); Reduce Motion ⇒ crossfade; bottom inset = bar + margin + safe area exactly. Reveal-only-at-bottom considered and superseded same discussion (would gate tab switching behind scrolling to the end of long lists). Previews must render tab screens inside RootView.
+
+- **v12** — LOGO SOURCING CONTRACT locked (from the 21r discussion, 2026-07-20). Three-tier chain, **freshness-first by explicit choice** (runtime fetch promoted over bundling so rebrands propagate without manual asset maintenance): (1) logo.dev fetch by domain (publishable key embedded client-side; chosen over Google favicons on quality at row-icon size), (2) bundled assets **deferred until tier 1 fails in practice**, (3) existing monogram tile as the zero-data fallback. Cache: disk, keyed by domain, 30-day TTL (7 if rebrand latency bothers); rebrand-visible-within-one-TTL accepted eyes open. Schema impact: one nullable **`domain`** field on the future MERCHANT_CATALOG — no new tables, no image storage in Supabase. Legal posture settled first: nominative fair use + personal-only deployment; as-if-public constraints kept (marks undistorted, never Signu branding). *Same-day amendment — both opened questions closed*: (1) **rendering treatment locked: full-color mark inside a neutral tile** (chosen over naked full-color, which turns the muted list into competing billboards, and over grayscale, which pays fetch complexity while losing recognition value; neutral container also absorbs logo.dev's shape/background variance with zero per-merchant styling; open check: white tiles vs. the ink-dark detail hero). (2) **`subscription.logo_url` dropped** — a pre-contract placeholder for a copy-from-catalog mechanism that was never designed; under the locked chain it has no writer, no reader, and the exact staleness liability the tier inversion avoids; keep-as-override rejected as speculative (re-adding later = one-line additive migration). Migration #1 unwritten, so the drop is free.
 
 - **v11** — AUTH FLOW CONTRACT locked (designs 17a–17e; completes the auth surface begun by 16a — every screen state in the app is now designed). Cross-cutting: **Google sign-ins never require email confirmation** (Google-verified, `email_confirmed_at` auto-set; the gate applies only to 17b signups); **confirmation stays ON as a linking-safety precondition** (unverified email+password signup + later Google sign-in with the same address must never merge — verification-before-entry is what makes "same verified email = same account" safe); deep-link redirect mechanism shared by confirm + reset flows (session arriving via `onAuthStateChange` **is** the signal — no polling); password policy locked (8+ / 1 uppercase / 1 number; Supabase preset adds lowercase, accepted; identical hint copy on 17b/17e); enumeration-safe copy doctrine (no screen claims knowledge the API refuses to give). 17a: no Google button (one back-tap away); failed-sign-in copy signposts both exits of the Google-first trap — Forgot password **is** the set-password flow; distinct unverified-error variant with resend. 17b: Name mandatory ⇒ signup-trigger fallback order amended (Google `full_name` → signup name → email); Terms line on 17b only, deliberately absent on 17a (signing in agrees to nothing new). 17c: shown only after 17b; state machine (deep link ⇒ Home / manual `getUser()` check for the wrong-device case / resend with **120s cooldown** clearing the ~60s rate limit); "Go back" honestly documented as fresh-signup-plus-inert-orphan, not an edit. 17d: "set" not "reset" (Google-first accounts have no old password); sent state = countdown + *"If an account exists for \<email\>…"* (unconditional API success forbids "we sent it"). 17e: deep-link destination, no back chevron by design; "You're signed in as" states the session honestly; submit ⇒ `updateUser` ⇒ straight to Home; expired-link branch routes back to 17d, never a silent dead end.
 
