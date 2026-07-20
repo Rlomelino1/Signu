@@ -7,7 +7,16 @@ import Foundation
 /// 2 inactive — 1 ended, 1 cancelled), 2 possible-run suggestions, 2 dismissed,
 /// 3 connections (active / needs action / expiring consent).
 final class MockDataProvider: SignuDataProviding {
+    /// Preview scenarios: the same provider drives every home-screen state.
+    enum Scenario {
+        case standard        // full dataset (21i-class)
+        case freshConnection // bank connected, nothing detected yet (21h)
+        case noBank          // nothing connected (21g)
+    }
+
     let today = MockDataProvider.date(2026, 7, 13)
+    /// Wall-clock "now" for relative copy ("Updated 2h ago", greeting).
+    let now = MockDataProvider.dateTime(2026, 7, 13, 15, 35)
 
     private(set) var profileValue: Profile!
     private(set) var connectionList: [Connection] = []
@@ -34,6 +43,32 @@ final class MockDataProvider: SignuDataProviding {
     }
 
     // MARK: - Dataset
+
+    convenience init(scenario: Scenario) {
+        self.init()
+        switch scenario {
+        case .standard:
+            break
+        case .freshConnection:
+            connectionList = connectionList.filter { $0.institutionName == "Nubank" }
+            if var nubank = connectionList.first {
+                nubank.lastSyncedAt = Self.calendar.date(byAdding: .minute, value: -1, to: now)
+                connectionList = [nubank]
+            }
+            accountList = accountList.filter { account in connectionList.contains { $0.id == account.connectionId } }
+            subscriptionList = []
+            runList = []
+            chargeList = []
+            transactionAccountMap = [:]
+        case .noBank:
+            connectionList = []
+            accountList = []
+            subscriptionList = []
+            runList = []
+            chargeList = []
+            transactionAccountMap = [:]
+        }
+    }
 
     init() {
         profileValue = Profile(
@@ -268,6 +303,146 @@ final class MockDataProvider: SignuDataProviding {
                 ChargeSpec(date: Self.date(2026, 5, 28), amount: Self.brl("54.02"), account: master7730, label: "Master 7730"),
             ]
         )
+    }
+
+    // MARK: - Home payload (endpoint stand-in)
+
+    func homePayload() async throws -> HomePayload {
+        HomePayload(
+            firstName: firstName,
+            now: now,
+            banner: connectionBanner,
+            content: homeContent
+        )
+    }
+
+    private var firstName: String {
+        profileValue.displayName.split(separator: " ").first.map(String.init) ?? profileValue.displayName
+    }
+
+    private var connectionBanner: HomePayload.Banner? {
+        let troubled = connectionList.filter { $0.status == .needsAction || $0.status == .expired }
+        guard let first = troubled.first else { return nil }
+        let text = troubled.count == 1
+            ? "\(first.institutionName) connection needs attention"
+            : "\(troubled.count) bank connections need attention"
+        return HomePayload.Banner(connectionId: first.id, text: text)
+    }
+
+    private var homeContent: HomePayload.Content {
+        if connectionList.isEmpty { return .noBank }
+
+        let visibleRuns = runList.filter { run in
+            guard let sub = subscription(run.subscriptionId) else { return false }
+            return !sub.ignored
+        }
+        guard visibleRuns.contains(where: { $0.status != .possible }) else {
+            let bank = connectionList.first?.institutionName ?? ""
+            return .watching(syncText: "Updated \(SignuFormat.ago(lastSynced ?? now, now: now)) · \(bank) connected")
+        }
+
+        // Hero: landed charges this calendar month, non-ignored subs,
+        // primary currency only. Delta: same day-span of the previous month.
+        let monthStart = Self.calendar.date(from: Self.calendar.dateComponents([.year, .month], from: today))!
+        let previousMonthStart = Self.calendar.date(byAdding: .month, value: -1, to: monthStart)!
+        let daysIntoMonth = Self.calendar.dateComponents([.day], from: monthStart, to: today).day!
+        let previousSpanEnd = Self.calendar.date(byAdding: .day, value: daysIntoMonth, to: previousMonthStart)!
+
+        let total = landedSum(from: monthStart, through: today)
+        let previousTotal = landedSum(from: previousMonthStart, through: previousSpanEnd)
+        let delta = total - previousTotal
+
+        let activeRuns = visibleRuns.filter { $0.status == .active }
+        let overdueRuns = visibleRuns.filter { $0.status == .overdue }
+            .sorted { ($0.nextExpectedDate ?? today) < ($1.nextExpectedDate ?? today) }
+
+        let horizon = Self.calendar.date(byAdding: .day, value: 14, to: today)!
+        let comingUp = activeRuns
+            .compactMap { run -> HomePayload.ComingUpItem? in
+                guard let next = run.nextExpectedDate, next <= horizon, next >= today,
+                      let sub = subscription(run.subscriptionId),
+                      let last = latestCharge(run.id) else { return nil }
+                return HomePayload.ComingUpItem(
+                    id: run.id, subscriptionId: sub.id, serviceName: sub.displayName,
+                    date: next, daysAway: days(from: today, to: next),
+                    amount: last.amount, approximate: run.detectedBy.isApproximate
+                )
+            }
+            .sorted { $0.date < $1.date }
+
+        let overdue = overdueRuns.compactMap { run -> HomePayload.OverdueItem? in
+            guard let expected = run.nextExpectedDate,
+                  let sub = subscription(run.subscriptionId),
+                  let last = latestCharge(run.id) else { return nil }
+            return HomePayload.OverdueItem(
+                id: run.id, subscriptionId: sub.id, serviceName: sub.displayName,
+                expectedDate: expected, daysOverdue: days(from: expected, to: today),
+                amount: last.amount, approximate: run.detectedBy.isApproximate
+            )
+        }
+
+        let subscriptions = (activeRuns + overdueRuns)
+            .compactMap { run -> HomePayload.SubscriptionItem? in
+                guard let sub = subscription(run.subscriptionId),
+                      let next = run.nextExpectedDate,
+                      let last = latestCharge(run.id) else { return nil }
+                let interval = run.billingInterval == .monthly ? "Monthly" : "Annual"
+                return HomePayload.SubscriptionItem(
+                    id: sub.id, serviceName: sub.displayName,
+                    subtitle: "\(interval) · \(last.cardLabel)",
+                    amount: last.amount, approximate: run.detectedBy.isApproximate,
+                    nextDate: next,
+                    overdueDays: run.status == .overdue ? days(from: next, to: today) : nil
+                )
+            }
+            .sorted { $0.nextDate < $1.nextDate }
+
+        let suggestionCount = visibleRuns.filter { $0.status == .possible }.count
+
+        return .active(HomePayload.Active(
+            monthToDateTotal: total,
+            activeCount: activeRuns.count,
+            overdueCount: overdueRuns.count,
+            deltaVsPreviousMonth: delta == 0 ? nil : delta,
+            previousMonthAbbrev: SignuFormat.monthAbbrev(previousMonthStart),
+            syncText: "Updated \(SignuFormat.ago(lastSynced ?? now, now: now))",
+            overdue: overdue,
+            comingUp: comingUp,
+            suggestionCount: suggestionCount,
+            subscriptions: subscriptions
+        ))
+    }
+
+    /// Primary currency is derived, never stored: dominant across charges.
+    private var primaryCurrency: String {
+        let counts = Dictionary(grouping: chargeList, by: \.currency).mapValues(\.count)
+        return counts.max { $0.value < $1.value }?.key ?? "BRL"
+    }
+
+    private func landedSum(from start: Date, through end: Date) -> Decimal {
+        let currency = primaryCurrency
+        return chargeList.reduce(Decimal.zero) { sum, charge in
+            guard charge.date >= start, charge.date <= end, charge.currency == currency,
+                  let run = runList.first(where: { $0.id == charge.runId }),
+                  let sub = subscription(run.subscriptionId), !sub.ignored else { return sum }
+            return sum + charge.amount
+        }
+    }
+
+    private func subscription(_ id: UUID) -> Subscription? {
+        subscriptionList.first { $0.id == id }
+    }
+
+    private func latestCharge(_ runId: UUID) -> Charge? {
+        chargeList.filter { $0.runId == runId }.max { $0.date < $1.date }
+    }
+
+    private var lastSynced: Date? {
+        connectionList.compactMap(\.lastSyncedAt).max()
+    }
+
+    private func days(from: Date, to: Date) -> Int {
+        Self.calendar.dateComponents([.day], from: from, to: to).day ?? 0
     }
 
     // MARK: - Builders

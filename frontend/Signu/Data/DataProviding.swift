@@ -11,6 +11,8 @@ protocol SignuDataProviding {
     var today: Date { get }
 
     func profile() async throws -> Profile
+    /// Screen payload for Home — assembled per the home screen contract.
+    func homePayload() async throws -> HomePayload
     func connections() async throws -> [Connection]
     func bankAccounts() async throws -> [BankAccount]
     func subscriptions() async throws -> [Subscription]
