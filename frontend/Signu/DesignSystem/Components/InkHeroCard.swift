@@ -33,43 +33,17 @@ struct HeroStatTile: View {
     }
 }
 
-#Preview("Detail hero") {
+// Subscription-run heroes live in SubscriptionHeroCard (all four states
+// previewed there). This preview only exercises the bare container + tiles.
+#Preview("Container + stat tiles") {
     InkHeroCard {
-        HStack(alignment: .top, spacing: 14) {
-            ServiceAvatar(name: "Netflix", size: 56)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Netflix")
-                    .font(.signuHeadline)
-                    .foregroundStyle(SignuColor.onInk)
-                Text("Monthly · Visa – 4821")
-                    .font(.signuSubtitle)
-                    .foregroundStyle(SignuColor.onInkSecondary)
-            }
-            Spacer()
-            StatusChip(text: "Active", tone: .positive, onInk: true)
-        }
-        .padding(.bottom, 20)
-
-        HStack(alignment: .firstTextBaseline) {
-            Text("R$ 44,90")
-                .font(.signuHero)
-                .foregroundStyle(SignuColor.onInk)
-            Text("/mo")
-                .font(.signuBody)
-                .foregroundStyle(SignuColor.onInkSecondary)
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                OverlineText("Renews", color: SignuColor.onInkSecondary)
-                Text("Jul 18 · in 5 days")
-                    .font(.signuRowTitle)
-                    .foregroundStyle(SignuColor.onInk)
-            }
-        }
-        .padding(.bottom, 20)
-
+        Text("Itaú")
+            .font(.signuHeadline)
+            .foregroundStyle(SignuColor.onInk)
+            .padding(.bottom, 16)
         HStack(spacing: 12) {
-            HeroStatTile(label: "This year", value: "R$ 289,30")
-            HeroStatTile(label: "Since Nov 23", value: "R$ 1.312,70")
+            HeroStatTile(label: "Last synced", value: "Jul 12 · 08:14")
+            HeroStatTile(label: "Consent expires", value: "Sep 28")
         }
     }
     .padding(SignuMetric.screenPadding)

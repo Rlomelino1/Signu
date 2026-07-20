@@ -51,3 +51,13 @@ enum SignuFormat {
     /// "Nov 23" — the hero's SINCE label.
     static func monthYearShort(_ date: Date) -> String { monthYearShortFormatter.string(from: date) }
 }
+
+extension String {
+    /// Unbreakable rendering for card labels and similar compounds
+    /// ("Monthly · Master – 7730" must never orphan "– 7730"): swaps spaces
+    /// for non-breaking spaces and glues the en dash to its neighbors.
+    var signuNonBreaking: String {
+        replacingOccurrences(of: " ", with: "\u{00A0}")
+            .replacingOccurrences(of: "–", with: "\u{2060}–\u{2060}")
+    }
+}

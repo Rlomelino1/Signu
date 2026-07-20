@@ -60,25 +60,16 @@ struct DesignSystemGallery: View {
                     }
                 }
 
-                group("Ink hero") {
-                    InkHeroCard {
-                        HStack(alignment: .top, spacing: 14) {
-                            ServiceAvatar(name: "Globoplay", size: 56)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Globoplay")
-                                    .font(.signuHeadline)
-                                    .foregroundStyle(SignuColor.onInk)
-                                Text("Monthly · Master – 7730")
-                                    .font(.signuSubtitle)
-                                    .foregroundStyle(SignuColor.onInkSecondary)
+                group("Ink hero — run states") {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(SubscriptionHeroCard.previewStates.indices, id: \.self) { index in
+                            let state = SubscriptionHeroCard.previewStates[index]
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(state.title)
+                                    .font(.signuCaption)
+                                    .foregroundStyle(SignuColor.textTertiary)
+                                state.card
                             }
-                            Spacer()
-                            StatusChip(text: "Overdue", tone: .danger, onInk: true)
-                        }
-                        .padding(.bottom, 20)
-                        HStack(spacing: 12) {
-                            HeroStatTile(label: "This year", value: "R$ 149,40")
-                            HeroStatTile(label: "Since Oct 25", value: "R$ 224,10")
                         }
                     }
                 }
