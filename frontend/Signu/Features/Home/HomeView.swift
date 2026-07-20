@@ -50,16 +50,19 @@ struct HomeView: View {
                     }
                 }
 
-                OverlineText("This month")
-                    .padding(.top, 2)
+                // Label sits tight above the number, caption-style (21i).
+                VStack(alignment: .leading, spacing: 5) {
+                    OverlineText("This month")
+                        .padding(.top, 2)
 
-                switch payload.content {
-                case .noBank:
-                    noBankContent
-                case .watching(let syncText):
-                    watchingContent(syncText: syncText)
-                case .active(let active):
-                    activeContent(active)
+                    switch payload.content {
+                    case .noBank:
+                        noBankContent
+                    case .watching(let syncText):
+                        watchingContent(syncText: syncText)
+                    case .active(let active):
+                        activeContent(active)
+                    }
                 }
             }
             .padding(.horizontal, SignuMetric.screenPadding)
@@ -288,19 +291,18 @@ struct HomeView: View {
         Button {
             actions.onSelectSubscription(item.subscriptionId)
         } label: {
-            SignuCard(background: SignuColor.overdueRowFill) {
-                SignuRow(
-                    title: item.serviceName,
-                    subtitle: Text("Overdue · \(item.daysOverdue) days").foregroundStyle(SignuColor.red),
-                    trailingTitle: Text(SignuFormat.brl(item.amount, approximate: item.approximate))
-                ) {
-                    DateBadge(date: item.expectedDate, overdue: true)
-                }
+            SignuRow(
+                title: item.serviceName,
+                subtitle: Text("Overdue · \(item.daysOverdue) days").foregroundStyle(SignuColor.red),
+                trailingTitle: Text(SignuFormat.brl(item.amount, approximate: item.approximate))
+            ) {
+                DateBadge(date: item.expectedDate, overdue: true)
             }
-            .overlay {
-                RoundedRectangle(cornerRadius: SignuMetric.cardRadius, style: .continuous)
-                    .strokeBorder(SignuColor.overdueRowStroke, lineWidth: 1)
-            }
+            .tintedSurface(
+                fill: SignuColor.overdueRowFill,
+                stroke: SignuColor.overdueRowStroke,
+                cornerRadius: SignuMetric.cardRadius
+            )
         }
         .buttonStyle(.plain)
     }
@@ -354,7 +356,7 @@ struct HomeView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(SignuColor.greenTint, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .tintedSurface(fill: SignuColor.greenTint, stroke: SignuColor.greenTintStroke, cornerRadius: 18)
         }
         .buttonStyle(.plain)
     }
