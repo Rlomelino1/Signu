@@ -74,20 +74,21 @@ struct SubscriptionHeroCard: View {
                         .truncationMode(.tail)
                 }
             }
-            .padding(.bottom, 20)
+            .padding(.bottom, 16)
 
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
+            // Amount dominates; the date slot's bottom line shares its baseline.
+            HStack(alignment: .lastTextBaseline, spacing: 2) {
                 Text(amount)
-                    .font(.signuHero)
+                    .font(.signuHeroXL)
                     .foregroundStyle(SignuColor.onInk.opacity(dateSlot.isDead ? 0.72 : 1))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                 if let unit {
                     Text(unit)
-                        .font(.signuBody)
+                        .font(.signuSubtitle)
                         .foregroundStyle(SignuColor.onInkSecondary)
                 }
-                Spacer(minLength: 10)
+                Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 3) {
                     OverlineText(
                         dateSlot.label,
@@ -100,7 +101,7 @@ struct SubscriptionHeroCard: View {
                 }
                 .fixedSize()
             }
-            .padding(.bottom, 20)
+            .padding(.bottom, 16)
 
             HStack(spacing: 12) {
                 ForEach(stats.indices, id: \.self) { index in

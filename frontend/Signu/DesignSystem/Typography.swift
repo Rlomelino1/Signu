@@ -5,10 +5,12 @@ import SwiftUI
 extension Font {
     /// Screen titles: "Subscriptions", "Settings", auth headlines.
     static let signuScreenTitle = Font.system(size: 34, weight: .bold)
-    /// Home hero money (R$ 246,40).
-    static let signuHeroXL = Font.system(size: 44, weight: .bold)
-    /// Subs-tab hero (/yr) and detail-hero money.
-    static let signuHero = Font.system(size: 38, weight: .bold)
+    /// Hero money (home, subs-tab, detail heroes). Condensed width: matches
+    /// the mockup grotesque's geometry — full 44pt height at the mockups'
+    /// measured amount width, so the locked layouts fit with SF.
+    static let signuHeroXL = Font.system(size: 44, weight: .bold).width(.condensed)
+    /// Secondary hero money slot.
+    static let signuHero = Font.system(size: 38, weight: .bold).width(.condensed)
     /// Greetings, sheet titles ("Remove Itaú?").
     static let signuTitle = Font.system(size: 28, weight: .bold)
     /// In-screen section titles: "Coming up", "History".
