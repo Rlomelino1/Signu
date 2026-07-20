@@ -18,7 +18,7 @@ struct ServiceAvatar: View {
             .frame(width: size, height: size)
             .overlay {
                 Text(initial)
-                    .font(.system(size: size * 0.45, weight: .semibold))
+                    .font(SignuFont.font(size * 0.45, .semibold))
                     .foregroundStyle(.white)
             }
     }

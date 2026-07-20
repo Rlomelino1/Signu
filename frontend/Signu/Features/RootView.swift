@@ -7,6 +7,12 @@ struct RootView: View {
 
     private let provider: SignuDataProviding = MockDataProvider()
 
+    init() {
+        #if DEBUG
+        FontDiagnostics.runIfRequested()
+        #endif
+    }
+
     var body: some View {
         #if DEBUG
         // Screenshot harnesses: `simctl launch … pro.sinatra.signu --hero-states[=0,1]`
@@ -18,6 +24,10 @@ struct RootView: View {
             } else {
                 HeroStatesGallery(indices: indices)
             }
+        } else if CommandLine.arguments.contains("--gallery-center") {
+            DesignSystemGallery(anchor: .center)
+        } else if CommandLine.arguments.contains("--gallery-bottom") {
+            DesignSystemGallery(anchor: .bottom)
         } else if CommandLine.arguments.contains("--gallery") {
             DesignSystemGallery()
         } else {
