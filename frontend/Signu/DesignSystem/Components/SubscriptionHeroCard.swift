@@ -53,26 +53,23 @@ struct SubscriptionHeroCard: View {
 
     var body: some View {
         InkHeroCard {
-            HStack(alignment: .top, spacing: 14) {
-                ServiceAvatar(name: serviceName, size: 48)
-                // The chip shares a line with the name only; the subtitle
-                // runs the full column width beneath it (21k/21m).
+            // Chip centers against the name + subtitle block as a whole (21o).
+            HStack(alignment: .center, spacing: 12) {
+                ServiceAvatar(name: serviceName, size: 46)
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(serviceName)
-                            .font(.signuHeadline)
-                            .foregroundStyle(SignuColor.onInk)
-                            .lineLimit(1)
-                        Spacer(minLength: 8)
-                        StatusChip(text: statusText, tone: statusTone, onInk: true)
-                            .fixedSize()
-                    }
+                    Text(serviceName)
+                        .font(.signuHeadline)
+                        .foregroundStyle(SignuColor.onInk)
+                        .lineLimit(1)
                     Text(subtitle.signuNonBreaking)
-                        .font(SignuFont.font(14))
+                        .font(SignuFont.font(13.5))
                         .foregroundStyle(SignuColor.onInkSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                StatusChip(text: statusText, tone: statusTone, onInk: true)
+                    .fixedSize()
             }
             .padding(.bottom, 16)
 
