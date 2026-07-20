@@ -10,7 +10,15 @@ struct RootView: View {
     @State private var tabBarState = TabBarState()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let provider: SignuDataProviding = MockDataProvider()
+    private let provider: SignuDataProviding = {
+        #if DEBUG
+        // Shell with the short empty-state content, for auto-hide review.
+        if CommandLine.arguments.contains("--shell-nobank") {
+            return MockDataProvider(scenario: .noBank)
+        }
+        #endif
+        return MockDataProvider()
+    }()
 
     // Screenshot runs pass --home-bottom to review the bottom inset in
     // context (shell + tab bar), pre-scrolled to the end.
@@ -85,7 +93,45 @@ struct RootView: View {
         .onChange(of: selectedTab) {
             tabBarState.reset()
         }
+        #if DEBUG
+        .onAppear(perform: runAutoHideDemoIfRequested)
+        #endif
     }
+
+    #if DEBUG
+    /// `--autohide-demo`: drives the real UIScrollView so the full
+    /// preference → TabBarState pipeline runs without touch injection.
+    /// Sequence: down (hide) → nudge up (reveal) → bottom (reveal).
+    private func runAutoHideDemoIfRequested() {
+        guard CommandLine.arguments.contains("--autohide-demo") else { return }
+        func scrollTo(_ y: CGFloat) {
+            guard let scroll = Self.firstScrollView() else { return }
+            let maxY = scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom
+            let target = min(max(y, -scroll.adjustedContentInset.top), maxY)
+            scroll.setContentOffset(CGPoint(x: 0, y: target), animated: true)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { scrollTo(500) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { scrollTo(430) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.5) { scrollTo(.greatestFiniteMagnitude) }
+    }
+
+    private static func firstScrollView() -> UIScrollView? {
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+        func find(in view: UIView) -> UIScrollView? {
+            if let scroll = view as? UIScrollView { return scroll }
+            for subview in view.subviews {
+                if let found = find(in: subview) { return found }
+            }
+            return nil
+        }
+        for window in windows {
+            if let found = find(in: window) { return found }
+        }
+        return nil
+    }
+    #endif
 }
 
 private struct PlaceholderScreen: View {

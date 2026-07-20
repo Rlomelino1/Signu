@@ -45,20 +45,12 @@ final class TabBarState {
     }
 }
 
-private struct ScrollMetrics: Equatable {
-    var offset: CGFloat = 0
-    var contentHeight: CGFloat = 0
-}
-
-private struct ScrollMetricsKey: PreferenceKey {
-    static var defaultValue = ScrollMetrics()
-    static func reduce(value: inout ScrollMetrics, nextValue: () -> ScrollMetrics) {
-        value = nextValue()
-    }
-}
-
 /// ScrollView for tab screens: reports scroll metrics to the shell's
 /// TabBarState when hosted in it; standalone (previews) it's inert.
+///
+/// Metrics come from KVO on the enclosing UIScrollView — the SwiftUI
+/// preference-key pipeline proved unreliable here (verified empirically:
+/// preferences from scroll content never re-propagated on scroll).
 struct SignuScrollView<Content: View>: View {
     var anchor: UnitPoint = .top
     @ViewBuilder var content: () -> Content
@@ -66,30 +58,82 @@ struct SignuScrollView<Content: View>: View {
     @Environment(TabBarState.self) private var tabBarState: TabBarState?
 
     var body: some View {
-        GeometryReader { viewport in
-            ScrollView {
-                content()
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: ScrollMetricsKey.self,
-                                value: ScrollMetrics(
-                                    offset: -proxy.frame(in: .named("signuScroll")).minY,
-                                    contentHeight: proxy.size.height
-                                )
-                            )
-                        }
+        ScrollView {
+            content()
+                .background {
+                    ScrollViewObserver { offset, contentHeight, viewportHeight in
+                        tabBarState?.update(
+                            offset: offset,
+                            contentHeight: contentHeight,
+                            viewportHeight: viewportHeight
+                        )
                     }
+                }
+        }
+        .defaultScrollAnchor(anchor)
+    }
+}
+
+/// Invisible view that finds its enclosing UIScrollView and observes
+/// contentOffset/contentSize. Reports offsets normalized so 0 = top and
+/// (contentHeight - viewportHeight) = bottom, insets included.
+private struct ScrollViewObserver: UIViewRepresentable {
+    let onChange: (CGFloat, CGFloat, CGFloat) -> Void
+
+    func makeUIView(context: Context) -> ObserverView {
+        ObserverView(onChange: onChange)
+    }
+
+    func updateUIView(_ view: ObserverView, context: Context) {
+        view.onChange = onChange
+    }
+
+    final class ObserverView: UIView {
+        var onChange: (CGFloat, CGFloat, CGFloat) -> Void
+        private var observations: [NSKeyValueObservation] = []
+        private weak var observedScrollView: UIScrollView?
+
+        init(onChange: @escaping (CGFloat, CGFloat, CGFloat) -> Void) {
+            self.onChange = onChange
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            attachIfNeeded()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            attachIfNeeded()
+        }
+
+        private func attachIfNeeded() {
+            var candidate = superview
+            while candidate != nil, !(candidate is UIScrollView) {
+                candidate = candidate?.superview
             }
-            .coordinateSpace(name: "signuScroll")
-            .defaultScrollAnchor(anchor)
-            .onPreferenceChange(ScrollMetricsKey.self) { metrics in
-                tabBarState?.update(
-                    offset: metrics.offset,
-                    contentHeight: metrics.contentHeight,
-                    viewportHeight: viewport.size.height
+            guard let scroll = candidate as? UIScrollView, scroll !== observedScrollView else { return }
+            observedScrollView = scroll
+
+            let report = { [weak self, weak scroll] in
+                guard let self, let scroll else { return }
+                let insets = scroll.adjustedContentInset
+                self.onChange(
+                    scroll.contentOffset.y + insets.top,
+                    scroll.contentSize.height + insets.top + insets.bottom,
+                    scroll.bounds.height
                 )
             }
+            observations = [
+                scroll.observe(\.contentOffset, options: [.initial]) { _, _ in report() },
+                scroll.observe(\.contentSize) { _, _ in report() },
+            ]
         }
     }
 }
