@@ -58,6 +58,11 @@ enum SignuMetric {
     static let rowPaddingV: CGFloat = 11
     static let rowPaddingH: CGFloat = 16
     static let buttonHeight: CGFloat = 56
+    /// Floating tab bar: 62pt items + 6pt container padding each side.
+    static let tabBarHeight: CGFloat = 74
+    /// Bottom content inset for scroll views under the floating bar:
+    /// bar height + its 8pt lift above the safe area + 12pt breathing room.
+    static let scrollBottomInset: CGFloat = tabBarHeight + 8 + 12
 }
 
 extension Color {
