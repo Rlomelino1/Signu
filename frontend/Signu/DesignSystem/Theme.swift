@@ -36,6 +36,14 @@ enum SignuColor {
     static let redFill = Color(hex: 0xC6553F)
     static let redTint = Color(hex: 0xF2DCD5)
     static let redOnInk = Color(hex: 0xE08A78)
+
+    // Home banner + overdue row, sampled from 21i
+    static let bannerFill = Color(hex: 0xEDE7DC)
+    static let bannerStroke = Color(hex: 0xDACAB0)
+    static let bannerText = Color(hex: 0x825E16)
+    static let overdueRowFill = Color(hex: 0xEFE8E4)
+    static let overdueRowStroke = Color(hex: 0xE3C8C1)
+    static let overdueBadgeFill = Color(hex: 0xEAD9D4)
 }
 
 /// Spacing and radius tokens.
@@ -44,7 +52,7 @@ enum SignuMetric {
     static let cardRadius: CGFloat = 24
     static let heroRadius: CGFloat = 28
     static let tileRadius: CGFloat = 16
-    static let rowPaddingV: CGFloat = 14
+    static let rowPaddingV: CGFloat = 11
     static let rowPaddingH: CGFloat = 16
     static let buttonHeight: CGFloat = 56
 }

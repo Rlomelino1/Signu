@@ -41,7 +41,7 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 14) {
                 header
 
                 if let banner = payload.banner {
@@ -51,7 +51,7 @@ struct HomeView: View {
                 }
 
                 OverlineText("This month")
-                    .padding(.top, 4)
+                    .padding(.top, 2)
 
                 switch payload.content {
                 case .noBank:
@@ -89,7 +89,7 @@ struct HomeView: View {
                         .foregroundStyle(SignuColor.onInk)
                 }
         }
-        .padding(.top, 8)
+        .padding(.top, 4)
     }
 
     private var greeting: String {
@@ -191,8 +191,8 @@ struct HomeView: View {
     // MARK: - Active (21i)
 
     private func activeContent(_ active: HomePayload.Active) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(SignuFormat.brl(active.monthToDateTotal))
                     .font(.signuHeroXL)
                     .foregroundStyle(SignuColor.textPrimary)
@@ -205,6 +205,7 @@ struct HomeView: View {
             }
 
             comingUpHeader(showCalendar: true)
+                .padding(.top, 4)
             if active.comingUp.isEmpty {
                 EmptyDashCard(
                     title: "Nothing in the next two weeks",
@@ -230,7 +231,7 @@ struct HomeView: View {
                     .foregroundStyle(SignuColor.textPrimary)
                     .buttonStyle(.plain)
             }
-            .padding(.top, 8)
+            .padding(.top, 4)
 
             SignuListCard(data: active.subscriptions) { item in
                 subscriptionRow(item)
@@ -287,7 +288,7 @@ struct HomeView: View {
         Button {
             actions.onSelectSubscription(item.subscriptionId)
         } label: {
-            SignuCard(background: SignuColor.redTint) {
+            SignuCard(background: SignuColor.overdueRowFill) {
                 SignuRow(
                     title: item.serviceName,
                     subtitle: Text("Overdue · \(item.daysOverdue) days").foregroundStyle(SignuColor.red),
@@ -295,6 +296,10 @@ struct HomeView: View {
                 ) {
                     DateBadge(date: item.expectedDate, overdue: true)
                 }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: SignuMetric.cardRadius, style: .continuous)
+                    .strokeBorder(SignuColor.overdueRowStroke, lineWidth: 1)
             }
         }
         .buttonStyle(.plain)
@@ -323,28 +328,33 @@ struct HomeView: View {
         }
     }
 
+    // 13pt is the largest size at which the locked copy fits one line in
+    // Inter beside the badge and "Review →" — the mockup face is narrower.
     private func reviewPill(count: Int) -> some View {
         Button(action: actions.onReview) {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Circle()
                     .fill(SignuColor.green)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 24, height: 24)
                     .overlay {
                         Text("\(count)")
-                            .font(SignuFont.font(15, .semibold, tabular: true))
+                            .font(SignuFont.font(13, .semibold, tabular: true))
                             .foregroundStyle(.white)
                     }
                 Text("Possible subscriptions detected")
-                    .font(SignuFont.font(16, .semibold))
+                    .font(SignuFont.font(13, .semibold))
                     .foregroundStyle(SignuColor.green)
-                Spacer(minLength: 8)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.95)
+                Spacer(minLength: 6)
                 Text("Review →")
-                    .font(SignuFont.font(16, .semibold))
+                    .font(SignuFont.font(13, .semibold))
                     .foregroundStyle(SignuColor.green)
+                    .fixedSize()
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(SignuColor.greenTint, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(SignuColor.greenTint, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
     }

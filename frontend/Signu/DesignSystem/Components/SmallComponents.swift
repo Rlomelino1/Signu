@@ -29,17 +29,17 @@ struct DateBadge: View {
     var body: some View {
         VStack(spacing: 0) {
             Text(SignuFormat.monthAbbrev(date).uppercased())
-                .font(SignuFont.font(11, .semibold))
+                .font(SignuFont.font(10, .semibold))
                 .kerning(0.5)
                 .foregroundStyle(overdue ? SignuColor.red : SignuColor.textSecondary)
             Text(SignuFormat.dayNumber(date))
-                .font(SignuFont.font(20, .bold, tabular: true))
+                .font(SignuFont.font(17, .bold, tabular: true))
                 .foregroundStyle(overdue ? SignuColor.red : SignuColor.textPrimary)
         }
-        .frame(width: 48, height: 48)
+        .frame(width: 44, height: 44)
         .background(
-            overdue ? SignuColor.red.opacity(0.1) : SignuColor.sunken.opacity(0.7),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            overdue ? SignuColor.overdueBadgeFill : SignuColor.sunken.opacity(0.7),
+            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
         )
     }
 }
@@ -101,7 +101,7 @@ struct SortToggle: View {
 }
 
 /// Warning banner — the home connection-problem slot ("plumbing problems"
-/// severity channel; overdue never renders here).
+/// severity channel; overdue never renders here). Colors sampled from 21i.
 struct WarningBanner: View {
     let text: String
     var actionLabel: String?
@@ -110,19 +110,25 @@ struct WarningBanner: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
-                .font(SignuFont.font(16, .semibold, tabular: true))
+                .font(.system(size: 15, weight: .semibold))
             Text(text)
                 .font(.signuSubtitleEmphasis)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let actionLabel {
                 Button(actionLabel, action: action)
                     .font(.signuSubtitleEmphasis)
             }
         }
-        .foregroundStyle(SignuColor.gold)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(SignuColor.goldTint, in: RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous))
+        .foregroundStyle(SignuColor.bannerText)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(SignuColor.bannerFill, in: RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous)
+                .strokeBorder(SignuColor.bannerStroke, lineWidth: 1)
+        }
     }
 }
 
