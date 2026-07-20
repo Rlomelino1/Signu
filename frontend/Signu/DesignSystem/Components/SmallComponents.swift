@@ -100,6 +100,19 @@ struct SortToggle: View {
     }
 }
 
+/// The tinted-alert-surface rule (21i): tint fill + 1px darker-tint stroke.
+/// One treatment for the banner, the overdue row and the suggestion pill.
+extension View {
+    func tintedSurface(fill: Color, stroke: Color, cornerRadius: CGFloat = SignuMetric.tileRadius) -> some View {
+        self
+            .background(fill, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(stroke, lineWidth: 1)
+            }
+    }
+}
+
 /// Warning banner — the home connection-problem slot ("plumbing problems"
 /// severity channel; overdue never renders here). Colors sampled from 21i.
 struct WarningBanner: View {
@@ -124,11 +137,7 @@ struct WarningBanner: View {
         .foregroundStyle(SignuColor.bannerText)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(SignuColor.bannerFill, in: RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous)
-                .strokeBorder(SignuColor.bannerStroke, lineWidth: 1)
-        }
+        .tintedSurface(fill: SignuColor.bannerFill, stroke: SignuColor.bannerStroke)
     }
 }
 

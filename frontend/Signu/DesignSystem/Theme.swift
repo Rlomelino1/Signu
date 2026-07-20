@@ -37,13 +37,16 @@ enum SignuColor {
     static let redTint = Color(hex: 0xF2DCD5)
     static let redOnInk = Color(hex: 0xE08A78)
 
-    // Home banner + overdue row, sampled from 21i
+    // Tinted alert surfaces (banner / overdue row / suggestion pill),
+    // sampled from 21i. Shared rule: tint fill + 1px darker-tint stroke —
+    // see View.tintedSurface(fill:stroke:cornerRadius:).
     static let bannerFill = Color(hex: 0xEDE7DC)
     static let bannerStroke = Color(hex: 0xDACAB0)
     static let bannerText = Color(hex: 0x825E16)
     static let overdueRowFill = Color(hex: 0xEFE8E4)
     static let overdueRowStroke = Color(hex: 0xE3C8C1)
     static let overdueBadgeFill = Color(hex: 0xEAD9D4)
+    static let greenTintStroke = Color(hex: 0xC9D1C4)
 }
 
 /// Spacing and radius tokens.
