@@ -41,6 +41,20 @@ enum FontDiagnostics {
             let at44 = width(worstAmount, face: "Inter-Bold", size: 44, tabular: true)
             lines.append("FONTCHECK screen \(screen): amount@44=\(Int(at44))pt available=\(Int(available))pt maxSafe=\(safe)pt")
         }
+
+        // Header row: avatar + spacing + subtitle + spacer + chip vs card inner.
+        let states: [(subtitle: String, chip: String)] = [
+            ("Monthly · Visa – 4821", "Active"),
+            ("Monthly · Master – 7730", "Overdue"),
+            ("Monthly · Visa – 4821", "Cancelled"),
+            ("Monthly · Visa – 4821", "Ended"),
+        ]
+        for state in states {
+            let subtitle = width(state.subtitle, face: "Inter-Regular", size: 13.5)
+            let chip = width(state.chip, face: "Inter-SemiBold", size: 14) + 22
+            let needed = 46 + 13 + subtitle + 6 + chip
+            lines.append("FONTCHECK header [\(state.chip)] subtitle=\(Int(subtitle)) chip=\(Int(chip)) needed=\(Int(needed)) inner402=314 inner393=305")
+        }
     }
 
     private static func width(_ text: String, face: String, size: CGFloat, tabular: Bool = false) -> CGFloat {
