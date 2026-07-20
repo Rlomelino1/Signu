@@ -40,7 +40,7 @@ struct HomeView: View {
     var scrollAnchor: UnitPoint = .top
 
     var body: some View {
-        ScrollView {
+        SignuScrollView(anchor: scrollAnchor) {
             VStack(alignment: .leading, spacing: 14) {
                 header
 
@@ -68,7 +68,6 @@ struct HomeView: View {
             .padding(.horizontal, SignuMetric.screenPadding)
             .padding(.bottom, SignuMetric.scrollBottomInset)
         }
-        .defaultScrollAnchor(scrollAnchor)
         .background(SignuColor.paper)
     }
 

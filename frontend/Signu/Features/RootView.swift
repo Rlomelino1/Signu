@@ -7,6 +7,8 @@ struct RootView: View {
     var homeScrollAnchor: UnitPoint = .top
 
     @State private var selectedTab = SignuTab.home
+    @State private var tabBarState = TabBarState()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let provider: SignuDataProviding = MockDataProvider()
 
@@ -70,8 +72,18 @@ struct RootView: View {
                 PlaceholderScreen(title: "Settings", note: "Coming in step 6")
             }
 
+            // Safari-style auto-hide (tab bar behavior contract): slides out
+            // on downward scroll, back on any upward scroll or at content
+            // end; crossfades instead when Reduce Motion is on.
             SignuTabBar(selection: $selectedTab)
                 .padding(.bottom, 8)
+                .offset(y: !reduceMotion && tabBarState.hidden ? 170 : 0)
+                .opacity(reduceMotion && tabBarState.hidden ? 0 : 1)
+                .animation(.easeOut(duration: 0.25), value: tabBarState.hidden)
+        }
+        .environment(tabBarState)
+        .onChange(of: selectedTab) {
+            tabBarState.reset()
         }
     }
 }
