@@ -66,7 +66,7 @@ struct HomeView: View {
                 }
             }
             .padding(.horizontal, SignuMetric.screenPadding)
-            .padding(.bottom, 120)
+            .padding(.bottom, SignuMetric.scrollBottomInset)
         }
         .defaultScrollAnchor(scrollAnchor)
         .background(SignuColor.paper)
@@ -406,6 +406,12 @@ struct EmptyDashCard: View {
 
 #Preview("Home · active (21i)") {
     HomeScreen(provider: MockDataProvider())
+}
+
+// Bottom-of-scroll spacing must always be reviewed in its real context:
+// inside the shell, tab bar overlaid, scrolled to the very end.
+#Preview("Home · in shell, scrolled to bottom") {
+    RootView(homeScrollAnchor: .bottom)
 }
 
 #Preview("Home · watching (21h)") {

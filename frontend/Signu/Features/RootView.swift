@@ -3,11 +3,24 @@ import SwiftUI
 /// App shell: paper background, screen content, floating tab bar.
 /// Screens land per the approval-gated plan; placeholders hold their slots.
 struct RootView: View {
+    /// Lets previews/screenshots open Home pre-scrolled (bottom-inset review).
+    var homeScrollAnchor: UnitPoint = .top
+
     @State private var selectedTab = SignuTab.home
 
     private let provider: SignuDataProviding = MockDataProvider()
 
-    init() {
+    // Screenshot runs pass --home-bottom to review the bottom inset in
+    // context (shell + tab bar), pre-scrolled to the end.
+    private var effectiveHomeAnchor: UnitPoint {
+        #if DEBUG
+        if CommandLine.arguments.contains("--home-bottom") { return .bottom }
+        #endif
+        return homeScrollAnchor
+    }
+
+    init(homeScrollAnchor: UnitPoint = .top) {
+        self.homeScrollAnchor = homeScrollAnchor
         #if DEBUG
         FontDiagnostics.runIfRequested()
         #endif
@@ -30,8 +43,6 @@ struct RootView: View {
             DesignSystemGallery(anchor: .bottom)
         } else if CommandLine.arguments.contains("--gallery") {
             DesignSystemGallery()
-        } else if CommandLine.arguments.contains("--home-bottom") {
-            HomeScreen(provider: MockDataProvider(), scrollAnchor: .bottom)
         } else if CommandLine.arguments.contains("--home-watching") {
             HomeScreen(provider: MockDataProvider(scenario: .freshConnection))
         } else if CommandLine.arguments.contains("--home-nobank") {
@@ -52,7 +63,7 @@ struct RootView: View {
             case .home:
                 HomeScreen(provider: provider, actions: HomeActions(
                     onSeeAll: { selectedTab = .subs }
-                ))
+                ), scrollAnchor: effectiveHomeAnchor)
             case .subs:
                 PlaceholderScreen(title: "Subscriptions", note: "Coming in step 3")
             case .settings:
