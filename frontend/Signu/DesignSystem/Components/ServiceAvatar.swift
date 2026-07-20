@@ -8,8 +8,9 @@ struct ServiceAvatar: View {
     var size: CGFloat = 44
     var color: Color?
 
+    // Verbatim first character — "iCloud+" keeps its lowercase "i" (21r).
     private var initial: String {
-        String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased()
+        String(name.trimmingCharacters(in: .whitespaces).prefix(1))
     }
 
     var body: some View {

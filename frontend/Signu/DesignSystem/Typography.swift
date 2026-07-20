@@ -31,10 +31,11 @@ extension Font {
     static let signuScreenTitle = SignuFont.font(34, .bold)
     /// Hero money on uncontested rows (home + subs-tab heroes).
     static let signuHeroXL = SignuFont.font(44, .bold, tabular: true)
-    /// Detail-hero money: shares its row with the date slot, so it is
-    /// capped at the measured no-truncation size (see FontDiagnostics;
-    /// Inter@44 is ~223pt against a ~148pt budget on 393pt screens).
-    static let signuHeroDetail = SignuFont.font(32, .bold, tabular: true)
+    /// Hero money on contested rows (detail hero beside the date slot,
+    /// subs hero beside the /mo companion): capped at the measured
+    /// no-truncation size (see FontDiagnostics; Inter@44 is ~223pt against
+    /// a ~148pt budget on 393pt screens).
+    static let signuHeroCompact = SignuFont.font(32, .bold, tabular: true)
     /// Secondary hero money slot.
     static let signuHero = SignuFont.font(38, .bold, tabular: true)
     /// Greetings, sheet titles ("Remove Itaú?").
