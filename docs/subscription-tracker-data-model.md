@@ -1,6 +1,8 @@
-# Subscription Tracker — Data Model
+# Signu — Data Model
 
-> **Living document** · Last updated **2026-07-15** (v8) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-07-17** (v11) · See [changelog](#changelog) at the bottom.
+>
+> **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
 ## Entity relationship diagram
 
@@ -37,6 +39,7 @@ Managed entirely by Supabase Auth — not part of our schema.
 |---|---|---|
 | `id` | uuid PK | References `auth_users(id)` — same UUID, PK and FK |
 | `display_name` | string | |
+| `reminder_channels` | string | push / email / both; default `'email'` (semantic default — the birth-state channel; an email address always exists); user-owned (RLS UPDATE grant); see [reminder delivery](#reminder-delivery-skeleton) |
 | `created_at` | timestamptz | |
 
 ### CONNECTION
@@ -319,20 +322,25 @@ The user can assert "I cancelled this" from the detail screen.
 - **Overdue variant locked** (2026-07-15, screen 10a): Overdue badge on the hero; EXPECTED label per the slot rule above; missed-charge timeline row rendered with an **open ring** marker (vs filled dots for landed events — the marker itself distinguishes "hasn't happened" from "happened"); footer states the exact deadline and consequence (*"If no charge arrives by \<expected + 10\>, we'll mark this run ended."*) — plain fact, no vague "soon".
 - **Tilde stays `detected_by`-only** (reaffirmed 2026-07-15): overdue does **not** downgrade prediction confidence — an R1 run's expected amount renders exact even while overdue. What's uncertain about an overdue run is *whether* the charge lands, not *how much* — and the "not seen" copy carries that. The tilde keeps its one meaning; a screen must never make two confidence claims about one number.
 - **"Since \<date\>" copy** pins to the first run's `start_date` (R2-corrected, *actual* since), **not** `subscription.created_at` (tracking since).
-- **Reminder toggle**: maps to `subscription.remind_before_days` (see push skeleton below); toggle on = 2 for now. Renders today, delivers later.
+- **Reminder toggle**: maps to `subscription.remind_before_days` (see [reminder delivery skeleton](#reminder-delivery-skeleton)); toggle on = 2 for now. Renders today, delivers later — email channel committed, push a maybe.
 - **Ended-run footer copy** must stay honest about R1's two-charge requirement: a resubscription is invisible for up to one full cycle (first post-ended charge sits unclaimed until the second anchors R1). Copy along the lines of *"if charges resume, tracking restarts after two"* — never promise instant restart.
 - **Run segmentation locked** (2026-07-15, screen 11a): the gap between runs is a **first-class timeline event**, not whitespace — *"NOT SUBSCRIBED · Nov 15 – May 05 · 6 months"* with a **dashed connector line and open marker** (solid line = covered, dashes = no coverage; open marker consistent with 10a's "didn't happen" semantics). Boundary semantics: the gap's start = the dead run's ended/cancelled date; its end = the next run's `start_date` — which R1 backdates to the first charge, so replay renders the resubscription from its true beginning even though the run was only *created* when the second charge anchored it. The new run's first charge renders as the *"Started · new run"* boundary event; price differences across the gap narrate themselves (each run's charges show their own amounts). The hero's SINCE stat gains a **run count** when > 1 (*"SINCE SEP 25 · 2 RUNS"*) — explains the gap before the user scrolls.
 - **Tilde is amounts-only — dates never carry tildes** (locked 2026-07-15): every predicted date has the same −3/+3 matching window, so marking dates approximate adds noise without information; relative copy ("in 3w") already reads soft. RENEWS/EXPECTED dates render bare everywhere.
 
 ---
 
-## Push notification skeleton
+## Reminder delivery skeleton
 
-*Locked 2026-07-14; schema only, nothing runs yet.*
+*Push skeleton locked 2026-07-14; channel preference + email commitment locked 2026-07-15. Schema only, nothing runs yet.*
 
 - New table **DEVICE_TOKEN** (`user_id` FK → profiles, CASCADE; `token` UNIQUE; `platform`; `created_at`; `last_seen_at`). RLS: user SELECTs own rows; writes via Edge Function, consistent with posture.
 - New column **`subscription.remind_before_days`** (nullable int; null = off; the detail-screen toggle maps to it, e.g. 2 = remind 2 days before) — **added to the user-owned column list** in the RLS column-scoped UPDATE grant, alongside nickname/category/ignored.
-- The delivery side (APNs, scheduled job reading `next_expected_date`, Apple Developer account) is **deferred entirely** — the skeleton exists so it lands without a redesign later.
+- New column **`profiles.reminder_channels`** (text + CHECK: `push` / `email` / `both`; default `'email'`) — a **global user preference, deliberately not per-subscription**. Division of labor: `remind_before_days` decides *whether and when*, per subscription; `reminder_channels` decides *how*, once, per user. Added to the user-owned RLS UPDATE grant list (alongside `display_name`). The `'email'` default is a semantic default in the doctrine's sense (like `ignored = false`): it's the true birth state — the only channel guaranteed deliverable for every account, since an email address always exists.
+- **Reminder address is derived, never stored**: reminders go to **`auth.users.email`** — whatever address the account was created with (Google identity or email+password signup; with account linking both resolve to the same verified address). No separate reminder-email column, no setting — same "the data decides" doctrine as primary currency and the card row.
+- **Delivery commitment split (2026-07-15)**:
+  - **Email is committed** — will be implemented at a later development stage. Shape: a scheduled Edge Function (Supabase cron) reads `next_expected_date` against `remind_before_days` and sends via a free transactional email provider (e.g. Resend free tier). Free-tier providers restrict recipients to the account owner's address until a custom domain is verified — a non-issue for the single-user deployment, where the owner is the only recipient by construction.
+  - **Push is a maybe, no longer planned-for-sure** — APNs requires the paid Apple Developer account, and with the app now personal-only (never going live), that purchase is uncertain. `DEVICE_TOKEN` and the `push`/`both` CHECK values stay in the schema so a future yes lands without redesign; a permanent no costs nothing (an unused table and two unused enum-ish values).
+- Schema additions here travel as a versioned migration when reminder implementation begins (or fold into `initial_schema.sql` if it hasn't been applied yet).
 
 ---
 
@@ -397,6 +405,83 @@ The user can assert "I cancelled this" from the detail screen.
 
 ---
 
+## Welcome screen contract
+
+*Locked 2026-07-17 — design 16a: auto-advancing value-prop carousel with tap dots; replaces static 15b. Pure marketing/auth surface — reads no user state (nothing exists yet); the "UI reads state" doctrine is trivially satisfied by having no state to read.*
+
+### Structure
+
+- **Two zones**: upper zone = wordmark + carousel (only this swaps); lower zone = **anchored CTA stack** (Create account / Continue with Google / "Already have an account? Sign in" / Terms line) — never moves during auto-advance, so the tap targets are stable by construction.
+- **Three slides, one doctrine each**, in narrative order (locked — story build chosen over partial-viewer optimization, with eyes open that slide 1 gets disproportionate exposure on auto-advance):
+  1. **"Know what you're really paying for."** — mock subscription list with renewal dates ("Renews \<date\>") and exact amounts; the all-in-one-place promise.
+  2. **"Catch every price hike."** — single mock row with PRICE RAISED badge, strikethrough old price → new price + "since \<date\>"; the price-change-narration differentiator (timeline's "Price raised · was R$ X" story, told visually).
+  3. **"Found straight from your bank."** — single mock row with FOUND badge, **tilde on the detected amount** ("~R$ 24,90 /mo · spotted in your bank activity"); the automatic-detection differentiator. The tilde semantic is taught before the user ever sees real data.
+
+### Mock-data rules
+
+- **No real bank brands** in mock copy — "spotted in your bank activity", never "your Itaú activity" (a claim of knowledge the app can't have pre-signup, and a brand on a marketing surface).
+- **Mock renewal dates staggered** — no two mock rows share a date (coincidence reads as a rendering bug).
+- Mock service rows may use real service names (Netflix, Spotify, Globoplay, iCloud+) — they read as examples, not claims.
+- Mock rows stay visually distinct from live home-screen rows (card stagger/overlap treatment) — the glimpse must not be mistakable for real data.
+
+### Legal line
+
+- **"By continuing you agree to our Terms and Privacy Policy." is present, always** — as-if-public standard. Rationale: a public launch would require it three ways independently (LGPD disclosure for financial data, Apple App Store privacy-policy URL requirement, Google OAuth production consent-screen requirement), and the clickwrap-adjacent placement (agreement tied to the sign-up action, docs linked adjacent) is the pattern that constitutes valid consent. ToS not legally mandated but carries the liability framing (detection may be wrong/incomplete, not financial advice, Pluggy dependency).
+- **Docs are stubbed** for the personal deployment — links must resolve to placeholder pages, never dead links; the screen stays truthful.
+
+### Carousel behavior
+
+- **Auto-advance pauses on any user touch**; tap dots are the manual navigation path.
+- **Respects Reduce Motion** — no auto-advance when the OS accessibility setting is on; dots-only navigation.
+
+---
+
+## Auth flow contract
+
+*Locked 2026-07-17 — designs 17a–17e: sign in, create account, confirm email, forgot password, choose new password. Completes the auth surface begun by 16a. Reads no app state; the contract's substance is Supabase Auth semantics + copy honesty.*
+
+### Cross-cutting mechanics
+
+- **Google sign-ins never require email confirmation**: Google verified the address; Supabase sets `email_confirmed_at` automatically, no email is sent, no interstitial renders. The confirmation gate applies **only** to accounts born via 17b (email+password signup).
+- **Email confirmation stays ON — non-negotiable**: it is what makes bidirectional account linking safe. Attack it prevents: attacker signs up email+password with the victim's address (unverified); victim later signs in with Google (same verified email); linking would merge attacker's account with victim's. Verification-before-entry is the precondition of the "same verified email = same account" rule. A soft "signed in but unverified, nagged by banner" mode does not exist in Supabase and must not be built around.
+- **Deep-link redirect**: confirmation and reset emails carry a registered redirect URL (custom scheme, e.g. `signu://auth-callback`; universal link possible later). Tapping the link opens the app, the Swift SDK exchanges the tokens, `onAuthStateChange` fires with a live session, and the app navigates forward. **The session arriving is the signal** — no polling, no status checks. The redirect URL must be whitelisted in the Supabase dashboard and registered in the Xcode project; the confirm and reset flows share this one mechanism.
+- **Password policy (enforced + copy contract)**: minimum 8 characters, ≥1 uppercase, ≥1 number — Supabase setting: min length 8 + required-characters preset lowercase/uppercase/digits (the preset's lowercase requirement is accepted; in practice always satisfied). Hint copy on 17b and 17e is identical and matches exactly: *"At least 8 characters, with 1 uppercase letter and 1 number."* One policy, two surfaces, never diverging.
+- **Enumeration-safe copy doctrine**: Supabase deliberately returns generic errors (sign-in) and unconditional success (reset request) so that no response reveals whether an account exists or how it signs in. All auth copy inherits this constraint — no screen may claim knowledge the API refuses to give.
+
+### Sign in (17a)
+
+- Email + password only — **no Google button**; "Continue with Google" lives one back-tap away on 16a.
+- **Failed sign-in copy (locked)**: *"Couldn't sign in. Check your password — if you signed up with Google you need to set a password first by tapping on Forgot password, or go back and continue with Google."* Generic by necessity (enumeration-safe), but signposts both exits from the Google-first-user trap: the Forgot-password path **is** the set-password flow (verified-email reset adds a password identity; account linking merges it — same account, two ways in).
+- **Distinct unverified-error variant**: Supabase returns a specific "email not confirmed" error, different from invalid credentials — 17a catches it and renders verify-specific copy with a resend action. Covers the user who abandoned 17c and returned days later.
+
+### Create account (17b)
+
+- Fields: **Name (mandatory)**, Email, Password (hint copy per the policy contract).
+- **Signup trigger amendment**: signup passes Name in user metadata; the profiles-creation trigger's `display_name` fallback order becomes **Google `full_name` → signup-provided name → email**. (Amends the Migration #1 trigger note.)
+- Terms/Privacy line present on 17b (the account-creating action = the clickwrap moment) and **deliberately absent on 17a** — signing in agrees to nothing new. The asymmetry is correct; do not "fix" it.
+
+### Confirm email (17c)
+
+- Shown **only** after 17b signup (never Google). States the sent-to address; copy promises the deep-link behavior ("we'll take you straight in").
+- **State machine**: waiting → (deep link fires ⇒ session arrives ⇒ Home) | (**"I've confirmed my email"** ⇒ `getUser()` checks `email_confirmed_at`: set ⇒ proceed; not set ⇒ inline "Not confirmed yet — check your inbox") | (**Resend** ⇒ 120s countdown renders under the link, then reactivates). The manual check exists for the wrong-device case (link opened on a laptop ⇒ deep link fired elsewhere or nowhere).
+- **120s resend cooldown** comfortably clears Supabase's ~60s email rate limit — the UI never shows a live link that would error.
+- **"Wrong address? Go back" is a fresh signup, not an edit** — stated honestly: the account already exists (unverified) and pre-session `updateUser` is impossible, so go-back returns to 17b for a new signup, leaving an **orphaned unverified account** behind. Accepted: orphans are inert (no sign-in, no data) and prunable. Typo'd-someone-else's-address case: that person receives a confirmation email for an account they didn't create; ignoring it is harmless — no design response needed.
+
+### Forgot password (17d)
+
+- Reached from 17a. Subtitle verb is **"set"**, not "reset" — for Google-first accounts there is no old password; this screen doubles as the set-password flow.
+- **Sent state (second state of the same screen, no new screen)**: button becomes the **120s countdown** (same cooldown contract as 17c) and the enumeration-safe line renders: *"If an account exists for \<email\>, a link is on its way."* Never "we sent it" — the API succeeds unconditionally, so the copy may not claim a send happened.
+
+### Choose new password (17e)
+
+- **Deep-link destination** of the reset email — **no back chevron by design** (not part of a navigation stack; exits are submit or app-kill).
+- Header states the session honestly: *"You're signed in as \<email\>"* — the link authenticated the user; this screen finishes the job, and the line doubles as a right-account check.
+- New password + confirm field (kept alongside the eye toggle — belt-and-suspenders on the screen where a typo re-locks the user out); hint copy identical to 17b.
+- Submit calls `updateUser` on the deep-link session ⇒ **straight to Home** — already authenticated, no second sign-in.
+- **Expired/invalid link branch (required)**: reset links expire (default ~1h); the deep-link handler routes failures back to 17d with a *"link expired — request a new one"* notice, never a silent dead end.
+
+---
+
 ## User deletion tiers
 
 - **(a) Delete account** = `auth.users` cascade wipes everything.
@@ -416,7 +501,7 @@ The user can assert "I cancelled this" from the detail screen.
   - Posture: `authenticated` role = SELECT everywhere + column-scoped UPDATE grants on user-owned columns only (`profiles.display_name`, `bank_account.nickname`, `subscription.{nickname,category,ignored}`); no INSERT/DELETE ever; `anon` = nothing.
   - All writes go through Edge Functions (service role, bypasses RLS). Sync/detection never pay the RLS join cost.
 - **Indexes (minimal, migration #1)**: FK-support indexes on `bank_account(connection_id)`, `subscription_run(subscription_id)`, `charge(run_id)`; transaction's widened to `(account_id, date)` — one index serves FK support **and** the engine's fundamental scan. Everything else (`normalized_merchant`, `next_expected_date`, partial status indexes) deferred until real query patterns exist.
-- **Signup trigger**: on `auth.users` insert, a security-definer function creates the profiles row (`display_name` from Google `full_name` metadata, falling back to email). Works for both providers.
+- **Signup trigger**: on `auth.users` insert, a security-definer function creates the profiles row. `display_name` fallback order (amended by the [auth flow contract](#auth-flow-contract), v11): Google `full_name` metadata → signup-provided name (17b passes the mandatory Name field in user metadata) → email. Works for both providers.
 
 ---
 
@@ -427,6 +512,12 @@ The user can assert "I cancelled this" from the detail screen.
 ---
 
 ## Changelog
+
+- **v11** — AUTH FLOW CONTRACT locked (designs 17a–17e; completes the auth surface begun by 16a — every screen state in the app is now designed). Cross-cutting: **Google sign-ins never require email confirmation** (Google-verified, `email_confirmed_at` auto-set; the gate applies only to 17b signups); **confirmation stays ON as a linking-safety precondition** (unverified email+password signup + later Google sign-in with the same address must never merge — verification-before-entry is what makes "same verified email = same account" safe); deep-link redirect mechanism shared by confirm + reset flows (session arriving via `onAuthStateChange` **is** the signal — no polling); password policy locked (8+ / 1 uppercase / 1 number; Supabase preset adds lowercase, accepted; identical hint copy on 17b/17e); enumeration-safe copy doctrine (no screen claims knowledge the API refuses to give). 17a: no Google button (one back-tap away); failed-sign-in copy signposts both exits of the Google-first trap — Forgot password **is** the set-password flow; distinct unverified-error variant with resend. 17b: Name mandatory ⇒ signup-trigger fallback order amended (Google `full_name` → signup name → email); Terms line on 17b only, deliberately absent on 17a (signing in agrees to nothing new). 17c: shown only after 17b; state machine (deep link ⇒ Home / manual `getUser()` check for the wrong-device case / resend with **120s cooldown** clearing the ~60s rate limit); "Go back" honestly documented as fresh-signup-plus-inert-orphan, not an edit. 17d: "set" not "reset" (Google-first accounts have no old password); sent state = countdown + *"If an account exists for \<email\>…"* (unconditional API success forbids "we sent it"). 17e: deep-link destination, no back chevron by design; "You're signed in as" states the session honestly; submit ⇒ `updateUser` ⇒ straight to Home; expired-link branch routes back to 17d, never a silent dead end.
+
+- **v10** — WELCOME SCREEN CONTRACT locked (design 16a: auto-advancing value-prop carousel, replaces static 15b; 15a/15c rejected — 15c's fabricated hero total violated the spirit of the empty-state doctrine: money-shaped numbers read as claims). Three slides, one doctrine each, **narrative order kept** (list → price hikes → found-from-bank; story build chosen over partial-viewer optimization with eyes open). Anchored CTA stack — only the upper zone swaps. Slide 3 teaches the tilde semantic pre-signup. Mock-data rules: no real bank brands ("your bank activity", never a named bank — pre-signup knowledge claim + brand on marketing surface), staggered mock dates, mock rows visually distinct from live rows. **Terms/Privacy line present on principle** (as-if-public standard: LGPD + Apple privacy-policy requirement + Google OAuth production requirement would each independently mandate it; clickwrap-adjacent placement is the valid-consent pattern); docs stubbed, never dead links. Carousel: pause on touch, Reduce Motion respected, tap dots as manual path.
+
+- **v9** — **App named: Signu** (from *assinatura*; locked 2026-07-15). Chosen after a collision hunt that eliminated twelve candidates (Subly, Subcycle, Itera, Loopa, Talli, Peri, Subka, Cyva, Vylo, Ciclou, Assiny, Renvy — all taken or compromised); Signu verified clean across web, app stores, and INPI. Personal-only deployment makes domains/trademark moot, but the name was verified unused regardless. REMINDER DELIVERY locked (channel preference + email commitment): new column `profiles.reminder_channels` (text + CHECK: push / email / both; default `'email'` — semantic default, the only channel guaranteed deliverable; user-owned, added to the RLS UPDATE grant). Global user preference by design, not per-subscription — `remind_before_days` = whether/when per sub, `reminder_channels` = how, once. Reminder address is derived from `auth.users.email` (the address the account was created with, Google or email+password) — never stored, no setting; same "data decides" doctrine as primary currency. Delivery commitment split: **email committed** (later stage; scheduled Edge Function + free transactional provider, e.g. Resend — free-tier single-recipient restriction moot for the single-user deployment) / **push downgraded to maybe** (APNs requires the paid Apple Developer account, uncertain now that the app is personal-only; DEVICE_TOKEN and the push values stay so a future yes needs no redesign). Section renamed "Push notification skeleton" → "Reminder delivery skeleton". Context: multi-user go-live scrapped this session after Pluggy pricing research (no permanent free tier for third-party users; Meu Pluggy free path covers the owner's own banks only) — architecture stays multi-user-shaped, deployment is single-user.
 
 - **v8** — SETTINGS CONTRACT locked (designs 12a–12d + 13a + 14a): single scrollable screen + one sub-page (connection detail, which doubles as the Home connection-banner destination — that gap is closed). Sections: Profile / Connected banks / Dismissed suggestions / Data; no Notifications section yet (per-sub toggle lives on detail; nothing global to control pre-delivery); no currency setting ever (derived-currency doctrine). Remove-bank-link flow makes deletion tier (b) concrete: history choice captured up front (sequencing rule), keep-history pre-selected, copy names affected services and says "stop updating **from this bank**". **Attribution rule locked**: "found via this bank" = latest charge of latest run resolves to this connection (most-recent-charge doctrine, same as the card row); mixed-evidence subs are counted — "Delete them too" erases their other-bank charges as well, accepted with eyes open; **count includes `ignored` subscriptions** (no invisible ghost data). *Same-day amendment*: sheet copy went generic (named services cut); the eyes-open safeguard moved to the **12b tap-through list** ("N subscriptions found via this bank" must open the attributed list — now mandatory). **13a locked** as that list: grouped by card, real state per row (renewal/overdue/ended lines, tilde rules apply), DISMISSED section outside the card groups (no Restore — fully read-only, strict 9b precedent; Restore lives in 12a only); header count = total **including dismissed**, checkable on-screen (card groups + dismissed = N), same N on 12b and 12c — three surfaces, one number; **tracked total = full charge history of the N attributed subs** (incl. other-bank and dismissed charges) — defined to equal exactly what "Delete them too" erases. Destructive button restates the choice. Dismissed-suggestions surface fulfills the "recoverable in Settings" promise; restore = `ignored = false` only, back to review, never auto-tracks. Empty state (12d) doubles as first-run landing shape. **14a locked**: delete-account confirmation = type-to-confirm sheet (no longer deferred); concrete scope list with real counts (subscriptions count **includes dismissed** — no-ghost-data principle); "no grace period and no undo" copy accurate to the hard cascade; button disabled until case-insensitive "DELETE" match. **Detail-screen card row tap destination locked**: opens 12b (the card's connection detail) — the last dangling chevron in the app; no new screen.
 
