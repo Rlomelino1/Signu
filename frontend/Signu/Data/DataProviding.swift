@@ -13,6 +13,8 @@ protocol SignuDataProviding {
     func profile() async throws -> Profile
     /// Screen payload for Home — assembled per the home screen contract.
     func homePayload() async throws -> HomePayload
+    /// Screen payload for the Subscriptions tab — per the subs tab contract.
+    func subsPayload() async throws -> SubsPayload
     func connections() async throws -> [Connection]
     func bankAccounts() async throws -> [BankAccount]
     func subscriptions() async throws -> [Subscription]

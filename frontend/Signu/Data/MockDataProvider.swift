@@ -413,6 +413,113 @@ final class MockDataProvider: SignuDataProviding {
         ))
     }
 
+    // MARK: - Subs payload (endpoint stand-in)
+
+    func subsPayload() async throws -> SubsPayload {
+        let visibleSubs = subscriptionList.filter { !$0.ignored }
+
+        var monthlyRows: [SubsPayload.Row] = []
+        var annualRows: [SubsPayload.Row] = []
+        var suggested: [SubsPayload.SuggestedItem] = []
+        var inactive: [SubsPayload.InactiveItem] = []
+
+        for sub in visibleSubs {
+            guard let run = latestRun(sub.id), let last = latestCharge(run.id) else { continue }
+            switch run.status {
+            case .active, .overdue:
+                guard let next = run.nextExpectedDate else { continue }
+                let interval = run.billingInterval == .monthly ? "Monthly" : "Annual"
+                let row = SubsPayload.Row(
+                    id: sub.id, serviceName: sub.displayName,
+                    subtitle: "\(interval) · \(last.cardLabel)",
+                    amount: last.amount, approximate: run.detectedBy.isApproximate,
+                    nextDate: next,
+                    overdueDays: run.status == .overdue ? days(from: next, to: today) : nil,
+                    share: 0
+                )
+                if run.billingInterval == .monthly { monthlyRows.append(row) } else { annualRows.append(row) }
+            case .possible:
+                suggested.append(SubsPayload.SuggestedItem(
+                    id: run.id, subscriptionId: sub.id, serviceName: sub.displayName,
+                    evidence: suggestionEvidence(run)
+                ))
+            case .ended, .cancelled:
+                let unit = run.billingInterval == .monthly ? "/mo" : "/yr"
+                let was = "Was \(SignuFormat.brl(last.amount)) \(unit)"
+                let cancelled = run.status == .cancelled
+                let detail = cancelled
+                    ? "cancelled by you \(SignuFormat.monthDay(run.cancelledDate ?? last.date))"
+                    : "last charge \(SignuFormat.monthDay(last.date))"
+                inactive.append(SubsPayload.InactiveItem(
+                    id: sub.id, serviceName: sub.displayName,
+                    statusText: "\(was) · \(detail)",
+                    paidThroughText: "Paid through \(run.endDate.map(SignuFormat.monthDay) ?? SignuFormat.dash)",
+                    cancelled: cancelled
+                ))
+            }
+        }
+
+        monthlyRows.sort { $0.nextDate < $1.nextDate }
+        annualRows.sort { $0.nextDate < $1.nextDate }
+
+        let monthlySubtotal = monthlyRows.reduce(Decimal.zero) { $0 + $1.amount }
+        let annualSubtotal = annualRows.reduce(Decimal.zero) { $0 + $1.amount }
+        for index in monthlyRows.indices {
+            monthlyRows[index].share = share(monthlyRows[index].amount, of: monthlySubtotal)
+        }
+        for index in annualRows.indices {
+            annualRows[index].share = share(annualRows[index].amount, of: annualSubtotal)
+        }
+
+        let yearly = monthlySubtotal * 12 + annualSubtotal
+        let approximate = monthlyRows.contains(where: \.approximate) || annualRows.contains(where: \.approximate)
+
+        return SubsPayload(
+            yearlyTotal: yearly,
+            yearlyApproximate: approximate,
+            monthlyCompanion: yearly / 12,
+            allCount: monthlyRows.count + annualRows.count + inactive.count,
+            activeCount: monthlyRows.count + annualRows.count,
+            inactiveCount: inactive.count,
+            suggested: suggested,
+            monthly: SubsPayload.Group(
+                subtotal: monthlySubtotal,
+                approximate: monthlyRows.contains(where: \.approximate),
+                unitSuffix: "/mo", rows: monthlyRows
+            ),
+            annual: SubsPayload.Group(
+                subtotal: annualSubtotal,
+                approximate: annualRows.contains(where: \.approximate),
+                unitSuffix: "/yr", rows: annualRows
+            ),
+            inactive: inactive
+        )
+    }
+
+    /// Compressed evidence (9b): only what the engine measured. R3 states
+    /// cadence + approximate amount; R4 states the catalog fact, no amount.
+    private func suggestionEvidence(_ run: SubscriptionRun) -> String {
+        let charges = chargeList.filter { $0.runId == run.id }
+        switch run.detectedBy {
+        case .r3:
+            let looks = run.billingInterval == .monthly ? "looks monthly" : "looks annual"
+            let latest = charges.max { $0.date < $1.date }?.amount ?? 0
+            return "\(charges.count) charges · \(looks) · \(SignuFormat.brlWhole(latest, approximate: true))"
+        case .r4:
+            return "1 charge · known subscription service"
+        case .r1:
+            return "\(charges.count) charges"
+        }
+    }
+
+    private func latestRun(_ subscriptionId: UUID) -> SubscriptionRun? {
+        runList.filter { $0.subscriptionId == subscriptionId }.max { $0.startDate < $1.startDate }
+    }
+
+    private func share(_ amount: Decimal, of total: Decimal) -> Double {
+        total == 0 ? 0 : ((amount / total) as NSDecimalNumber).doubleValue
+    }
+
     /// Primary currency is derived, never stored: dominant across charges.
     private var primaryCurrency: String {
         let counts = Dictionary(grouping: chargeList, by: \.currency).mapValues(\.count)

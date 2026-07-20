@@ -76,7 +76,7 @@ struct SubscriptionHeroCard: View {
             // Amount dominates; the date slot's bottom line shares its baseline.
             HStack(alignment: .lastTextBaseline, spacing: 2) {
                 Text(amount)
-                    .font(.signuHeroDetail)
+                    .font(.signuHeroCompact)
                     .foregroundStyle(SignuColor.onInk.opacity(dateSlot.isDead ? 0.72 : 1))
                     .lineLimit(1)
                 if let unit {

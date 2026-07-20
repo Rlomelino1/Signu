@@ -18,6 +18,15 @@ enum SignuFormat {
         return approximate ? "~" + formatted : formatted
     }
 
+    /// Whole-real rendering for compressed evidence copy: "~R$ 112".
+    static func brlWhole(_ amount: Decimal, approximate: Bool = false) -> String {
+        var rounded = Decimal()
+        var value = amount
+        NSDecimalRound(&rounded, &value, 0, .plain)
+        let formatted = "R$\u{00A0}\(rounded)"
+        return approximate ? "~" + formatted : formatted
+    }
+
     /// The empty-money placeholder — the contract's "dash, not R$ 0,00".
     static let dash = "—"
 

@@ -29,11 +29,14 @@ struct RootView: View {
         return homeScrollAnchor
     }
 
-    init(homeScrollAnchor: UnitPoint = .top) {
+    init(homeScrollAnchor: UnitPoint = .top, initialTab: SignuTab = .home) {
         self.homeScrollAnchor = homeScrollAnchor
+        var tab = initialTab
         #if DEBUG
+        if CommandLine.arguments.contains("--shell-subs") { tab = .subs }
         FontDiagnostics.runIfRequested()
         #endif
+        self._selectedTab = State(initialValue: tab)
     }
 
     var body: some View {
@@ -75,7 +78,16 @@ struct RootView: View {
                     onSeeAll: { selectedTab = .subs }
                 ), scrollAnchor: effectiveHomeAnchor)
             case .subs:
-                PlaceholderScreen(title: "Subscriptions", note: "Coming in step 3")
+                #if DEBUG
+                SubsScreen(
+                    provider: provider,
+                    initialFilter: CommandLine.arguments.contains("--subs-inactive") ? .inactive : .all,
+                    initialSortByCost: CommandLine.arguments.contains("--subs-cost"),
+                    scrollAnchor: CommandLine.arguments.contains("--subs-bottom") ? .bottom : .top
+                )
+                #else
+                SubsScreen(provider: provider)
+                #endif
             case .settings:
                 PlaceholderScreen(title: "Settings", note: "Coming in step 6")
             }
