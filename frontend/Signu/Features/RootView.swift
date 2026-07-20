@@ -8,6 +8,27 @@ struct RootView: View {
     private let provider: SignuDataProviding = MockDataProvider()
 
     var body: some View {
+        #if DEBUG
+        // Screenshot harnesses: `simctl launch … pro.sinatra.signu --hero-states[=0,1]`
+        if let heroArg = CommandLine.arguments.first(where: { $0.hasPrefix("--hero-states") }) {
+            let indices = heroArg.split(separator: "=").dropFirst().first
+                .map { $0.split(separator: ",").compactMap { Int($0) } } ?? []
+            if indices.isEmpty {
+                HeroStatesGallery()
+            } else {
+                HeroStatesGallery(indices: indices)
+            }
+        } else if CommandLine.arguments.contains("--gallery") {
+            DesignSystemGallery()
+        } else {
+            shell
+        }
+        #else
+        shell
+        #endif
+    }
+
+    private var shell: some View {
         ZStack(alignment: .bottom) {
             SignuColor.paper.ignoresSafeArea()
 
