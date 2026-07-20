@@ -37,6 +37,7 @@ enum SignuFormat {
     private static let weekdayMonthDayFormatter = formatter("EEE, MMM d")
     private static let weekdayMonthDayYearFormatter = formatter("EEE, MMM d, yyyy")
     private static let monthYearShortFormatter = formatter("MMM yy")
+    private static let weekdayFullFormatter = formatter("EEEE, MMM d")
 
     /// "Jul"
     static func monthAbbrev(_ date: Date) -> String { monthAbbrevFormatter.string(from: date) }
@@ -50,6 +51,17 @@ enum SignuFormat {
     static func weekdayMonthDayYear(_ date: Date) -> String { weekdayMonthDayYearFormatter.string(from: date) }
     /// "Nov 23" — the hero's SINCE label.
     static func monthYearShort(_ date: Date) -> String { monthYearShortFormatter.string(from: date) }
+    /// "Sunday, Jul 13" — the home header overline (rendered uppercase).
+    static func weekdayFull(_ date: Date) -> String { weekdayFullFormatter.string(from: date) }
+
+    /// "just now" / "25m ago" / "2h ago" / "3d ago" — sync-status copy.
+    static func ago(_ date: Date, now: Date) -> String {
+        let seconds = now.timeIntervalSince(date)
+        if seconds < 120 { return "just now" }
+        if seconds < 3600 { return "\(Int(seconds / 60))m ago" }
+        if seconds < 172_800 { return "\(Int(seconds / 3600))h ago" }
+        return "\(Int(seconds / 86400))d ago"
+    }
 }
 
 extension String {

@@ -54,7 +54,7 @@ struct SignuRow<Leading: View>: View {
                     .foregroundStyle(SignuColor.textPrimary)
                 if let subtitle {
                     subtitle
-                        .font(.signuSubtitle)
+                        .font(SignuFont.font(14))
                         .foregroundStyle(SignuColor.textSecondary)
                         .multilineTextAlignment(.leading)
                 }

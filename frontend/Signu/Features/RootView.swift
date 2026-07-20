@@ -30,6 +30,12 @@ struct RootView: View {
             DesignSystemGallery(anchor: .bottom)
         } else if CommandLine.arguments.contains("--gallery") {
             DesignSystemGallery()
+        } else if CommandLine.arguments.contains("--home-bottom") {
+            HomeScreen(provider: MockDataProvider(), scrollAnchor: .bottom)
+        } else if CommandLine.arguments.contains("--home-watching") {
+            HomeScreen(provider: MockDataProvider(scenario: .freshConnection))
+        } else if CommandLine.arguments.contains("--home-nobank") {
+            HomeScreen(provider: MockDataProvider(scenario: .noBank))
         } else {
             shell
         }
@@ -44,7 +50,9 @@ struct RootView: View {
 
             switch selectedTab {
             case .home:
-                PlaceholderScreen(title: "Home", note: "Coming in step 2")
+                HomeScreen(provider: provider, actions: HomeActions(
+                    onSeeAll: { selectedTab = .subs }
+                ))
             case .subs:
                 PlaceholderScreen(title: "Subscriptions", note: "Coming in step 3")
             case .settings:
