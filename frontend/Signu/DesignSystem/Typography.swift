@@ -1,33 +1,62 @@
 import SwiftUI
 
-/// Type scale read off the mockups. System font stands in for the mockups'
-/// grotesque — no third-party dependencies per the ground rules.
+/// App typeface: Inter (bundled, SIL OFL — see Fonts/OFL-Inter-LICENSE.txt),
+/// registered via UIAppFonts. Every text style in the app routes through
+/// here; no view uses the system font directly.
+enum SignuFont {
+    enum Weight {
+        case regular, medium, semibold, bold
+
+        var faceName: String {
+            switch self {
+            case .regular: "Inter-Regular"
+            case .medium: "Inter-Medium"
+            case .semibold: "Inter-SemiBold"
+            case .bold: "Inter-Bold"
+            }
+        }
+    }
+
+    /// `tabular` turns on monospaced (tabular) numerals — required on any
+    /// style that renders amounts, so digits align down lists and tiles.
+    static func font(_ size: CGFloat, _ weight: Weight = .regular, tabular: Bool = false) -> Font {
+        let font = Font.custom(weight.faceName, size: size)
+        return tabular ? font.monospacedDigit() : font
+    }
+}
+
+/// Type scale read off the mockups.
 extension Font {
     /// Screen titles: "Subscriptions", "Settings", auth headlines.
-    static let signuScreenTitle = Font.system(size: 34, weight: .bold)
-    /// Hero money (home, subs-tab, detail heroes). Condensed width: matches
-    /// the mockup grotesque's geometry — full 44pt height at the mockups'
-    /// measured amount width, so the locked layouts fit with SF.
-    static let signuHeroXL = Font.system(size: 44, weight: .bold).width(.condensed)
+    static let signuScreenTitle = SignuFont.font(34, .bold)
+    /// Hero money on uncontested rows (home + subs-tab heroes).
+    static let signuHeroXL = SignuFont.font(44, .bold, tabular: true)
+    /// Detail-hero money: shares its row with the date slot, so it is
+    /// capped at the measured no-truncation size (see FontDiagnostics;
+    /// Inter@44 is ~223pt against a ~148pt budget on 393pt screens).
+    static let signuHeroDetail = SignuFont.font(32, .bold, tabular: true)
     /// Secondary hero money slot.
-    static let signuHero = Font.system(size: 38, weight: .bold).width(.condensed)
+    static let signuHero = SignuFont.font(38, .bold, tabular: true)
     /// Greetings, sheet titles ("Remove Itaú?").
-    static let signuTitle = Font.system(size: 28, weight: .bold)
+    static let signuTitle = SignuFont.font(28, .bold)
     /// In-screen section titles: "Coming up", "History".
-    static let signuSection = Font.system(size: 22, weight: .bold)
+    static let signuSection = SignuFont.font(22, .bold)
     /// Detail hero service name, review card titles.
-    static let signuHeadline = Font.system(size: 21, weight: .semibold)
+    static let signuHeadline = SignuFont.font(21, .semibold)
     /// Row titles and row amounts.
-    static let signuRowTitle = Font.system(size: 17, weight: .semibold)
-    static let signuBody = Font.system(size: 17)
+    static let signuRowTitle = SignuFont.font(17, .semibold, tabular: true)
+    static let signuBody = SignuFont.font(17)
     /// Row subtitles, secondary copy.
-    static let signuSubtitle = Font.system(size: 15)
-    static let signuSubtitleEmphasis = Font.system(size: 15, weight: .semibold)
-    static let signuCaption = Font.system(size: 13)
+    static let signuSubtitle = SignuFont.font(15)
+    static let signuSubtitleEmphasis = SignuFont.font(15, .semibold, tabular: true)
+    static let signuCaption = SignuFont.font(13)
     /// Chips and small controls.
-    static let signuChip = Font.system(size: 15, weight: .semibold)
+    static let signuChip = SignuFont.font(14, .semibold)
     /// CTA buttons.
-    static let signuButton = Font.system(size: 18, weight: .semibold)
+    static let signuButton = SignuFont.font(18, .semibold)
+    /// Stat-tile values (ink hero tiles). 17pt keeps "R$ 1.312,70" on one
+    /// line inside a half-width tile on 393pt screens.
+    static let signuStatValue = SignuFont.font(17, .semibold, tabular: true)
 }
 
 /// Uppercase, letterspaced label — section headers, hero stat labels.
@@ -42,7 +71,7 @@ struct OverlineText: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 13, weight: .semibold))
+            .font(SignuFont.font(13, .semibold, tabular: true))
             .kerning(1.1)
             .foregroundStyle(color)
     }

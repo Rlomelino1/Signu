@@ -29,11 +29,11 @@ struct DateBadge: View {
     var body: some View {
         VStack(spacing: 0) {
             Text(SignuFormat.monthAbbrev(date).uppercased())
-                .font(.system(size: 11, weight: .semibold))
+                .font(SignuFont.font(11, .semibold))
                 .kerning(0.5)
                 .foregroundStyle(overdue ? SignuColor.red : SignuColor.textSecondary)
             Text(SignuFormat.dayNumber(date))
-                .font(.system(size: 20, weight: .bold))
+                .font(SignuFont.font(20, .bold, tabular: true))
                 .foregroundStyle(overdue ? SignuColor.red : SignuColor.textPrimary)
         }
         .frame(width: 48, height: 48)
@@ -54,7 +54,7 @@ struct FilterChip: View {
     var body: some View {
         Button(action: action) {
             Text(count.map { "\(label) · \($0)" } ?? label)
-                .font(.system(size: 16, weight: .semibold))
+                .font(SignuFont.font(16, .semibold, tabular: true))
                 .foregroundStyle(isSelected ? SignuColor.onInk : SignuColor.textPrimary)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -110,7 +110,7 @@ struct WarningBanner: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 16, weight: .semibold))
+                .font(SignuFont.font(16, .semibold, tabular: true))
             Text(text)
                 .font(.signuSubtitleEmphasis)
                 .frame(maxWidth: .infinity, alignment: .leading)

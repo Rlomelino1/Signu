@@ -24,8 +24,9 @@ struct HeroStatTile: View {
         VStack(alignment: .leading, spacing: 4) {
             OverlineText(label, color: SignuColor.onInkSecondary)
             Text(value)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.signuStatValue)
                 .foregroundStyle(SignuColor.onInk)
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)

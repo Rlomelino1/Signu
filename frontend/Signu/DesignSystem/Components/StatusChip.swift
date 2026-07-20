@@ -16,7 +16,7 @@ struct StatusChip: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 14, weight: .semibold))
+            .font(.signuChip)
             .foregroundStyle(foreground)
             .padding(.horizontal, 11)
             .padding(.vertical, 6)

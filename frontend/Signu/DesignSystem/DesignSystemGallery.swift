@@ -3,6 +3,7 @@ import SwiftUI
 /// One-stop preview of the design system — tokens and every reusable
 /// component, on paper. Not part of any navigation flow.
 struct DesignSystemGallery: View {
+    var anchor: UnitPoint = .top
     @State private var sort = 0
     @State private var tab = SignuTab.home
 
@@ -127,6 +128,7 @@ struct DesignSystemGallery: View {
             }
             .padding(SignuMetric.screenPadding)
         }
+        .defaultScrollAnchor(anchor)
         .background(SignuColor.paper)
     }
 

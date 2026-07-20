@@ -40,7 +40,7 @@ struct SignuTabBar: View {
                 Image(systemName: tab.icon)
                     .font(.system(size: 20, weight: .medium))
                 Text(tab.rawValue)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(SignuFont.font(13, .medium))
             }
             .foregroundStyle(selection == tab ? SignuColor.textPrimary : SignuColor.textSecondary)
             .frame(width: 86, height: 62)

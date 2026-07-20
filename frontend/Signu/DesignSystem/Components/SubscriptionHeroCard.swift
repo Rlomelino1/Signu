@@ -68,7 +68,7 @@ struct SubscriptionHeroCard: View {
                             .fixedSize()
                     }
                     Text(subtitle.signuNonBreaking)
-                        .font(.system(size: 14))
+                        .font(SignuFont.font(14))
                         .foregroundStyle(SignuColor.onInkSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -79,10 +79,9 @@ struct SubscriptionHeroCard: View {
             // Amount dominates; the date slot's bottom line shares its baseline.
             HStack(alignment: .lastTextBaseline, spacing: 2) {
                 Text(amount)
-                    .font(.signuHeroXL)
+                    .font(.signuHeroDetail)
                     .foregroundStyle(SignuColor.onInk.opacity(dateSlot.isDead ? 0.72 : 1))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
                 if let unit {
                     Text(unit)
                         .font(.signuSubtitle)
