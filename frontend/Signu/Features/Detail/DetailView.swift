@@ -164,11 +164,14 @@ private struct TimelineRow: View {
                     .foregroundStyle(SignuColor.textSecondary)
             }
             .padding(.vertical, 10)
-            Spacer(minLength: 8)
+            .layoutPriority(1)          // label wins space over the amount
+            Spacer(minLength: 6)
             if let amount = event.amountText {
                 Text(amount)
                     .font(.signuRowTitle)
                     .foregroundStyle(tone)
+                    .lineLimit(1)
+                    .fixedSize()
                     .padding(.vertical, 10)
             }
         }
@@ -183,6 +186,8 @@ private struct TimelineRow: View {
             Text(event.title)
                 .font(.signuRowTitle)
                 .foregroundStyle(event.tone == .normal ? SignuColor.textPrimary : tone)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)   // one line — all timeline labels (21o)
         }
     }
 
