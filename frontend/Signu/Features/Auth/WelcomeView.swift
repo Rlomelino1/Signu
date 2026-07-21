@@ -183,11 +183,14 @@ private struct SlideFound: View {
                     Spacer()
                     StatusChip(text: "FOUND", tone: .positive)
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("~R$ 24,90").font(.signuHeadline).foregroundStyle(SignuColor.textPrimary)
-                    Text("/mo · spotted in your bank activity")
-                        .font(.signuSubtitle).foregroundStyle(SignuColor.textSecondary)
-                }
+                // "~R$ 24,90 /mo" glued with non-breaking spaces so it stays
+                // intact; the description flows after and wraps cleanly.
+                (
+                    Text("~R$\u{00A0}24,90").font(.signuHeadline).foregroundStyle(SignuColor.textPrimary)
+                    + Text("\u{00A0}/mo").font(.signuSubtitle).foregroundStyle(SignuColor.textSecondary)
+                    + Text(" · spotted in your bank activity").font(.signuSubtitle).foregroundStyle(SignuColor.textSecondary)
+                )
+                .fixedSize(horizontal: false, vertical: true)
             }
             .padding(16)
             .background(SignuColor.surface, in: RoundedRectangle(cornerRadius: SignuMetric.cardRadius, style: .continuous))
