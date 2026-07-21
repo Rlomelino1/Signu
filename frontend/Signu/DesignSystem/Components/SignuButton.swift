@@ -13,13 +13,16 @@ struct SignuButtonStyle: ButtonStyle {
 
     var kind: Kind = .primary
     var fullWidth = true
+    /// Slimmer pill for in-card action pairs (review Track it / Not a
+    /// subscription) — matches 21j's button height, not the full CTA.
+    var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.signuButton)
+            .font(compact ? SignuFont.font(16, .semibold) : .signuButton)
             .foregroundStyle(foreground)
             .frame(maxWidth: fullWidth ? .infinity : nil)
-            .frame(height: SignuMetric.buttonHeight)
+            .frame(height: compact ? 46 : SignuMetric.buttonHeight)
             .padding(.horizontal, fullWidth ? 0 : 28)
             .background(background, in: Capsule())
             .overlay {

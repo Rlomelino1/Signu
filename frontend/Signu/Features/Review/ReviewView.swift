@@ -48,7 +48,7 @@ struct ReviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 16) {
                 header
 
                 if remaining.isEmpty {
@@ -62,7 +62,7 @@ struct ReviewView: View {
                         .foregroundStyle(SignuColor.textSecondary)
                         .frame(maxWidth: .infinity)
                         .multilineTextAlignment(.center)
-                        .padding(.top, 6)
+                        .padding(.top, 4)
                 }
             }
             .padding(.horizontal, SignuMetric.screenPadding)
@@ -91,14 +91,14 @@ struct ReviewView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
             ChromeButton(systemName: "chevron.left", action: actions.onBack)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("Possible subscriptions")
-                    .font(.signuScreenTitle)
+                    .font(.signuTitle)
                     .foregroundStyle(SignuColor.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                 Text("Found in your transactions — you decide.")
-                    .font(.signuBody)
+                    .font(.signuSubtitle)
                     .foregroundStyle(SignuColor.textSecondary)
             }
         }
@@ -127,17 +127,20 @@ struct ReviewView: View {
 
     private func card(_ suggestion: ReviewPayload.Suggestion) -> some View {
         SignuCard {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    ServiceAvatar(name: suggestion.serviceName, size: 48)
-                    VStack(alignment: .leading, spacing: 3) {
+                    ServiceAvatar(name: suggestion.serviceName, size: 44)
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(suggestion.serviceName)
-                            .font(.signuHeadline)
+                            .font(.signuRowTitle)
                             .foregroundStyle(SignuColor.textPrimary)
+                        // One line, per 21j — 13pt scales to fit the longest
+                        // R3 evidence copy in Inter.
                         Text(suggestion.evidence)
-                            .font(SignuFont.font(15, .semibold))
+                            .font(SignuFont.font(13, .semibold))
                             .foregroundStyle(SignuColor.green)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                 }
 
@@ -154,16 +157,17 @@ struct ReviewView: View {
                     } label: {
                         Text("Track it").lineLimit(1)
                     }
-                    .buttonStyle(.signuSuccess)
+                    .buttonStyle(SignuButtonStyle(kind: .success, compact: true))
                     Button {
                         dismiss(suggestion)
                     } label: {
                         Text("Not a subscription").lineLimit(1).minimumScaleFactor(0.8)
                     }
-                    .buttonStyle(.signuSecondary)
+                    .buttonStyle(SignuButtonStyle(kind: .secondary, compact: true))
                 }
+                .padding(.top, 2)
             }
-            .padding(18)
+            .padding(16)
         }
     }
 
@@ -183,10 +187,11 @@ struct ReviewView: View {
                         .font(.signuSubtitleEmphasis)
                         .foregroundStyle(SignuColor.textPrimary)
                 }
-                .padding(.vertical, 10)
+                .padding(.vertical, 8)
                 .padding(.horizontal, 14)
             }
         }
+        .padding(.vertical, 2)
         .background(SignuColor.sunken.opacity(0.7), in: RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous))
     }
 
