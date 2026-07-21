@@ -16,6 +16,9 @@ struct RootView: View {
     @State private var showReview = false
     @State private var detailSubscriptionId: UUID?
     @State private var detailFixture: DetailPayload?
+    @State private var settingsConnectionId: UUID?
+    @State private var showDelete = false
+    @State private var deleteScope: DeleteAccountScope?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let provider: SignuDataProviding = {
@@ -45,6 +48,7 @@ struct RootView: View {
         var tab = initialTab
         #if DEBUG
         if CommandLine.arguments.contains("--shell-subs") { tab = .subs }
+        if CommandLine.arguments.contains("--shell-settings") { tab = .settings }
         FontDiagnostics.runIfRequested()
         #endif
         self._selectedTab = State(initialValue: tab)
@@ -76,6 +80,8 @@ struct RootView: View {
                 name: String(arg.dropFirst("--detail=".count)),
                 bottom: CommandLine.arguments.contains("--detail-bottom")
             )
+        } else if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--settings=") }) {
+            SettingsDebugView(name: String(arg.dropFirst("--settings=".count)))
         } else {
             shell
         }
@@ -118,7 +124,15 @@ struct RootView: View {
                 )
                 #endif
             case .settings:
-                PlaceholderScreen(title: "Settings", note: "Coming in step 6")
+                SettingsScreen(provider: provider, actions: SettingsActions(
+                    onSelectBank: { settingsConnectionId = $0 },
+                    onDeleteAccount: {
+                        Task {
+                            deleteScope = try? await provider.deleteAccountScope()
+                            showDelete = true
+                        }
+                    }
+                ))
             }
 
             // Safari-style auto-hide (tab bar behavior contract): slides out
@@ -152,6 +166,17 @@ struct RootView: View {
         }
         .fullScreenCover(item: $detailFixture) { fixture in
             DetailScreen(payload: fixture, actions: DetailActions(onBack: { detailFixture = nil }))
+        }
+        // Connection detail (12b) — covers the tab bar; from a Settings bank row.
+        .fullScreenCover(item: $settingsConnectionId) { id in
+            ConnectionDetailScreen(provider: provider, connectionId: id, onBack: { settingsConnectionId = nil })
+        }
+        .sheet(isPresented: $showDelete) {
+            if let deleteScope {
+                DeleteAccountSheet(scope: deleteScope, onDelete: { showDelete = false })
+                    .presentationDetents([.height(560)])
+                    .presentationDragIndicator(.visible)
+            }
         }
         #if DEBUG
         .onAppear {
@@ -237,6 +262,54 @@ private struct DetailDebugView: View {
                 return try? await provider.detailPayload(subscriptionId: sub.id)
             }, scrollAnchor: anchor)
         }
+    }
+}
+#endif
+
+#if DEBUG
+/// Screenshot harness for settings sub-screens: `--settings=<name>` where
+/// name is connection-itau / connection-nubank / connection-bradesco /
+/// attributed-itau / remove / delete.
+private struct SettingsDebugView: View {
+    let name: String
+    private let provider = MockDataProvider()
+    @State private var deleteScope: DeleteAccountScope?
+
+    var body: some View {
+        switch name {
+        case "connection-itau", "connection-nubank", "connection-bradesco":
+            ConnectionDetailScreen(provider: provider, connectionId: connId(String(name.dropFirst("connection-".count))))
+        case "attributed-itau":
+            AttributedSubsScreen(provider: provider, connectionId: connId("itau"))
+        case "remove":
+            SignuColor.paper.ignoresSafeArea()
+                .sheet(isPresented: .constant(true)) {
+                    RemoveBankSheet(institutionName: "Itaú", count: 11)
+                        .presentationDetents([.height(560)])
+                        .presentationDragIndicator(.visible)
+                }
+        case "delete":
+            SignuColor.paper.ignoresSafeArea()
+                .sheet(isPresented: .constant(true)) {
+                    Group {
+                        if let deleteScope {
+                            DeleteAccountSheet(scope: deleteScope)
+                                .presentationDetents([.height(560)])
+                                .presentationDragIndicator(.visible)
+                        } else {
+                            Color.clear
+                        }
+                    }
+                    .task { deleteScope = try? await provider.deleteAccountScope() }
+                }
+        default:
+            SettingsScreen(provider: provider)
+        }
+    }
+
+    private func connId(_ key: String) -> UUID {
+        let map = ["itau": "Itaú", "nubank": "Nubank", "bradesco": "Bradesco"]
+        return provider.connectionList.first { $0.institutionName == (map[key] ?? "Itaú") }?.id ?? UUID()
     }
 }
 #endif

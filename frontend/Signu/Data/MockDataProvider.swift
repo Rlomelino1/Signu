@@ -169,9 +169,10 @@ final class MockDataProvider: SignuDataProviding {
                 interval: .monthly, status: .active, detectedBy: .r1,
                 start: Self.date(2025, 2, 22), nextExpected: Self.date(2026, 7, 22)
             ),
+            // Billed on Nubank Visa (spreads subs across the 3 banks).
             charges: monthlySeries(
                 from: Self.date(2025, 2, 22), through: Self.date(2026, 6, 22),
-                account: master7730, label: "Master 7730"
+                account: nubankVisa, label: "Visa 1029"
             ) { _ in Self.brl("14.90") }
         )
         addSubscription(
@@ -183,7 +184,7 @@ final class MockDataProvider: SignuDataProviding {
             ),
             charges: monthlySeries(
                 from: Self.date(2026, 1, 30), through: Self.date(2026, 6, 30),
-                account: visa4821, label: "Visa 4821"
+                account: nubankVisa, label: "Visa 1029"
             ) { _ in Self.brl("19.90") }
         )
         addSubscription(
@@ -207,9 +208,10 @@ final class MockDataProvider: SignuDataProviding {
                 interval: .annual, status: .active, detectedBy: .r1,
                 start: Self.date(2024, 11, 12), nextExpected: Self.date(2026, 11, 12)
             ),
+            // Billed on Bradesco Elo.
             charges: [
-                ChargeSpec(date: Self.date(2024, 11, 12), amount: Self.brl("99.90"), account: visa4821, label: "Visa 4821"),
-                ChargeSpec(date: Self.date(2025, 11, 12), amount: Self.brl("99.90"), account: visa4821, label: "Visa 4821"),
+                ChargeSpec(date: Self.date(2024, 11, 12), amount: Self.brl("99.90"), account: bradescoElo, label: "Elo 3311"),
+                ChargeSpec(date: Self.date(2025, 11, 12), amount: Self.brl("99.90"), account: bradescoElo, label: "Elo 3311"),
             ]
         )
         addSubscription(

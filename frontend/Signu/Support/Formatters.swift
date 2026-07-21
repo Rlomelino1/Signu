@@ -47,6 +47,8 @@ enum SignuFormat {
     private static let weekdayMonthDayFormatter = formatter("EEE, MMM dd")
     private static let weekdayMonthDayYearFormatter = formatter("EEE, MMM dd, yyyy")
     private static let monthYearShortFormatter = formatter("MMM yy")
+    private static let monthYearLongFormatter = formatter("MMM yyyy")
+    private static let syncStampFormatter = formatter("MMM dd · HH:mm")
     private static let weekdayFullFormatter = formatter("EEEE, MMM d")
 
     /// "Jul"
@@ -63,6 +65,10 @@ enum SignuFormat {
     static func weekdayMonthDayYear(_ date: Date) -> String { weekdayMonthDayYearFormatter.string(from: date) }
     /// "Nov 23" — the hero's SINCE label.
     static func monthYearShort(_ date: Date) -> String { monthYearShortFormatter.string(from: date) }
+    /// "Oct 2025" — connection "connected since" line.
+    static func monthYearLong(_ date: Date) -> String { monthYearLongFormatter.string(from: date) }
+    /// "Jul 12 · 08:14" — connection LAST SYNCED stat.
+    static func syncStamp(_ date: Date) -> String { syncStampFormatter.string(from: date) }
     /// "Sunday, Jul 13" — the home header overline (rendered uppercase).
     static func weekdayFull(_ date: Date) -> String { weekdayFullFormatter.string(from: date) }
 
