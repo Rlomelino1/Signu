@@ -86,21 +86,24 @@ struct ReviewView: View {
 
     // MARK: - Header
 
-    // Chevron on its own row, title full-width below — same pushed-screen
-    // header pattern as the detail screen (21k).
+    // Chevron on the left, title on the same row starting just right of it,
+    // subtitle directly under the title (21j).
     private var header: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        HStack(alignment: .top, spacing: 12) {
             ChromeButton(systemName: "chevron.left", action: actions.onBack)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Possible subscriptions")
                     .font(.signuTitle)
                     .foregroundStyle(SignuColor.textPrimary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.75)
                 Text("Found in your transactions — you decide.")
                     .font(.signuSubtitle)
                     .foregroundStyle(SignuColor.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
+            .padding(.top, 4)
         }
         .padding(.top, 4)
     }
