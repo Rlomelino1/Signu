@@ -1,2 +1,0 @@
-Target dependency graph (1 target)
-Target 'Signu' in project 'Signu' (no dependencies)

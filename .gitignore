@@ -14,3 +14,4 @@ backend/supabase/.temp
 frontend/**/xcuserdata/
 frontend/**/*.xcuserstate
 frontend/DerivedData/
+frontend/build/
