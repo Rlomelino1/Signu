@@ -39,11 +39,11 @@ struct SettingsView: View {
 
     var body: some View {
         SignuScrollView(anchor: scrollAnchor) {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("Settings")
                     .font(.signuScreenTitle)
                     .foregroundStyle(SignuColor.textPrimary)
-                    .padding(.top, 4)
+                    .padding(.top, 2)
 
                 profileSection
                 banksSection
@@ -59,18 +59,18 @@ struct SettingsView: View {
     // MARK: - Profile
 
     private var profileSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             SectionHeader("Profile")
             SignuCard {
                 VStack(spacing: 0) {
                     HStack(spacing: 14) {
-                        Circle().fill(SignuColor.ink).frame(width: 52, height: 52)
+                        Circle().fill(SignuColor.ink).frame(width: 46, height: 46)
                             .overlay {
                                 Text(payload.initial)
-                                    .font(SignuFont.font(20, .semibold))
+                                    .font(SignuFont.font(18, .semibold))
                                     .foregroundStyle(SignuColor.onInk)
                             }
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 1) {
                             Text(payload.displayName)
                                 .font(.signuRowTitle)
                                 .foregroundStyle(SignuColor.textPrimary)
@@ -82,7 +82,8 @@ struct SettingsView: View {
                         Spacer(minLength: 8)
                         chevron
                     }
-                    .padding(SignuMetric.rowPaddingH)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
 
                     if !payload.providers.isEmpty {
                         rowDivider
@@ -95,11 +96,12 @@ struct SettingsView: View {
                                 Text(provider)
                                     .font(.signuChip)
                                     .foregroundStyle(SignuColor.textPrimary)
-                                    .padding(.horizontal, 12).padding(.vertical, 6)
+                                    .padding(.horizontal, 12).padding(.vertical, 5)
                                     .background(SignuColor.sunken, in: Capsule())
                             }
                         }
-                        .padding(SignuMetric.rowPaddingH)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 9)
                     }
                 }
             }
@@ -109,7 +111,7 @@ struct SettingsView: View {
     // MARK: - Connected banks (12a rows; 12d empty)
 
     private var banksSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             SectionHeader("Connected banks")
             if payload.banks.isEmpty {
                 emptyBanksCard
@@ -130,9 +132,9 @@ struct SettingsView: View {
     }
 
     private func bankRow(_ bank: SettingsPayload.BankRow) -> some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             ServiceAvatar(name: bank.name)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(bank.name)
                     .font(.signuRowTitle)
                     .foregroundStyle(SignuColor.textPrimary)
@@ -141,11 +143,14 @@ struct SettingsView: View {
                     .foregroundStyle(subtitleColor(bank.chipTone))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 8)
-            StatusChip(text: bank.chipText, tone: bank.chipTone)
+            .layoutPriority(1)
+            Spacer(minLength: 6)
+            // Chip sizes to its content on one line ("Needs action").
+            StatusChip(text: bank.chipText, tone: bank.chipTone, compact: true).fixedSize()
             chevron
         }
-        .padding(SignuMetric.rowPaddingH)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
     }
 
     private func subtitleColor(_ tone: StatusChip.Tone) -> Color {
@@ -167,7 +172,8 @@ struct SettingsView: View {
                 .foregroundStyle(SignuColor.textPrimary)
             Spacer()
         }
-        .padding(SignuMetric.rowPaddingH)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
     }
 
     private var emptyBanksCard: some View {
@@ -196,21 +202,25 @@ struct SettingsView: View {
     // MARK: - Dismissed suggestions
 
     private var dismissedSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             SectionHeader("Dismissed suggestions")
-            VStack(spacing: 10) {
-                ForEach(dismissed) { row in
-                    SignuCard {
+            // One grouped card with hairline dividers (same as banks).
+            SignuCard {
+                VStack(spacing: 0) {
+                    ForEach(Array(dismissed.enumerated()), id: \.element.id) { index, row in
                         HStack(spacing: 12) {
                             ServiceAvatar(name: row.name)
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: 1) {
                                 Text(row.name)
                                     .font(.signuRowTitle)
                                     .foregroundStyle(SignuColor.textPrimary)
                                 Text(row.subtitle)
                                     .font(SignuFont.font(14))
                                     .foregroundStyle(SignuColor.textSecondary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
                             }
+                            .layoutPriority(1)
                             Spacer(minLength: 8)
                             Button {
                                 actions.onRestore(row.id)
@@ -219,22 +229,21 @@ struct SettingsView: View {
                                 Text("Restore").lineLimit(1)
                             }
                             .buttonStyle(SignuButtonStyle(kind: .secondary, fullWidth: false, compact: true))
+                            .fixedSize()
                         }
-                        .padding(SignuMetric.rowPaddingH)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 9)
+                        if index < dismissed.count - 1 { rowDivider }
                     }
                 }
             }
-            Text("Restoring puts the suggestion back in review — nothing is tracked until you confirm it.")
-                .font(.signuSubtitle)
-                .foregroundStyle(SignuColor.textSecondary)
-                .padding(.top, 2)
         }
     }
 
     // MARK: - Data
 
     private var dataSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             SectionHeader("Data")
             Button(action: actions.onDeleteAccount) {
                 SignuCard {
@@ -246,14 +255,16 @@ struct SettingsView: View {
                             Text(payload.deleteScopeLine)
                                 .font(SignuFont.font(14))
                                 .foregroundStyle(SignuColor.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(SignuColor.red)
                     }
-                    .padding(SignuMetric.rowPaddingH)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
                 }
             }
             .buttonStyle(.plain)

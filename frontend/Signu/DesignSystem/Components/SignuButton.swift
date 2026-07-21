@@ -23,7 +23,7 @@ struct SignuButtonStyle: ButtonStyle {
             .foregroundStyle(foreground)
             .frame(maxWidth: fullWidth ? .infinity : nil)
             .frame(height: compact ? 46 : SignuMetric.buttonHeight)
-            .padding(.horizontal, fullWidth ? 0 : 28)
+            .padding(.horizontal, fullWidth ? 0 : (compact ? 18 : 28))
             .background(background, in: Capsule())
             .overlay {
                 if hasStroke {
