@@ -18,7 +18,7 @@ struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             wordmark
-                .padding(.top, 24)
+                .padding(.top, 14)
 
             TabView(selection: $index) {
                 ForEach(slides.indices, id: \.self) { i in
@@ -33,22 +33,22 @@ struct WelcomeView: View {
                 withAnimation(.easeInOut) { index = (index + 1) % slides.count }
             }
 
-            dots.padding(.bottom, 20)
+            dots.padding(.bottom, 18)
             ctaStack.padding(.horizontal, SignuMetric.screenPadding).padding(.bottom, 8)
         }
         .background(SignuColor.paper)
     }
 
     private var wordmark: some View {
-        VStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+        VStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(SignuColor.ink)
-                .frame(width: 76, height: 76)
+                .frame(width: 64, height: 64)
                 .overlay {
-                    Text("S").font(SignuFont.font(38, .bold)).foregroundStyle(SignuColor.onInk)
+                    Text("S").font(SignuFont.font(32, .bold)).foregroundStyle(SignuColor.onInk)
                 }
             Text("Signu")
-                .font(SignuFont.font(34, .bold))
+                .font(SignuFont.font(32, .bold))
                 .foregroundStyle(SignuColor.textPrimary)
         }
     }
@@ -104,12 +104,28 @@ struct WelcomeSlide {
     ]
 }
 
+/// Shared slide layout: content top-anchored at a shared position with a
+/// fixed gap reserved above the page-dot indicator, so all three slides
+/// (different heights) keep a consistent gap instead of sagging into the dots.
+private struct SlideScaffold<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            content()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, 6)
+        .padding(.bottom, 24)   // fixed gap above the dots
+    }
+}
+
 // MARK: - Slide 1: the all-in-one-place promise
 
 private struct SlideList: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(spacing: 10) {
+        SlideScaffold {
+            VStack(spacing: 8) {
                 mockRow("Netflix", "Renews Jul 22", "R$ 44,90", faded: false)
                 mockRow("Spotify", "Renews Jul 15", "R$ 21,90", faded: false)
                 mockRow("iCloud+", "Renews Jul 21", "R$ 14,90", faded: true)
@@ -118,9 +134,7 @@ private struct SlideList: View {
                 title: "Know what you're really paying for.",
                 message: "Every subscription in one place, with the next renewal always in sight."
             )
-            Spacer(minLength: 0)
         }
-        .padding(.top, 24)
     }
 
     private func mockRow(_ name: String, _ sub: String, _ amount: String, faded: Bool) -> some View {
@@ -133,7 +147,7 @@ private struct SlideList: View {
             Spacer()
             Text(amount).font(.signuRowTitle).foregroundStyle(SignuColor.textPrimary)
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
+        .padding(.horizontal, 16).padding(.vertical, 10)
         .background(SignuColor.surface, in: RoundedRectangle(cornerRadius: SignuMetric.cardRadius, style: .continuous))
         .opacity(faded ? 0.5 : 1)
     }
@@ -143,7 +157,7 @@ private struct SlideList: View {
 
 private struct SlidePriceHike: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        SlideScaffold {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     ServiceAvatar(name: "Spotify", size: 40)
@@ -165,17 +179,19 @@ private struct SlidePriceHike: View {
                 title: "Catch every price hike.",
                 message: "Signu compares each charge to the last one and flags the quiet increases."
             )
-            Spacer(minLength: 0)
         }
-        .padding(.top, 24)
     }
 }
 
 // MARK: - Slide 3: found-from-bank (teaches the tilde)
 
 private struct SlideFound: View {
+    // Descriptor is one non-breaking unit — it wraps whole (or drops to a new
+    // line) at the "·", never mid-phrase.
+    private let descriptor = "·\u{00A0}spotted\u{00A0}in\u{00A0}your\u{00A0}bank\u{00A0}activity"
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        SlideScaffold {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     ServiceAvatar(name: "Globoplay", size: 40)
@@ -183,12 +199,10 @@ private struct SlideFound: View {
                     Spacer()
                     StatusChip(text: "FOUND", tone: .positive)
                 }
-                // "~R$ 24,90 /mo" glued with non-breaking spaces so it stays
-                // intact; the description flows after and wraps cleanly.
                 (
                     Text("~R$\u{00A0}24,90").font(.signuHeadline).foregroundStyle(SignuColor.textPrimary)
-                    + Text("\u{00A0}/mo").font(.signuSubtitle).foregroundStyle(SignuColor.textSecondary)
-                    + Text(" · spotted in your bank activity").font(.signuSubtitle).foregroundStyle(SignuColor.textSecondary)
+                    + Text("\u{00A0}/mo ").font(.signuSubtitle).foregroundStyle(SignuColor.textSecondary)
+                    + Text(descriptor).font(.signuSubtitle).foregroundStyle(SignuColor.textSecondary)
                 )
                 .fixedSize(horizontal: false, vertical: true)
             }
@@ -199,9 +213,7 @@ private struct SlideFound: View {
                 title: "Found straight from your bank.",
                 message: "Connect your bank and subscriptions show up on their own — even the ones you forgot."
             )
-            Spacer(minLength: 0)
         }
-        .padding(.top, 24)
     }
 }
 
@@ -210,7 +222,7 @@ private struct SlideCopy: View {
     let message: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(SignuFont.font(34, .bold))
                 .foregroundStyle(SignuColor.textPrimary)
