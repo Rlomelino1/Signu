@@ -17,6 +17,8 @@ protocol SignuDataProviding {
     func subsPayload() async throws -> SubsPayload
     /// Screen payload for the Review screen (9a) — possible runs to decide on.
     func reviewPayload() async throws -> ReviewPayload
+    /// Screen payload for the subscription detail screen. nil if not found.
+    func detailPayload(subscriptionId: UUID) async throws -> DetailPayload?
     func connections() async throws -> [Connection]
     func bankAccounts() async throws -> [BankAccount]
     func subscriptions() async throws -> [Subscription]

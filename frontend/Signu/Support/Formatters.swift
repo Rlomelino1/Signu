@@ -43,8 +43,9 @@ enum SignuFormat {
     private static let monthAbbrevFormatter = formatter("MMM")
     private static let dayFormatter = formatter("d")
     private static let monthDayFormatter = formatter("MMM dd")
+    private static let monthDayShortFormatter = formatter("MMM d")
     private static let weekdayMonthDayFormatter = formatter("EEE, MMM dd")
-    private static let weekdayMonthDayYearFormatter = formatter("EEE, MMM d, yyyy")
+    private static let weekdayMonthDayYearFormatter = formatter("EEE, MMM dd, yyyy")
     private static let monthYearShortFormatter = formatter("MMM yy")
     private static let weekdayFullFormatter = formatter("EEEE, MMM d")
 
@@ -54,6 +55,8 @@ enum SignuFormat {
     static func dayNumber(_ date: Date) -> String { dayFormatter.string(from: date) }
     /// "Jul 18"
     static func monthDay(_ date: Date) -> String { monthDayFormatter.string(from: date) }
+    /// "Jul 2" — no leading zero, for footer prose (21o/21p).
+    static func monthDayShort(_ date: Date) -> String { monthDayShortFormatter.string(from: date) }
     /// "Tue, Apr 15" — timeline rows within the current year.
     static func weekdayMonthDay(_ date: Date) -> String { weekdayMonthDayFormatter.string(from: date) }
     /// "Sat, Nov 18, 2023" — timeline rows in earlier years.
@@ -62,6 +65,24 @@ enum SignuFormat {
     static func monthYearShort(_ date: Date) -> String { monthYearShortFormatter.string(from: date) }
     /// "Sunday, Jul 13" — the home header overline (rendered uppercase).
     static func weekdayFull(_ date: Date) -> String { weekdayFullFormatter.string(from: date) }
+
+    /// Timeline row date: "Wed, Jun 18" in the current year, "Sat, Nov 18,
+    /// 2023" in earlier years (21k vs 21l).
+    static func timelineDate(_ date: Date, referenceYear: Int) -> String {
+        let year = MockDataProvider.calendar.component(.year, from: date)
+        return year == referenceYear ? weekdayMonthDay(date) : weekdayMonthDayYear(date)
+    }
+
+    /// Relative renewal copy: "today" / "tomorrow" / "in 5 days" / "in 3w".
+    static func relativeShort(days: Int) -> String {
+        switch days {
+        case ..<0: "overdue"
+        case 0: "today"
+        case 1: "tomorrow"
+        case 2...14: "in \(days) days"
+        default: "in \(Int((Double(days) / 7).rounded()))w"
+        }
+    }
 
     /// "just now" / "25m ago" / "2h ago" / "3d ago" — sync-status copy.
     static func ago(_ date: Date, now: Date) -> String {
