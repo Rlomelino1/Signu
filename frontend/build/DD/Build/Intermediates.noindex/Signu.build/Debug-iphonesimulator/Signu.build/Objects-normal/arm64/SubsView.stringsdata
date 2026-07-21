@@ -1,0 +1,56 @@
+{
+  "source": "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/Signu/Features/Subs/SubsView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Subscriptions",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 89
+        }
+      },
+      {
+        "comment": "",
+        "key": "/yr",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 107
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ /mo",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 112
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%% of total",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 236
+        }
+      },
+      {
+        "comment": "",
+        "key": "Overdue · %lld days",
+        "location": {
+          "startingColumn": 58,
+          "startingLine": 232
+        }
+      },
+      {
+        "comment": "",
+        "key": "If charges come back, two in a row start a new run.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 276
+        }
+      }
+    ]
+  },
+  "version": 1
+}

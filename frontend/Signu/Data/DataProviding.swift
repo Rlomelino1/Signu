@@ -15,6 +15,8 @@ protocol SignuDataProviding {
     func homePayload() async throws -> HomePayload
     /// Screen payload for the Subscriptions tab — per the subs tab contract.
     func subsPayload() async throws -> SubsPayload
+    /// Screen payload for the Review screen (9a) — possible runs to decide on.
+    func reviewPayload() async throws -> ReviewPayload
     func connections() async throws -> [Connection]
     func bankAccounts() async throws -> [BankAccount]
     func subscriptions() async throws -> [Subscription]

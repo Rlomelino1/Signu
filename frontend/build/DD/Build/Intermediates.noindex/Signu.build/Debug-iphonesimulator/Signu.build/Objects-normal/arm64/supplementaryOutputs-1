@@ -1,0 +1,23 @@
+{
+  "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/Signu/Data/DataProviding.swift" : {
+    "const-values" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/DataProviding.swiftconstvalues",
+    "dependencies" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/DataProviding.d",
+    "diagnostics" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/DataProviding.dia",
+    "object" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/DataProviding.o",
+    "swift-dependencies" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/DataProviding.swiftdeps"
+  },
+  "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/Signu/Data/MockDataProvider.swift" : {
+    "const-values" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/MockDataProvider.swiftconstvalues",
+    "dependencies" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/MockDataProvider.d",
+    "diagnostics" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/MockDataProvider.dia",
+    "object" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/MockDataProvider.o",
+    "swift-dependencies" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/MockDataProvider.swiftdeps"
+  },
+  "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/Signu/DesignSystem/Components/InkHeroCard.swift" : {
+    "const-values" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/InkHeroCard.swiftconstvalues",
+    "dependencies" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/InkHeroCard.d",
+    "diagnostics" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/InkHeroCard.dia",
+    "object" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/InkHeroCard.o",
+    "swift-dependencies" : "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/build/DD/Build/Intermediates.noindex/Signu.build/Debug-iphonesimulator/Signu.build/Objects-normal/arm64/InkHeroCard.swiftdeps"
+  }
+}

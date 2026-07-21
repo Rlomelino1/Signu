@@ -13,13 +13,16 @@ struct StatusChip: View {
     let text: String
     var tone: Tone
     var onInk = false
+    /// Tighter vertical padding so the chip fits a list row's height without
+    /// growing it past the 44pt avatar (inactive subs rows, 21s/21t).
+    var compact = false
 
     var body: some View {
         Text(text)
             .font(.signuChip)
             .foregroundStyle(foreground)
             .padding(.horizontal, 11)
-            .padding(.vertical, 6)
+            .padding(.vertical, compact ? 3 : 6)
             .background(background, in: Capsule())
     }
 

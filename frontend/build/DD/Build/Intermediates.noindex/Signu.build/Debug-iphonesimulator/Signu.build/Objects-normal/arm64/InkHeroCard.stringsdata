@@ -1,0 +1,16 @@
+{
+  "source": "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/Signu/DesignSystem/Components/InkHeroCard.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Itaú",
+        "location": {
+          "startingColumn": 1,
+          "startingLine": 39
+        }
+      }
+    ]
+  },
+  "version": 1
+}

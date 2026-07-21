@@ -5,9 +5,15 @@ import SwiftUI
 struct RootView: View {
     /// Lets previews/screenshots open Home pre-scrolled (bottom-inset review).
     var homeScrollAnchor: UnitPoint = .top
+    /// Same, for the Subs tab — previews render tab screens inside the shell
+    /// (tab bar overlaid) so hide/show behavior and bottom clearance are
+    /// reviewable (tab bar contract v13).
+    var subsScrollAnchor: UnitPoint = .top
+    var initialSubsFilter: SubsFilter = .all
 
     @State private var selectedTab = SignuTab.home
     @State private var tabBarState = TabBarState()
+    @State private var showReview = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let provider: SignuDataProviding = {
@@ -29,8 +35,11 @@ struct RootView: View {
         return homeScrollAnchor
     }
 
-    init(homeScrollAnchor: UnitPoint = .top, initialTab: SignuTab = .home) {
+    init(homeScrollAnchor: UnitPoint = .top, initialTab: SignuTab = .home,
+         initialSubsFilter: SubsFilter = .all, subsScrollAnchor: UnitPoint = .top) {
         self.homeScrollAnchor = homeScrollAnchor
+        self.initialSubsFilter = initialSubsFilter
+        self.subsScrollAnchor = subsScrollAnchor
         var tab = initialTab
         #if DEBUG
         if CommandLine.arguments.contains("--shell-subs") { tab = .subs }
@@ -75,18 +84,24 @@ struct RootView: View {
             switch selectedTab {
             case .home:
                 HomeScreen(provider: provider, actions: HomeActions(
+                    onReview: { showReview = true },
                     onSeeAll: { selectedTab = .subs }
                 ), scrollAnchor: effectiveHomeAnchor)
             case .subs:
                 #if DEBUG
                 SubsScreen(
                     provider: provider,
-                    initialFilter: CommandLine.arguments.contains("--subs-inactive") ? .inactive : .all,
+                    actions: SubsActions(onReviewSuggestion: { _ in showReview = true }),
+                    initialFilter: CommandLine.arguments.contains("--subs-inactive") ? .inactive : initialSubsFilter,
                     initialSortByCost: CommandLine.arguments.contains("--subs-cost"),
-                    scrollAnchor: CommandLine.arguments.contains("--subs-bottom") ? .bottom : .top
+                    scrollAnchor: CommandLine.arguments.contains("--subs-bottom") ? .bottom : subsScrollAnchor
                 )
                 #else
-                SubsScreen(provider: provider)
+                SubsScreen(
+                    provider: provider,
+                    actions: SubsActions(onReviewSuggestion: { _ in showReview = true }),
+                    initialFilter: initialSubsFilter
+                )
                 #endif
             case .settings:
                 PlaceholderScreen(title: "Settings", note: "Coming in step 6")
@@ -105,8 +120,29 @@ struct RootView: View {
         .onChange(of: selectedTab) {
             tabBarState.reset()
         }
+        // Review (9a) covers the tab bar — reached from Home's Review pill
+        // and Subs' SUGGESTED rows.
+        .fullScreenCover(isPresented: $showReview) {
+            ReviewScreen(
+                provider: provider,
+                actions: ReviewActions(onBack: { showReview = false }),
+                autoPresentIntervalForR4: reviewAutoR4
+            )
+        }
         #if DEBUG
-        .onAppear(perform: runAutoHideDemoIfRequested)
+        .onAppear {
+            runAutoHideDemoIfRequested()
+            if CommandLine.arguments.contains("--shell-review")
+                || CommandLine.arguments.contains("--review-r4-sheet") { showReview = true }
+        }
+        #endif
+    }
+
+    private var reviewAutoR4: Bool {
+        #if DEBUG
+        return CommandLine.arguments.contains("--review-r4-sheet")
+        #else
+        return false
         #endif
     }
 

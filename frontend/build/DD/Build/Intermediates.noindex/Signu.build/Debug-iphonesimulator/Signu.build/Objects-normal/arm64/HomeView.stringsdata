@@ -1,0 +1,184 @@
+{
+  "source": "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/Signu/Features/Home/HomeView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "%@, %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 80
+        }
+      },
+      {
+        "comment": "",
+        "key": "Connect a bank to start tracking",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 114
+        }
+      },
+      {
+        "comment": "",
+        "key": "Connect your first bank",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 129
+        }
+      },
+      {
+        "comment": "",
+        "key": "We read your card transactions and find the recurring charges. Read-only, via Open Finance — we can never move money.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 132
+        }
+      },
+      {
+        "comment": "",
+        "key": "Connect a bank",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 135
+        }
+      },
+      {
+        "comment": "",
+        "key": "No subscriptions detected yet",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 156
+        }
+      },
+      {
+        "comment": "",
+        "key": "We're watching for patterns",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 173
+        }
+      },
+      {
+        "comment": "",
+        "key": "Most subscriptions confirm after their second charge — usually within a month. Known services like Netflix can appear sooner.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 176
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld active",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 245
+        }
+      },
+      {
+        "comment": "",
+        "key": " · ",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 248
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld overdue",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 249
+        }
+      },
+      {
+        "comment": "",
+        "key": " · ",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 255
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@%@ vs %@",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 256
+        }
+      },
+      {
+        "comment": "",
+        "key": "Your subscriptions",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 227
+        }
+      },
+      {
+        "comment": "",
+        "key": "See all",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 231
+        }
+      },
+      {
+        "comment": "",
+        "key": "Coming up",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 274
+        }
+      },
+      {
+        "comment": "",
+        "key": "Calendar",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 279
+        }
+      },
+      {
+        "comment": "",
+        "key": "Overdue · %lld days",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 295
+        }
+      },
+      {
+        "comment": "",
+        "key": "Possible subscriptions detected",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 345
+        }
+      },
+      {
+        "comment": "",
+        "key": "Review →",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 351
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 341
+        }
+      },
+      {
+        "comment": "",
+        "key": "Overdue · %lld days",
+        "location": {
+          "startingColumn": 55,
+          "startingLine": 369
+        }
+      }
+    ]
+  },
+  "version": 1
+}
