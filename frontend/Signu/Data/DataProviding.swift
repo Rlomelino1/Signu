@@ -19,6 +19,14 @@ protocol SignuDataProviding {
     func reviewPayload() async throws -> ReviewPayload
     /// Screen payload for the subscription detail screen. nil if not found.
     func detailPayload(subscriptionId: UUID) async throws -> DetailPayload?
+    /// Settings screen (12a/12d).
+    func settingsPayload() async throws -> SettingsPayload
+    /// Connection detail (12b). nil if not found.
+    func connectionDetailPayload(connectionId: UUID) async throws -> ConnectionDetailPayload?
+    /// Attributed-subscriptions list (13a). nil if not found.
+    func attributedSubsPayload(connectionId: UUID) async throws -> AttributedSubsPayload?
+    /// Delete-account scope counts (14a).
+    func deleteAccountScope() async throws -> DeleteAccountScope
     func connections() async throws -> [Connection]
     func bankAccounts() async throws -> [BankAccount]
     func subscriptions() async throws -> [Subscription]
