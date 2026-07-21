@@ -132,7 +132,10 @@ struct SettingsView: View {
     }
 
     private func bankRow(_ bank: SettingsPayload.BankRow) -> some View {
-        HStack(spacing: 12) {
+        // Flexible: text column takes remaining width, chip hugs content,
+        // avatar fixed — so short subtitles ("Synced 2h ago · 2 cards") stay
+        // one line at any width, long ones wrap to two.
+        HStack(spacing: 10) {
             ServiceAvatar(name: bank.name)
             VStack(alignment: .leading, spacing: 1) {
                 Text(bank.name)
@@ -143,9 +146,7 @@ struct SettingsView: View {
                     .foregroundStyle(subtitleColor(bank.chipTone))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .layoutPriority(1)
-            Spacer(minLength: 6)
-            // Chip sizes to its content on one line ("Needs action").
+            .frame(maxWidth: .infinity, alignment: .leading)
             StatusChip(text: bank.chipText, tone: bank.chipTone, compact: true).fixedSize()
             chevron
         }
@@ -287,3 +288,5 @@ struct SettingsView: View {
 
 #Preview("Settings (12a)") { SettingsScreen(provider: MockDataProvider()) }
 #Preview("Settings · no banks (12d)") { SettingsScreen(provider: MockDataProvider(scenario: .noBank)) }
+// In-shell: tab bar overlaid (short content keeps it visible, v13).
+#Preview("Settings · in shell") { RootView(initialTab: .settings) }
