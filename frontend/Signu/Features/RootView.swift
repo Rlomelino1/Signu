@@ -14,6 +14,8 @@ struct RootView: View {
     @State private var selectedTab = SignuTab.home
     @State private var tabBarState = TabBarState()
     @State private var showReview = false
+    @State private var detailSubscriptionId: UUID?
+    @State private var detailFixture: DetailPayload?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let provider: SignuDataProviding = {
@@ -69,6 +71,11 @@ struct RootView: View {
             HomeScreen(provider: MockDataProvider(scenario: .freshConnection))
         } else if CommandLine.arguments.contains("--home-nobank") {
             HomeScreen(provider: MockDataProvider(scenario: .noBank))
+        } else if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--detail=") }) {
+            DetailDebugView(
+                name: String(arg.dropFirst("--detail=".count)),
+                bottom: CommandLine.arguments.contains("--detail-bottom")
+            )
         } else {
             shell
         }
@@ -85,13 +92,17 @@ struct RootView: View {
             case .home:
                 HomeScreen(provider: provider, actions: HomeActions(
                     onReview: { showReview = true },
-                    onSeeAll: { selectedTab = .subs }
+                    onSeeAll: { selectedTab = .subs },
+                    onSelectSubscription: { detailSubscriptionId = $0 }
                 ), scrollAnchor: effectiveHomeAnchor)
             case .subs:
                 #if DEBUG
                 SubsScreen(
                     provider: provider,
-                    actions: SubsActions(onReviewSuggestion: { _ in showReview = true }),
+                    actions: SubsActions(
+                        onSelectSubscription: { detailSubscriptionId = $0 },
+                        onReviewSuggestion: { _ in showReview = true }
+                    ),
                     initialFilter: CommandLine.arguments.contains("--subs-inactive") ? .inactive : initialSubsFilter,
                     initialSortByCost: CommandLine.arguments.contains("--subs-cost"),
                     scrollAnchor: CommandLine.arguments.contains("--subs-bottom") ? .bottom : subsScrollAnchor
@@ -99,7 +110,10 @@ struct RootView: View {
                 #else
                 SubsScreen(
                     provider: provider,
-                    actions: SubsActions(onReviewSuggestion: { _ in showReview = true }),
+                    actions: SubsActions(
+                        onSelectSubscription: { detailSubscriptionId = $0 },
+                        onReviewSuggestion: { _ in showReview = true }
+                    ),
                     initialFilter: initialSubsFilter
                 )
                 #endif
@@ -128,6 +142,16 @@ struct RootView: View {
                 actions: ReviewActions(onBack: { showReview = false }),
                 autoPresentIntervalForR4: reviewAutoR4
             )
+        }
+        // Subscription detail — covers the tab bar; from any row tap.
+        .fullScreenCover(item: $detailSubscriptionId) { id in
+            DetailScreen(
+                loader: { try? await provider.detailPayload(subscriptionId: id) },
+                actions: DetailActions(onBack: { detailSubscriptionId = nil })
+            )
+        }
+        .fullScreenCover(item: $detailFixture) { fixture in
+            DetailScreen(payload: fixture, actions: DetailActions(onBack: { detailFixture = nil }))
         }
         #if DEBUG
         .onAppear {
@@ -181,6 +205,41 @@ struct RootView: View {
     }
     #endif
 }
+
+#if DEBUG
+/// Screenshot harness for detail variants: `--detail=<name>` where name is
+/// netflix / globoplay / spotify / amazon / cancelled / max, plus optional
+/// `--detail-bottom` to open scrolled to the run start (21l).
+private struct DetailDebugView: View {
+    let name: String
+    let bottom: Bool
+
+    private let provider = MockDataProvider()
+    private let serviceNames = [
+        "netflix": "Netflix", "globoplay": "Globoplay",
+        "spotify": "Spotify", "amazon": "Amazon Prime", "mubi": "MUBI",
+    ]
+
+    var body: some View {
+        let anchor: UnitPoint = bottom ? .bottom : .top
+        switch name {
+        case "cancelled":
+            let (sub, runs, charges) = MockDataProvider.demoCancelledTrailing()
+            DetailScreen(payload: provider.detailPayload(subscription: sub, runs: runs, charges: charges), scrollAnchor: anchor)
+        case "max":
+            let (sub, runs, charges) = MockDataProvider.demoMax()
+            DetailScreen(payload: provider.detailPayload(subscription: sub, runs: runs, charges: charges), scrollAnchor: anchor)
+        default:
+            DetailScreen(loader: {
+                let service = serviceNames[name] ?? "Netflix"
+                guard let sub = (try? await provider.subscriptions())?.first(where: { $0.serviceName == service })
+                else { return nil }
+                return try? await provider.detailPayload(subscriptionId: sub.id)
+            }, scrollAnchor: anchor)
+        }
+    }
+}
+#endif
 
 private struct PlaceholderScreen: View {
     let title: String

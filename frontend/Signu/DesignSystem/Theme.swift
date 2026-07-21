@@ -31,6 +31,9 @@ enum SignuColor {
     static let gold = Color(hex: 0x91702A)
     static let goldTint = Color(hex: 0xECE2C6)
 
+    // Muted blue — card-change timeline events (21n)
+    static let blue = Color(hex: 0x5E7A99)
+
     // Brick red — overdue, cancellation, destructive
     static let red = Color(hex: 0xBE4B37)
     static let redFill = Color(hex: 0xC6553F)
