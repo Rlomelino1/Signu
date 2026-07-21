@@ -1,0 +1,64 @@
+{
+  "source": "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/Signu/DesignSystem/Components/SignuButton.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Create account",
+        "location": {
+          "startingColumn": 1,
+          "startingLine": 75
+        }
+      },
+      {
+        "comment": "",
+        "key": "Continue with Google",
+        "location": {
+          "startingColumn": 1,
+          "startingLine": 75
+        }
+      },
+      {
+        "comment": "",
+        "key": "Mark cancelled",
+        "location": {
+          "startingColumn": 1,
+          "startingLine": 75
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remove link, keep history",
+        "location": {
+          "startingColumn": 1,
+          "startingLine": 75
+        }
+      },
+      {
+        "comment": "",
+        "key": "Reconnect Itaú",
+        "location": {
+          "startingColumn": 1,
+          "startingLine": 75
+        }
+      },
+      {
+        "comment": "",
+        "key": "Track it",
+        "location": {
+          "startingColumn": 1,
+          "startingLine": 75
+        }
+      },
+      {
+        "comment": "",
+        "key": "Not a subscription",
+        "location": {
+          "startingColumn": 1,
+          "startingLine": 75
+        }
+      }
+    ]
+  },
+  "version": 1
+}

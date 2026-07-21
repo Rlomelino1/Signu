@@ -445,14 +445,12 @@ final class MockDataProvider: SignuDataProviding {
                 ))
             case .ended, .cancelled:
                 let unit = run.billingInterval == .monthly ? "/mo" : "/yr"
-                let was = "Was \(SignuFormat.brl(last.amount)) \(unit)"
+                // Context clause dropped: the date lives in the right-rail
+                // "Paid through", the ended/cancelled distinction in the chip.
                 let cancelled = run.status == .cancelled
-                let detail = cancelled
-                    ? "cancelled by you \(SignuFormat.monthDay(run.cancelledDate ?? last.date))"
-                    : "last charge \(SignuFormat.monthDay(last.date))"
                 inactive.append(SubsPayload.InactiveItem(
                     id: sub.id, serviceName: sub.displayName,
-                    statusText: "\(was) · \(detail)",
+                    statusText: "Was \(SignuFormat.brl(last.amount)) \(unit)",
                     paidThroughText: "Paid through \(run.endDate.map(SignuFormat.monthDay) ?? SignuFormat.dash)",
                     cancelled: cancelled
                 ))
@@ -494,6 +492,54 @@ final class MockDataProvider: SignuDataProviding {
             ),
             inactive: inactive
         )
+    }
+
+    // MARK: - Review payload (9a — endpoint stand-in)
+
+    func reviewPayload() async throws -> ReviewPayload {
+        let suggestions = runList
+            .filter { $0.status == .possible }
+            .filter { run in subscription(run.subscriptionId).map { !$0.ignored } ?? false }
+            .compactMap { run -> ReviewPayload.Suggestion? in
+                guard let sub = subscription(run.subscriptionId),
+                      let last = latestCharge(run.id),
+                      let next = run.nextExpectedDate else { return nil }
+                let charges = chargeList
+                    .filter { $0.runId == run.id }
+                    .sorted { $0.date > $1.date }
+                    .map {
+                        ReviewPayload.ChargeLine(
+                            id: $0.id,
+                            dateText: SignuFormat.weekdayMonthDay($0.date),
+                            cardLabel: $0.cardLabel,
+                            amount: $0.amount
+                        )
+                    }
+                return ReviewPayload.Suggestion(
+                    id: run.id, subscriptionId: sub.id, serviceName: sub.displayName,
+                    evidence: reviewEvidence(run),
+                    charges: charges,
+                    renewsDate: next,
+                    renewsAmount: last.amount,
+                    asksIntervalOnTrack: run.detectedBy == .r4
+                )
+            }
+        return ReviewPayload(suggestions: suggestions)
+    }
+
+    /// Full evidence headline (9a). R3 measured cadence + varying amounts;
+    /// R4 is the catalog fast-path off a single charge.
+    private func reviewEvidence(_ run: SubscriptionRun) -> String {
+        let count = chargeList.filter { $0.runId == run.id }.count
+        switch run.detectedBy {
+        case .r3:
+            let cadence = run.billingInterval == .monthly ? "monthly" : "annual"
+            return "\(count) charges, \(cadence) cadence · amounts vary"
+        case .r4:
+            return "Known subscription service · \(count) charge\(count == 1 ? "" : "s")"
+        case .r1:
+            return "\(count) charges"
+        }
     }
 
     /// Compressed evidence (9b): only what the engine measured. R3 states

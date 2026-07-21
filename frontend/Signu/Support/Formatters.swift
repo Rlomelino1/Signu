@@ -43,7 +43,7 @@ enum SignuFormat {
     private static let monthAbbrevFormatter = formatter("MMM")
     private static let dayFormatter = formatter("d")
     private static let monthDayFormatter = formatter("MMM dd")
-    private static let weekdayMonthDayFormatter = formatter("EEE, MMM d")
+    private static let weekdayMonthDayFormatter = formatter("EEE, MMM dd")
     private static let weekdayMonthDayYearFormatter = formatter("EEE, MMM d, yyyy")
     private static let monthYearShortFormatter = formatter("MMM yy")
     private static let weekdayFullFormatter = formatter("EEEE, MMM d")

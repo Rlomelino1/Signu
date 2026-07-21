@@ -138,19 +138,24 @@ struct SubsView: View {
         if !payload.suggested.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader("Suggested · \(payload.suggested.count)", color: SignuColor.green)
-                SignuCard(background: SignuColor.greenTint) {
-                    VStack(spacing: 0) {
-                        ForEach(Array(payload.suggested.enumerated()), id: \.element.id) { index, item in
-                            suggestedRow(item)
-                            if index < payload.suggested.count - 1 {
-                                Rectangle()
-                                    .fill(SignuColor.greenTintStroke.opacity(0.6))
-                                    .frame(height: 1)
-                                    .padding(.leading, SignuMetric.rowPaddingH)
-                            }
+                // Shared tinted-alert-surface rule (tint fill + 1px darker-tint
+                // stroke) — same treatment as Home's banner/overdue/review pill.
+                VStack(spacing: 0) {
+                    ForEach(Array(payload.suggested.enumerated()), id: \.element.id) { index, item in
+                        suggestedRow(item)
+                        if index < payload.suggested.count - 1 {
+                            Rectangle()
+                                .fill(SignuColor.greenTintStroke.opacity(0.6))
+                                .frame(height: 1)
+                                .padding(.leading, SignuMetric.rowPaddingH)
                         }
                     }
                 }
+                .tintedSurface(
+                    fill: SignuColor.greenTint,
+                    stroke: SignuColor.greenTintStroke,
+                    cornerRadius: SignuMetric.cardRadius
+                )
             }
             .padding(.top, 2)
         }
@@ -283,26 +288,42 @@ struct SubsView: View {
         Button {
             actions.onSelectSubscription(item.id)
         } label: {
-            HStack(alignment: .top, spacing: 12) {
+            // Same vertical rhythm as the active rows (SignuRow) — avatar,
+            // leading title/subtitle, trailing two-line rail — so the row
+            // height is driven by the 44pt avatar and stays interchangeable
+            // with the active list rows above it.
+            HStack(spacing: 12) {
                 ServiceAvatar(name: item.serviceName)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.serviceName)
                         .font(.signuRowTitle)
                         .foregroundStyle(SignuColor.textPrimary)
-                    // "Was" framing = historical fact — never a tilde here.
+                        .lineLimit(1)
+                    // One compact line: "Was R$ X /mo". "Was" framing =
+                    // historical fact — never a tilde here. Scale down a hair
+                    // before truncating (guards wider amounts, e.g.
+                    // "Was R$ 199,90 /yr", from clipping).
                     Text(item.statusText)
                         .font(SignuFont.font(14))
                         .foregroundStyle(SignuColor.textSecondary)
-                        .multilineTextAlignment(.leading)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.9)
+                        .truncationMode(.tail)
                 }
+                // Left column takes the slack so the fixed-width right rail
+                // never squeezes the title/subtitle.
                 .frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .trailing, spacing: 6) {
+                // Right rail mirrors the left: chip-over-date opposite
+                // title-over-subtitle. Compact chip keeps the rail ≤ 44pt.
+                VStack(alignment: .trailing, spacing: 3) {
                     StatusChip(
                         text: item.cancelled ? "Cancelled" : "Ended",
-                        tone: item.cancelled ? .danger : .neutral
+                        tone: item.cancelled ? .danger : .neutral,
+                        compact: true
                     )
                     // Billing state, not access state — paid-through carries
-                    // the access story.
+                    // the access story. 14pt (not 15) keeps this longer string
+                    // from widening the rail into the title.
                     Text(item.paidThroughText)
                         .font(SignuFont.font(14))
                         .foregroundStyle(SignuColor.textSecondary)
@@ -316,18 +337,22 @@ struct SubsView: View {
     }
 }
 
+// Tab screens are reviewed inside RootView (tab bar overlaid) so clearance
+// and the Safari-style hide/show behavior are visible (tab bar contract v13).
 #Preview("Subs · All (21t)") {
-    SubsScreen(provider: MockDataProvider())
+    RootView(initialTab: .subs)
 }
 
 #Preview("Subs · Inactive (21s)") {
-    SubsScreen(provider: MockDataProvider(), initialFilter: .inactive)
+    RootView(initialTab: .subs, initialSubsFilter: .inactive)
 }
 
 #Preview("Subs · Active") {
-    SubsScreen(provider: MockDataProvider(), initialFilter: .active)
+    RootView(initialTab: .subs, initialSubsFilter: .active)
 }
 
-#Preview("Subs · in shell") {
-    RootView(initialTab: .subs)
+// Bottom-of-scroll spacing must be reviewed in context: shell + tab bar,
+// pre-scrolled to the very end (mirrors the Home bottom-inset preview).
+#Preview("Subs · in shell, scrolled to bottom") {
+    RootView(initialTab: .subs, subsScrollAnchor: .bottom)
 }

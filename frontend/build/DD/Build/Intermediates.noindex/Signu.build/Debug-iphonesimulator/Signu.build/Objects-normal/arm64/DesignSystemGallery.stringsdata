@@ -1,0 +1,112 @@
+{
+  "source": "/Users/rafaelpastor/Documents/Subscription-tracker-app/frontend/Signu/DesignSystem/DesignSystemGallery.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "R$ 246,40",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 15
+        }
+      },
+      {
+        "comment": "",
+        "key": "Subscriptions",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 16
+        }
+      },
+      {
+        "comment": "",
+        "key": "Good afternoon, Rafa",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 17
+        }
+      },
+      {
+        "comment": "",
+        "key": "Coming up",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 18
+        }
+      },
+      {
+        "comment": "",
+        "key": "Row title / amount",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 19
+        }
+      },
+      {
+        "comment": "",
+        "key": "Body copy for explainer paragraphs.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 20
+        }
+      },
+      {
+        "comment": "",
+        "key": "Row subtitle · Monthly · Visa 4821",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 21
+        }
+      },
+      {
+        "comment": "",
+        "key": "Empty state: %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 32
+        }
+      },
+      {
+        "comment": "",
+        "key": "Create account",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 111
+        }
+      },
+      {
+        "comment": "",
+        "key": "Mark cancelled",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 116
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remove link, keep history",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 117
+        }
+      },
+      {
+        "comment": "",
+        "key": "Track it",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 113
+        }
+      },
+      {
+        "comment": "",
+        "key": "Not a subscription",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 114
+        }
+      }
+    ]
+  },
+  "version": 1
+}
