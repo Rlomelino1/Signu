@@ -22,14 +22,23 @@ struct HeroStatTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            OverlineText(label, color: SignuColor.onInkSecondary)
+            // Own label (not OverlineText): lighter kerning + strong shrink so
+            // long labels like "SINCE SEP 25 · 2 RUNS" stay on one line.
+            Text(label.uppercased())
+                .font(SignuFont.font(12, .semibold, tabular: true))
+                .kerning(0.5)
+                .foregroundStyle(SignuColor.onInkSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Text(value)
                 .font(.signuStatValue)
                 .foregroundStyle(SignuColor.onInk)
                 .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
         .background(SignuColor.inkTile, in: RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous))
     }
 }
