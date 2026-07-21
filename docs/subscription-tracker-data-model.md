@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-07-20** (v13) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-07-20** (v12) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -277,8 +277,9 @@ The user can assert "I cancelled this" from the detail screen.
 ### Inactive view (8a)
 
 - Selecting **Inactive** shows a **flat list** — no MONTHLY/ANNUAL grouping, no sort toggle (neither concept earns its place on dead subs). Hero stays put (invariance rule above).
-- **Row copy encodes the ended/cancelled distinction**: *"Was R$ X /mo · last charge \<date\>"* + **Ended** badge (engine-inferred) vs *"Was R$ X /mo · cancelled by you \<date\>"* + **Cancelled** badge (user-asserted) — the same split as the detail screen's "Charges stopped" / "You cancelled this". "Was" framing = historical fact, so **no tilde ever** on inactive rows.
-- Both rows show **"Paid through \<end_date\>"** — grouping reflects **billing state, not access state**; a cancelled sub with a future paid-through date still lives under Inactive, the paid-through copy carries the access story.
+- **Two-column row (amended v14, 2026-07-21 during 8a implementation)**: left column = service name over a **single-line** subtitle *"Was R$ X /mo"* (no context clause); right rail = status badge (**Ended** engine-inferred / **Cancelled** user-asserted) over *"Paid through \<end_date\>"*, mirroring the left column's title-over-subtitle. Row height matches the active list row exactly (interchangeable). "Was" framing = historical fact, so **no tilde ever** on inactive rows.
+  - **The ended/cancelled distinction now rides entirely on the badge + right-rail date** — the earlier subtitle clauses (*"· last charge \<date\>"* / *"· cancelled by you \<date\>"*) were **cut**: the date duplicated the right-rail "Paid through", the ended/cancelled split was already carried by the badge, and the combined left-subtitle + right-rail dates collided and truncated (MUBI). The detail screen still narrates the full "Charges stopped" / "You cancelled this" distinction; the list row no longer needs to.
+- Both rows show **"Paid through \<end_date\>"** in the right rail — grouping reflects **billing state, not access state**; a cancelled sub with a future paid-through date still lives under Inactive, the paid-through copy carries the access story.
 - **Footer copy**: *"If charges come back, two in a row start a new run."* — true for both statuses (ended: plain R1 restart; cancelled: R5 trailing charge then un-claim + new R1 run) and honest about the one-cycle blind spot. Satisfies the detail contract's footer-honesty rule.
 
 ### Suggested flow (9a/9b)
@@ -290,8 +291,6 @@ The user can assert "I cancelled this" from the detail screen.
 - **Copy honesty rule**: prediction copy states only what the engine measured. *"(foreign price, converted)" was cut* — the engine knows *amounts vary*, not *why*; the FX explanation would require a merchant-catalog flag that doesn't exist yet. Use "amount varies month to month"-class copy.
 
 ---
-
-## Subscription detail contract
 
 *Locked 2026-07-14 — design 4b: ink hero card + self-narrating timeline; UI reads state, never guesses.*
 
@@ -510,11 +509,32 @@ The user can assert "I cancelled this" from the detail screen.
 
 ---
 
-## User deletion tiers
 
 - **(a) Delete account** = `auth.users` cascade wipes everything.
 - **(b) Delete a bank link** = connection → bank_accounts → transactions removed; the user chooses whether associated subscription history (charges/runs/subs) survives or goes with it. `card_label` + duplicated date/amount/currency keep surviving history self-sufficient.
   - **"Associated" is now defined** — see the [remove-bank-link flow](#remove-bank-link-flow-12c--deletion-tier-b-made-concrete): latest charge of the latest run resolves to this connection; count includes `ignored = true` subscriptions.
+
+---
+
+## Tab bar & navigation contract
+
+*Locked 2026-07-20, during Home screen implementation review. Deliberate deviation from the mockups, which show the floating capsule bar always present — do not "fix" implementations back to the static mockup rendering.*
+
+- **Safari-style auto-hiding tab bar**: visible by default; scrolling down slides it out of view (ease-out, ~250ms); **any upward scroll immediately brings it back**. Reaching the very bottom of the content also reveals it — without this, a user parked at the end of a list would have no scroll-down gesture left and no bar.
+  - Chosen over reveal-only-at-bottom (Rafael's first instinct, superseded same discussion): bottom-reveal makes tab switching require scrolling to the end of every screen — real friction on long lists like the Subscriptions tab. Safari-style keeps navigation one gesture away while still clearing the last rows.
+- **Short-content rule**: if a screen's content doesn't scroll (empty states, short screens), the bar is **always visible** — it must never be unreachable.
+- **Reduce Motion**: crossfade instead of slide.
+- **Bottom content inset**: scroll content clears the bar when visible — exactly bar height + small margin + safe area, nothing more.
+- **Applies uniformly to all three tab screens** (Home / Subs / Settings); previews must render tab screens inside RootView with the bar overlaid.
+
+## Platform scope & preview convention
+
+*Locked 2026-07-21, at completion of the SwiftUI phone build.*
+
+- **v1 is iPhone-only, by deliberate choice — not an oversight.** Every mockup is an iPhone frame; the app has no iPad layouts. Build target is iPhone so iPad runs in iPhone-compatibility mode (centered phone frame) rather than a stretched full-bleed layout.
+  - **iPad is deferred to a dedicated design pass**, not abandoned. When iPad screens are designed, the target flips back and real layouts are added. Nothing is stubbed or deleted for iPad meanwhile — the holding state is fully reversible.
+  - Rejected for v1: capping content to a centered phone-width column on iPad (deferred rather than shipped as a stopgap), and full iPad design now (no mockups, unjustified pre-need).
+- **Every screen carries both iPhone 17 Pro and 17 Pro Max previews.** Prompted by a width regression: the Settings bank-row subtitle wrapped on the narrower Pro but not Pro Max (fixed widths instead of a flexible text column). Convention: text columns take remaining width (`maxWidth: .infinity`), chips/badges `fixedSize`; both device widths reviewable in the canvas.
 
 ---
 
@@ -540,6 +560,14 @@ The user can assert "I cancelled this" from the detail screen.
 ---
 
 ## Changelog
+
+- **v15** — PLATFORM SCOPE & PREVIEW CONVENTION locked (2026-07-21, at completion of the SwiftUI phone build — all 7 steps done: design system, Home, Subscriptions, Review 9a, Detail all-variants incl. run segmentation, Settings, Welcome+Auth). v1 is iPhone-only by deliberate choice; iPad deferred to a dedicated design pass (reversible, nothing stubbed). Every screen carries 17 Pro + 17 Pro Max previews after a width regression (Settings bank-row subtitle wrapped on Pro only). Two detail conflicts resolved in step 5: marker fill = happened (filled = landed, open ring = not-yet-happened; orthogonal to color = event type; older 4b/5a–5d open-ring-on-Charged mockups were stale, 21m/21q correct), and Renews tilde = detected_by-only (no tilde on R1; 21k's tilde was the error). Committed on feature/scaffold-design-system (PR #1).
+
+- **v14** — INACTIVE ROW COPY simplified (2026-07-21, Subscriptions tab approved). Inactive subtitle reduced from "Was R$ X /mo · [last charge/cancelled by you <date>]" to just "Was R$ X /mo". Two-column layout: name-over-subtitle left, badge-over-"Paid through <date>" right rail; ended/cancelled distinction now on badge + right-rail date alone. Cut clause duplicated the right-rail date and truncated (MUBI). Inactive row height matched to active row. Subs tab confirmed inside the v13 auto-hiding shell.
+
+- **v13** — TAB BAR & NAVIGATION CONTRACT locked (2026-07-20, from Home review; deliberate mockup deviation). Safari-style auto-hiding capsule: hides on scroll-down, returns on any scroll-up, revealed at content bottom; always visible when content too short (never unreachable); Reduce Motion ⇒ crossfade; bottom inset = bar + margin + safe area. Reveal-only-at-bottom superseded (would gate tab switching behind scrolling to list end). Previews render inside RootView.
+
+- **v14** — INACTIVE ROW COPY simplified (2026-07-21, during 8a implementation review; Subscriptions tab approved). Inactive-row subtitle reduced from *"Was R$ X /mo · [last charge/cancelled by you \<date\>]"* to just *"Was R$ X /mo"*. Two-column layout confirmed: name-over-subtitle on the left, badge-over-"Paid through \<date\>" on the right rail; the ended/cancelled distinction now rides on the badge + right-rail date alone. Rationale: the cut clause duplicated the right-rail date and collided/truncated when both dates rendered (MUBI); the badge already carries the ended-vs-cancelled split. Inactive row height matched to the active list row (was taller — separate component drift). Also confirmed: Subs tab scrolls inside the same auto-hiding shell as Home (v13), verified in Simulator.
 
 - **v13** — TAB BAR & NAVIGATION CONTRACT locked (2026-07-20, from Home implementation review; deliberate mockup deviation — mockups show the bar static). Safari-style auto-hiding floating capsule: hides on scroll-down, returns on any scroll-up, also revealed at content bottom; always visible when content is too short to scroll (never unreachable); Reduce Motion ⇒ crossfade; bottom inset = bar + margin + safe area exactly. Reveal-only-at-bottom considered and superseded same discussion (would gate tab switching behind scrolling to the end of long lists). Previews must render tab screens inside RootView.
 
