@@ -41,14 +41,16 @@ struct DetailView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 16) {
                     topChrome
                     hero
-                    Text("History")
-                        .font(.signuSection)
-                        .foregroundStyle(SignuColor.textPrimary)
-                        .padding(.top, 2)
-                    timeline
+                    // History sits tight under the hero (21q).
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("History")
+                            .font(.signuSection)
+                            .foregroundStyle(SignuColor.textPrimary)
+                        timeline
+                    }
                 }
                 .padding(.horizontal, SignuMetric.screenPadding)
                 .padding(.bottom, 150)

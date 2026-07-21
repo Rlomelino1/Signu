@@ -75,5 +75,7 @@ struct OverlineText: View {
             .font(SignuFont.font(13, .semibold, tabular: true))
             .kerning(1.1)
             .foregroundStyle(color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)   // keep long labels (e.g. "SINCE SEP 25 · 2 RUNS") one line
     }
 }
