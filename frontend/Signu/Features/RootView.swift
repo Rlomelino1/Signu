@@ -82,6 +82,10 @@ struct RootView: View {
             )
         } else if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--settings=") }) {
             SettingsDebugView(name: String(arg.dropFirst("--settings=".count)))
+        } else if CommandLine.arguments.contains("--welcome") {
+            WelcomeDemo()
+        } else if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--auth=") }) {
+            AuthDebugView(name: String(arg.dropFirst("--auth=".count)))
         } else {
             shell
         }
@@ -310,6 +314,35 @@ private struct SettingsDebugView: View {
     private func connId(_ key: String) -> UUID {
         let map = ["itau": "Itaú", "nubank": "Nubank", "bradesco": "Bradesco"]
         return provider.connectionList.first { $0.institutionName == (map[key] ?? "Itaú") }?.id ?? UUID()
+    }
+}
+#endif
+
+#if DEBUG
+/// Interactive welcome-flow demo: on finish, enters the app shell.
+private struct WelcomeDemo: View {
+    @State private var entered = false
+    var body: some View {
+        if entered {
+            RootView()
+        } else {
+            WelcomeFlow(onFinish: { entered = true })
+        }
+    }
+}
+
+/// Screenshot harness for individual auth screens: `--auth=<name>` where
+/// name is signin / create / confirm / forgot / newpassword.
+private struct AuthDebugView: View {
+    let name: String
+    var body: some View {
+        switch name {
+        case "create": CreateAccountView()
+        case "confirm": ConfirmEmailView(email: "marina.duarte@gmail.com")
+        case "forgot": ForgotPasswordView()
+        case "newpassword": NewPasswordView(email: "marina.duarte@gmail.com")
+        default: SignInView()
+        }
     }
 }
 #endif
