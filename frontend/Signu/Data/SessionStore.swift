@@ -7,6 +7,8 @@ import Foundation
 @MainActor
 @Observable
 final class SessionStore {
+    /// Sole writer: `apply(_:)`. Assigning it anywhere else is the defect —
+    /// see the funnel's comment for why.
     private(set) var gateState: AuthGateState = .restoring
 
     /// Address of the current session. 17e renders it; 17c's resend needs it.
@@ -25,22 +27,149 @@ final class SessionStore {
         self.provider = provider
     }
 
+    // MARK: - Transitions
+
+    /// Everything that can move the gate. Not a mirror of the UI actions:
+    /// several actions (17b's signup, 17d's request, both resends) move the
+    /// gate nowhere, and three different actions raise `.signedIn`.
+    enum GateEvent: Equatable {
+        /// Cold-launch restore resolved.
+        case restored(AuthGateState)
+        /// A session arrived through the UI — 17a, 16a's Google button, or
+        /// 17c's manual check.
+        case signedIn(email: String?)
+        /// Confirmation deep link. The session arriving **is** the signal.
+        case confirmLink
+        /// Recovery deep link: tokens exchanged, session live, password still
+        /// the old one.
+        case recoveryLink(email: String?)
+        /// Recovery deep link that had already expired. "The link failed" is
+        /// not the same fact as "there is no session" — the distinction the
+        /// `.authenticated` and `.recovering` cells below turn on.
+        case expiredRecoveryLink
+        /// 17e's submit succeeded. The only exit from `.recovering`.
+        case passwordUpdated
+        /// 12a's sign-out, 14a's delete.
+        case signedOut
+    }
+
+    /// The one place `gateState` is written.
+    ///
+    /// Every transition is a function of **(current state, event)**, never of
+    /// the event alone. Blind assignment was the same defect twice — a late
+    /// restore overwriting a link's decision, and an expired link ejecting a
+    /// signed-in user — so it is funnelled here rather than patched per site.
+    ///
+    /// Each event lists all four states with no `default`, so the compiler
+    /// forces a decision per cell and a `break` reads as one rather than as an
+    /// omission.
+    private func apply(_ event: GateEvent) {
+        switch event {
+
+        case .restored(let restored):
+            switch gateState {
+            case .restoring:
+                email = provider.currentEmail
+                // A stale link's notice belongs to 17d; if restore found a
+                // session there is no 17d to render it on.
+                if restored == .authenticated { expiredRecoveryLink = false }
+                gateState = restored
+            case .unauthenticated, .recovering, .authenticated:
+                // A deep link can land while restore is still in flight — a
+                // cold launch from an email link is exactly that race. The
+                // link already decided, and it wins: a late restore
+                // overwriting `.recovering` with `.authenticated` drops the
+                // user on Home with their password unchanged, the very bug
+                // `.recovering` exists to prevent.
+                break
+            }
+
+        case .signedIn(let address):
+            switch gateState {
+            case .restoring, .unauthenticated:
+                email = address ?? provider.currentEmail
+                gateState = .authenticated
+            case .recovering:
+                // 17e has no back chevron, so no sign-in screen is reachable
+                // from it — and the session there is already live. Accepting
+                // this would skip the password change.
+                break
+            case .authenticated:
+                break
+            }
+
+        case .confirmLink:
+            switch gateState {
+            case .restoring, .unauthenticated:
+                email = provider.currentEmail ?? email
+                expiredRecoveryLink = false
+                gateState = .authenticated
+            case .recovering:
+                // 17e still owes a password. A confirmation link must not eat
+                // it, for the same reason Home must not.
+                break
+            case .authenticated:
+                break
+            }
+
+        case .recoveryLink(let address):
+            switch gateState {
+            case .restoring, .unauthenticated, .recovering, .authenticated:
+                // The only event all four states agree on. `.authenticated`
+                // included, deliberately: a signed-in user tapping a reset
+                // link must land on 17e, never Home.
+                email = address ?? provider.currentEmail ?? email
+                expiredRecoveryLink = false
+                gateState = .recovering
+            }
+
+        case .expiredRecoveryLink:
+            switch gateState {
+            case .unauthenticated:
+                // 17d, with the notice — never a silent dead end.
+                expiredRecoveryLink = true
+            case .restoring:
+                // Defer: whether a session exists is still unknown. Raise the
+                // notice and let restore resolve the state; `WelcomeFlow`
+                // reads the flag with `initial: true`, so a cold launch from a
+                // stale link still lands on 17d.
+                expiredRecoveryLink = true
+            case .recovering, .authenticated:
+                // A live session the failed link never invalidated. Nothing to
+                // route to, and ejecting them would be a false sign-out.
+                break
+            }
+
+        case .passwordUpdated:
+            switch gateState {
+            case .recovering:
+                email = provider.currentEmail ?? email
+                gateState = .authenticated
+            case .restoring, .unauthenticated, .authenticated:
+                // 17e is only on screen in `.recovering`.
+                break
+            }
+
+        case .signedOut:
+            switch gateState {
+            case .restoring, .unauthenticated, .recovering, .authenticated:
+                // Unconditional, including from `.recovering`: abandoning the
+                // reset flow is a legitimate exit.
+                email = nil
+                lastError = nil
+                expiredRecoveryLink = false
+                gateState = .unauthenticated
+            }
+        }
+    }
+
     // MARK: - Cold launch
 
     /// Resolves `.restoring` into a real state. Runs while `SplashView` is on
     /// screen; the splash is what keeps a signed-in user from seeing 16a flash
     /// past on every launch.
     func restore() async {
-        let restored = await provider.restore()
-        // A deep link can land while restore is still in flight — a cold
-        // launch from an email link is exactly that race. Whatever the link
-        // decided wins: without this guard a late restore overwrites
-        // `.recovering` with `.authenticated` and drops the user on Home with
-        // their password unchanged, which is the very bug `.recovering` exists
-        // to prevent.
-        guard gateState == .restoring else { return }
-        email = provider.currentEmail
-        gateState = restored
+        apply(.restored(await provider.restore()))
     }
 
     // MARK: - Actions
@@ -50,8 +179,7 @@ final class SessionStore {
         lastError = nil
         do {
             try await provider.signIn(email: address, password: password)
-            email = provider.currentEmail ?? address
-            gateState = .authenticated
+            apply(.signedIn(email: provider.currentEmail ?? address))
         } catch {
             lastError = authError(error)
         }
@@ -80,8 +208,7 @@ final class SessionStore {
         lastError = nil
         do {
             try await provider.signInWithGoogle()
-            email = provider.currentEmail
-            gateState = .authenticated
+            apply(.signedIn(email: provider.currentEmail))
         } catch {
             lastError = authError(error)
         }
@@ -104,9 +231,10 @@ final class SessionStore {
         lastError = nil
         do {
             guard try await provider.checkConfirmation() else { return false }
-            email = provider.currentEmail ?? email
-            gateState = .authenticated
-            return true
+            apply(.signedIn(email: provider.currentEmail ?? email))
+            // Reports whether the gate actually moved, not what the provider
+            // said — the funnel is what decides.
+            return gateState == .authenticated
         } catch {
             lastError = authError(error)
             return false
@@ -137,8 +265,7 @@ final class SessionStore {
         lastError = nil
         do {
             try await provider.updatePassword(password)
-            email = provider.currentEmail ?? email
-            gateState = .authenticated
+            apply(.passwordUpdated)
         } catch {
             lastError = authError(error)
         }
@@ -149,10 +276,7 @@ final class SessionStore {
     /// reacts to the state, so neither exit routes anywhere explicitly.
     func signOut() async {
         await provider.signOut()
-        email = nil
-        lastError = nil
-        expiredRecoveryLink = false
-        gateState = .unauthenticated
+        apply(.signedOut)
     }
 
     // MARK: - Deep links
@@ -170,21 +294,15 @@ final class SessionStore {
 
         Task {
             guard let outcome = await provider.handleAuthCallback(url) else { return }
+            // What the link produced; what it *means* for the gate is the
+            // funnel's call, since that depends on where the user already is.
             switch outcome {
             case .authenticated:
-                // 17c's exit: the session arriving IS the signal.
-                email = provider.currentEmail ?? email
-                expiredRecoveryLink = false
-                gateState = .authenticated
+                apply(.confirmLink)
             case .recovering(let address):
-                // Must land on 17e, not Home — see updatePassword() above.
-                email = address ?? provider.currentEmail ?? email
-                expiredRecoveryLink = false
-                gateState = .recovering
+                apply(.recoveryLink(email: address))
             case .expiredRecoveryLink:
-                // Back to 17d with the notice, never a silent dead end.
-                expiredRecoveryLink = true
-                gateState = .unauthenticated
+                apply(.expiredRecoveryLink)
             }
         }
     }
