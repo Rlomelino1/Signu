@@ -337,22 +337,22 @@ struct SubsView: View {
     }
 }
 
-// Tab screens are reviewed inside RootView (tab bar overlaid) so clearance
+// Tab screens are reviewed inside AppShellView (tab bar overlaid) so clearance
 // and the Safari-style hide/show behavior are visible (tab bar contract v13).
 #Preview("Subs · All (21t)") {
-    RootView(initialTab: .subs)
+    AppShellView(provider: MockDataProvider(), initialTab: .subs)
 }
 
 #Preview("Subs · Inactive (21s)") {
-    RootView(initialTab: .subs, initialSubsFilter: .inactive)
+    AppShellView(provider: MockDataProvider(), initialTab: .subs, initialSubsFilter: .inactive)
 }
 
 #Preview("Subs · Active") {
-    RootView(initialTab: .subs, initialSubsFilter: .active)
+    AppShellView(provider: MockDataProvider(), initialTab: .subs, initialSubsFilter: .active)
 }
 
 // Bottom-of-scroll spacing must be reviewed in context: shell + tab bar,
 // pre-scrolled to the very end (mirrors the Home bottom-inset preview).
 #Preview("Subs · in shell, scrolled to bottom") {
-    RootView(initialTab: .subs, subsScrollAnchor: .bottom)
+    AppShellView(provider: MockDataProvider(), initialTab: .subs, subsScrollAnchor: .bottom)
 }

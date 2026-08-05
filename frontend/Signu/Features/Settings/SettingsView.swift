@@ -289,4 +289,4 @@ struct SettingsView: View {
 #Preview("Settings (12a)") { SettingsScreen(provider: MockDataProvider()) }
 #Preview("Settings · no banks (12d)") { SettingsScreen(provider: MockDataProvider(scenario: .noBank)) }
 // In-shell: tab bar overlaid (short content keeps it visible, v13).
-#Preview("Settings · in shell") { RootView(initialTab: .settings) }
+#Preview("Settings · in shell") { AppShellView(provider: MockDataProvider(), initialTab: .settings) }

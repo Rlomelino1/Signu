@@ -17,8 +17,10 @@ struct WelcomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            wordmark
-                .padding(.top, 14)
+            // Shared with SplashView (and mirrored by the launch storyboard)
+            // so restoring → welcome doesn't move the mark.
+            SignuWordmark()
+                .padding(.top, SignuWordmark.topPadding)
 
             TabView(selection: $index) {
                 ForEach(slides.indices, id: \.self) { i in
@@ -37,20 +39,6 @@ struct WelcomeView: View {
             ctaStack.padding(.horizontal, SignuMetric.screenPadding).padding(.bottom, 8)
         }
         .background(SignuColor.paper)
-    }
-
-    private var wordmark: some View {
-        VStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(SignuColor.ink)
-                .frame(width: 64, height: 64)
-                .overlay {
-                    Text("S").font(SignuFont.font(32, .bold)).foregroundStyle(SignuColor.onInk)
-                }
-            Text("Signu")
-                .font(SignuFont.font(32, .bold))
-                .foregroundStyle(SignuColor.textPrimary)
-        }
     }
 
     private var dots: some View {
