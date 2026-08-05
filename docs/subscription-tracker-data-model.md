@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-07-20** (v12) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-05** (v16) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -509,6 +509,22 @@ The user can assert "I cancelled this" from the detail screen.
 
 ---
 
+## Auth gate contract
+
+*Locked 2026-08-05, closing the last unimplemented navigation edge. Structure only — wired against a mock session provider; the Supabase client is a later conformance swap with no navigation rework.*
+
+- **The gate is four states, not two**: `restoring` (cold launch, session rehydration unresolved) → splash; `unauthenticated` → 16a; `recovering` → 17e; `authenticated` → the tab shell. `restoring` exists to prevent the cold-launch flash — a bare `session == nil` check renders 16a for ~200ms to a signed-in user on every launch.
+- **`recovering` is the non-obvious state and the reason this contract exists.** The 17e reset deep link exchanges tokens and yields a **live session before the new password is set**. A gate written as `if session != nil { shell }` swallows 17e: the user taps the email link and lands on Home with the password unchanged. The gate holds `recovering` from the recovery event until `updateUser` succeeds. v11 named 17e a deep-link destination without stating how the gate declines to eat it; this closes that gap.
+- **Session-exists ⇒ email-verified, so the gate has no unverified branch.** With confirmation ON (non-negotiable per v11), `signUp` returns a user and no session. Therefore **17b → 17c is navigation inside the welcome flow, never a gate transition**, and 17c's exit is the confirm link producing a session — the gate flips on its own. "The session arriving **is** the signal" becomes a structural property rather than something coded for.
+- **Both destructive exits are free**: sign-out (12a) and delete-account (14a) kill the session, and the gate returns to 16a with no explicit routing.
+- **Deep-link handling sits above the gate** — attached at the app root, not inside the welcome flow, because links fire in both unauthenticated (confirm, recovery) and authenticated states. One handler, shared by both flows, as v11 requires.
+- **Root swap, not a push**: crossfade between welcome flow and shell, no back gesture out of the shell, Reduce Motion ⇒ no animation (same posture as the v13 tab bar and the 16a carousel).
+- **The gate boundary is the data-provider lifecycle boundary**: `SignuDataProviding` is constructed on entry to `authenticated` and released on exit — not held globally and hidden. The real provider needs a `user_id`, and stale rows must not outlive a sign-out. Free now, retrofit later.
+- **Splash locked (new decision, no prior contract)**: wordmark on the app background, **no spinner** — a spinner on a ~200ms state reads as work, its absence reads as instant. Wordmark treatment and position match 16a's upper zone, so `restoring → unauthenticated` does not move it; the iOS launch screen matches the splash so there is no seam.
+- **Preview convention consequence**: the tab shell is extracted from `RootView` into **`AppShellView`**, which now owns the auto-hiding capsule bar. v13's "previews must render tab screens inside `RootView`" is **amended to name `AppShellView`** — the requirement's intent was always "inside the bar shell," and that is where the bar now lives. `RootView` additionally carries one preview per gate state.
+
+---
+
 
 - **(a) Delete account** = `auth.users` cascade wipes everything.
 - **(b) Delete a bank link** = connection → bank_accounts → transactions removed; the user chooses whether associated subscription history (charges/runs/subs) survives or goes with it. `card_label` + duplicated date/amount/currency keep surviving history self-sufficient.
@@ -560,6 +576,8 @@ The user can assert "I cancelled this" from the detail screen.
 ---
 
 ## Changelog
+
+- **v16** — AUTH GATE CONTRACT locked (2026-08-05, closing the last unimplemented navigation edge). Four states — `restoring` / `unauthenticated` / `recovering` / `authenticated` — wired against a mock `SessionProviding` mirroring the `SignuDataProviding` convention; the Supabase client is a later conformance swap. The load-bearing decision is **`recovering`**: the 17e reset link produces a live session *before* the password is set, so a naive `session != nil` gate swallows 17e and lands the user on Home unchanged — v11 named 17e a deep-link destination without saying how the gate declines it. `restoring` kills the cold-launch flash. Two properties fall out of confirmation-ON rather than being coded for: session-exists ⇒ verified (no unverified branch; **17b → 17c is intra-flow navigation, not a gate transition**), and both destructive exits (12a sign-out, 14a delete) return to 16a for free. Deep-link handler sits above the gate (fires in both signed-out and signed-in states). Root swap = crossfade, no back gesture, Reduce Motion ⇒ none. Gate boundary doubles as the data-provider lifecycle boundary (constructed on entering `authenticated`, released on exit — the real provider needs a `user_id`, stale rows must not outlive sign-out). Splash locked as new ground: 16a-matching wordmark, no spinner, launch screen matched, so `restoring → unauthenticated` moves nothing. **Amends v13**: tab shell extracted from `RootView` into `AppShellView`, and the "previews inside `RootView`" requirement is repointed to `AppShellView` (intent was always "inside the bar shell"); `RootView` gains one preview per gate state.
 
 - **v15** — PLATFORM SCOPE & PREVIEW CONVENTION locked (2026-07-21, at completion of the SwiftUI phone build — all 7 steps done: design system, Home, Subscriptions, Review 9a, Detail all-variants incl. run segmentation, Settings, Welcome+Auth). v1 is iPhone-only by deliberate choice; iPad deferred to a dedicated design pass (reversible, nothing stubbed). Every screen carries 17 Pro + 17 Pro Max previews after a width regression (Settings bank-row subtitle wrapped on Pro only). Two detail conflicts resolved in step 5: marker fill = happened (filled = landed, open ring = not-yet-happened; orthogonal to color = event type; older 4b/5a–5d open-ring-on-Charged mockups were stale, 21m/21q correct), and Renews tilde = detected_by-only (no tilde on R1; 21k's tilde was the error). Committed on feature/scaffold-design-system (PR #1).
 
