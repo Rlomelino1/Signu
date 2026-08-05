@@ -1,57 +1,25 @@
 import SwiftUI
 
-/// App shell: paper background, screen content, floating tab bar.
-/// Screens land per the approval-gated plan; placeholders hold their slots.
+/// The auth gate, and nothing else. Four states, one for each thing the app
+/// can legitimately be showing at launch; the tab shell is one of them, not
+/// the default (see `AppShellView`).
+///
+/// Transitions are **crossfade root swaps**, never pushes — which is what
+/// makes "no back gesture from the shell to WelcomeFlow" structural rather
+/// than something to suppress.
 struct RootView: View {
-    /// Lets previews/screenshots open Home pre-scrolled (bottom-inset review).
-    var homeScrollAnchor: UnitPoint = .top
-    /// Same, for the Subs tab — previews render tab screens inside the shell
-    /// (tab bar overlaid) so hide/show behavior and bottom clearance are
-    /// reviewable (tab bar contract v13).
-    var subsScrollAnchor: UnitPoint = .top
-    var initialSubsFilter: SubsFilter = .all
+    var session: SessionStore
 
-    @State private var selectedTab = SignuTab.home
-    @State private var tabBarState = TabBarState()
-    @State private var showReview = false
-    @State private var detailSubscriptionId: UUID?
-    @State private var detailFixture: DetailPayload?
-    @State private var settingsConnectionId: UUID?
-    @State private var showDelete = false
-    @State private var deleteScope: DeleteAccountScope?
+    /// Built on entry to `.authenticated`, dropped on exit — the gate
+    /// boundary is the provider boundary.
+    @State private var provider: SignuDataProviding?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let provider: SignuDataProviding = {
+    init(session: SessionStore) {
+        self.session = session
         #if DEBUG
-        // Shell with the short empty-state content, for auto-hide review.
-        if CommandLine.arguments.contains("--shell-nobank") {
-            return MockDataProvider(scenario: .noBank)
-        }
-        #endif
-        return MockDataProvider()
-    }()
-
-    // Screenshot runs pass --home-bottom to review the bottom inset in
-    // context (shell + tab bar), pre-scrolled to the end.
-    private var effectiveHomeAnchor: UnitPoint {
-        #if DEBUG
-        if CommandLine.arguments.contains("--home-bottom") { return .bottom }
-        #endif
-        return homeScrollAnchor
-    }
-
-    init(homeScrollAnchor: UnitPoint = .top, initialTab: SignuTab = .home,
-         initialSubsFilter: SubsFilter = .all, subsScrollAnchor: UnitPoint = .top) {
-        self.homeScrollAnchor = homeScrollAnchor
-        self.initialSubsFilter = initialSubsFilter
-        self.subsScrollAnchor = subsScrollAnchor
-        var tab = initialTab
-        #if DEBUG
-        if CommandLine.arguments.contains("--shell-subs") { tab = .subs }
-        if CommandLine.arguments.contains("--shell-settings") { tab = .settings }
         FontDiagnostics.runIfRequested()
         #endif
-        self._selectedTab = State(initialValue: tab)
     }
 
     var body: some View {
@@ -82,157 +50,78 @@ struct RootView: View {
             )
         } else if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--settings=") }) {
             SettingsDebugView(name: String(arg.dropFirst("--settings=".count)))
-        } else if CommandLine.arguments.contains("--welcome") {
-            WelcomeDemo()
         } else if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--auth=") }) {
             AuthDebugView(name: String(arg.dropFirst("--auth=".count)))
         } else {
-            shell
+            // `--gate=…` / `--welcome` / `--link=…` all run through the real
+            // gate rather than a separate demo host.
+            gate
         }
         #else
-        shell
+        gate
         #endif
     }
 
-    private var shell: some View {
-        ZStack(alignment: .bottom) {
+    private var gate: some View {
+        ZStack {
             SignuColor.paper.ignoresSafeArea()
 
-            switch selectedTab {
-            case .home:
-                HomeScreen(provider: provider, actions: HomeActions(
-                    onReview: { showReview = true },
-                    onSeeAll: { selectedTab = .subs },
-                    onSelectSubscription: { detailSubscriptionId = $0 }
-                ), scrollAnchor: effectiveHomeAnchor)
-            case .subs:
-                #if DEBUG
-                SubsScreen(
-                    provider: provider,
-                    actions: SubsActions(
-                        onSelectSubscription: { detailSubscriptionId = $0 },
-                        onReviewSuggestion: { _ in showReview = true }
-                    ),
-                    initialFilter: CommandLine.arguments.contains("--subs-inactive") ? .inactive : initialSubsFilter,
-                    initialSortByCost: CommandLine.arguments.contains("--subs-cost"),
-                    scrollAnchor: CommandLine.arguments.contains("--subs-bottom") ? .bottom : subsScrollAnchor
-                )
-                #else
-                SubsScreen(
-                    provider: provider,
-                    actions: SubsActions(
-                        onSelectSubscription: { detailSubscriptionId = $0 },
-                        onReviewSuggestion: { _ in showReview = true }
-                    ),
-                    initialFilter: initialSubsFilter
-                )
-                #endif
-            case .settings:
-                SettingsScreen(provider: provider, actions: SettingsActions(
-                    onSelectBank: { settingsConnectionId = $0 },
-                    onDeleteAccount: {
-                        Task {
-                            deleteScope = try? await provider.deleteAccountScope()
-                            showDelete = true
-                        }
-                    }
-                ))
-            }
+            switch session.gateState {
+            case .restoring:
+                SplashView()
+                    .transition(.opacity)
 
-            // Safari-style auto-hide (tab bar behavior contract): slides out
-            // on downward scroll, back on any upward scroll or at content
-            // end; crossfades instead when Reduce Motion is on.
-            SignuTabBar(selection: $selectedTab)
-                .padding(.bottom, 8)
-                .offset(y: !reduceMotion && tabBarState.hidden ? 170 : 0)
-                .opacity(reduceMotion && tabBarState.hidden ? 0 : 1)
-                .animation(.easeOut(duration: 0.25), value: tabBarState.hidden)
+            case .unauthenticated:
+                WelcomeFlow(session: session)
+                    .transition(.opacity)
+
+            case .recovering:
+                // 17e, standalone and with no back chevron: the reset link is
+                // not part of a navigation stack, so there is nothing to pop
+                // to. Its submit is the only exit (or an app kill).
+                NewPasswordView(
+                    email: session.email ?? "",
+                    onSubmit: { password in
+                        Task { await session.updatePassword(password) }
+                    }
+                )
+                .transition(.opacity)
+
+            case .authenticated:
+                // nil only for the single frame between the state flip and
+                // the provider being built below — hidden under the crossfade.
+                if let provider {
+                    AppShellView(
+                        provider: provider,
+                        onSignOut: { Task { await session.signOut() } }
+                    )
+                    .transition(.opacity)
+                }
+            }
         }
-        .environment(tabBarState)
-        .onChange(of: selectedTab) {
-            tabBarState.reset()
+        // Crossfade, not a push. Reduce Motion gets no animation at all —
+        // same accessibility posture as the v13 tab bar.
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: session.gateState)
+        .task {
+            await session.restore()
         }
-        // Review (9a) covers the tab bar — reached from Home's Review pill
-        // and Subs' SUGGESTED rows.
-        .fullScreenCover(isPresented: $showReview) {
-            ReviewScreen(
-                provider: provider,
-                actions: ReviewActions(onBack: { showReview = false }),
-                autoPresentIntervalForR4: reviewAutoR4
-            )
-        }
-        // Subscription detail — covers the tab bar; from any row tap.
-        .fullScreenCover(item: $detailSubscriptionId) { id in
-            DetailScreen(
-                loader: { try? await provider.detailPayload(subscriptionId: id) },
-                actions: DetailActions(onBack: { detailSubscriptionId = nil })
-            )
-        }
-        .fullScreenCover(item: $detailFixture) { fixture in
-            DetailScreen(payload: fixture, actions: DetailActions(onBack: { detailFixture = nil }))
-        }
-        // Connection detail (12b) — covers the tab bar; from a Settings bank row.
-        .fullScreenCover(item: $settingsConnectionId) { id in
-            ConnectionDetailScreen(provider: provider, connectionId: id, onBack: { settingsConnectionId = nil })
-        }
-        .sheet(isPresented: $showDelete) {
-            if let deleteScope {
-                DeleteAccountSheet(scope: deleteScope, onDelete: { showDelete = false })
-                    .presentationDetents([.height(560)])
-                    .presentationDragIndicator(.visible)
+        .onChange(of: session.gateState, initial: true) { _, state in
+            // The gate boundary is also the provider boundary: the real
+            // provider will need a user_id, and stale rows must not survive a
+            // sign-out. So it is constructed on entry and released on exit
+            // rather than held globally and merely hidden.
+            if state == .authenticated {
+                if provider == nil { provider = SignuDataProviderFactory.make() }
+            } else {
+                provider = nil
             }
         }
         #if DEBUG
         .onAppear {
-            runAutoHideDemoIfRequested()
-            if CommandLine.arguments.contains("--shell-review")
-                || CommandLine.arguments.contains("--review-r4-sheet") { showReview = true }
+            session.fireLaunchLinkIfRequested()
         }
         #endif
     }
-
-    private var reviewAutoR4: Bool {
-        #if DEBUG
-        return CommandLine.arguments.contains("--review-r4-sheet")
-        #else
-        return false
-        #endif
-    }
-
-    #if DEBUG
-    /// `--autohide-demo`: drives the real UIScrollView so the full
-    /// preference → TabBarState pipeline runs without touch injection.
-    /// Sequence: down (hide) → nudge up (reveal) → bottom (reveal).
-    private func runAutoHideDemoIfRequested() {
-        guard CommandLine.arguments.contains("--autohide-demo") else { return }
-        func scrollTo(_ y: CGFloat) {
-            guard let scroll = Self.firstScrollView() else { return }
-            let maxY = scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom
-            let target = min(max(y, -scroll.adjustedContentInset.top), maxY)
-            scroll.setContentOffset(CGPoint(x: 0, y: target), animated: true)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { scrollTo(500) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { scrollTo(430) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6.5) { scrollTo(.greatestFiniteMagnitude) }
-    }
-
-    private static func firstScrollView() -> UIScrollView? {
-        let windows = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-        func find(in view: UIView) -> UIScrollView? {
-            if let scroll = view as? UIScrollView { return scroll }
-            for subview in view.subviews {
-                if let found = find(in: subview) { return found }
-            }
-            return nil
-        }
-        for window in windows {
-            if let found = find(in: window) { return found }
-        }
-        return nil
-    }
-    #endif
 }
 
 #if DEBUG
@@ -319,20 +208,9 @@ private struct SettingsDebugView: View {
 #endif
 
 #if DEBUG
-/// Interactive welcome-flow demo: on finish, enters the app shell.
-private struct WelcomeDemo: View {
-    @State private var entered = false
-    var body: some View {
-        if entered {
-            RootView()
-        } else {
-            WelcomeFlow(onFinish: { entered = true })
-        }
-    }
-}
-
 /// Screenshot harness for individual auth screens: `--auth=<name>` where
-/// name is signin / create / confirm / forgot / newpassword.
+/// name is signin / create / confirm / forgot / newpassword / expired.
+/// Renders each screen in isolation, outside the gate.
 private struct AuthDebugView: View {
     let name: String
     var body: some View {
@@ -340,6 +218,7 @@ private struct AuthDebugView: View {
         case "create": CreateAccountView()
         case "confirm": ConfirmEmailView(email: "marina.duarte@gmail.com")
         case "forgot": ForgotPasswordView()
+        case "expired": ForgotPasswordView(showExpiredLinkNotice: true)
         case "newpassword": NewPasswordView(email: "marina.duarte@gmail.com")
         default: SignInView()
         }
@@ -347,25 +226,29 @@ private struct AuthDebugView: View {
 }
 #endif
 
-private struct PlaceholderScreen: View {
-    let title: String
-    let note: String
+// MARK: - Gate previews
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.signuScreenTitle)
-                .foregroundStyle(SignuColor.textPrimary)
-            Text(note)
-                .font(.signuBody)
-                .foregroundStyle(SignuColor.textSecondary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(SignuMetric.screenPadding)
-    }
+// One per gate state. Review each on **iPhone 17 Pro and 17 Pro Max** (v15
+// preview convention) using the canvas device picker: `previewDevice` is
+// ignored inside the `#Preview` macro — the compiler says so outright — which
+// is why no preview in this project specifies a device in code.
+
+#Preview("Gate · restoring (splash)") {
+    @Previewable @State var session = SessionStore(provider: MockSessionProvider(scenario: .restoring))
+    RootView(session: session)
 }
 
-#Preview {
-    RootView()
+#Preview("Gate · unauthenticated (16a)") {
+    @Previewable @State var session = SessionStore(provider: MockSessionProvider(scenario: .signedOut))
+    RootView(session: session)
+}
+
+#Preview("Gate · recovering (17e)") {
+    @Previewable @State var session = SessionStore(provider: MockSessionProvider(scenario: .recovery))
+    RootView(session: session)
+}
+
+#Preview("Gate · authenticated (shell)") {
+    @Previewable @State var session = SessionStore(provider: MockSessionProvider(scenario: .signedIn))
+    RootView(session: session)
 }

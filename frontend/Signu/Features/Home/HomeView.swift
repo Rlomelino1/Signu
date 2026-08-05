@@ -410,7 +410,7 @@ struct EmptyDashCard: View {
 // Bottom-of-scroll spacing must always be reviewed in its real context:
 // inside the shell, tab bar overlaid, scrolled to the very end.
 #Preview("Home · in shell, scrolled to bottom") {
-    RootView(homeScrollAnchor: .bottom)
+    AppShellView(provider: MockDataProvider(), homeScrollAnchor: .bottom)
 }
 
 #Preview("Home · watching (21h)") {

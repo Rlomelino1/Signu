@@ -1,13 +1,15 @@
 import SwiftUI
 
-// UI-only auth screens (17a–17e). Actions are stubs; no backend.
+// The auth screens (17a–17e). Layout and copy are locked; the actions are
+// wired to a `SessionStore` by their host (`WelcomeFlow`, or the gate itself
+// for 17e). No screen here touches a session directly.
 
 // MARK: - Sign in (17a)
 
 struct SignInView: View {
     var onBack: () -> Void = {}
     var onForgot: () -> Void = {}
-    var onSubmit: () -> Void = {}
+    var onSubmit: (String, String) -> Void = { _, _ in }   // email, password
 
     @State private var email = ""
     @State private var password = ""
@@ -28,7 +30,8 @@ struct SignInView: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
         } bottom: {
-            Button("Sign in", action: onSubmit).buttonStyle(.signuPrimary)
+            Button("Sign in") { onSubmit(email, password) }
+                .buttonStyle(.signuPrimary)
         }
     }
 }
@@ -37,7 +40,10 @@ struct SignInView: View {
 
 struct CreateAccountView: View {
     var onBack: () -> Void = {}
-    var onSubmit: (String) -> Void = { _ in }   // passes the entered email → 17c
+    /// name, email, password. Signup never yields a session (confirmation is
+    /// ON), so the host always pushes 17c after this — there is no
+    /// "maybe signed in" outcome to handle.
+    var onSubmit: (String, String, String) -> Void = { _, _, _ in }
 
     @State private var name = ""
     @State private var email = ""
@@ -56,7 +62,7 @@ struct CreateAccountView: View {
                 PasswordHint()
             }
         } bottom: {
-            Button("Create account") { onSubmit(email.isEmpty ? "you@email.com" : email) }
+            Button("Create account") { onSubmit(name, email, password) }
                 .buttonStyle(.signuPrimary)
             TermsLine()
         }
@@ -67,7 +73,12 @@ struct CreateAccountView: View {
 
 struct ConfirmEmailView: View {
     let email: String
-    var onConfirmed: () -> Void = {}
+    /// The manual check (`getUser()` behind the store) for the wrong-device
+    /// case — the link was opened on a laptop, so the deep link fired
+    /// elsewhere or nowhere. true means confirmation landed and the gate has
+    /// already swapped the root away from this screen; false renders the
+    /// inline "Not confirmed yet" line below.
+    var onCheck: () async -> Bool = { false }
     var onResend: () -> Void = {}
     var onGoBack: () -> Void = {}
 
@@ -111,8 +122,13 @@ struct ConfirmEmailView: View {
             .frame(maxWidth: .infinity)
 
             VStack(spacing: 14) {
-                Button("I've confirmed my email") { notConfirmed = true }
-                    .buttonStyle(.signuPrimary)
+                Button("I've confirmed my email") {
+                    Task {
+                        let confirmed = await onCheck()
+                        notConfirmed = !confirmed
+                    }
+                }
+                .buttonStyle(.signuPrimary)
                 // Resend shows a 120s countdown once tapped, then reactivates.
                 if cooldown > 0 {
                     Text("Resend available in \(cooldown)s")
@@ -149,7 +165,12 @@ struct ConfirmEmailView: View {
 // MARK: - Forgot / set password (17d)
 
 struct ForgotPasswordView: View {
+    /// Set when an expired/invalid recovery link routed the user here. The
+    /// contract requires the notice ("never a silent dead end"); it renders in
+    /// the same slot as the enumeration-safe sent line below.
+    var showExpiredLinkNotice = false
     var onBack: () -> Void = {}
+    var onSend: (String) -> Void = { _ in }
 
     @State private var email = ""
     @State private var sent = false
@@ -170,6 +191,15 @@ struct ForgotPasswordView: View {
                         .font(.signuSubtitle)
                         .foregroundStyle(SignuColor.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                } else if showExpiredLinkNotice {
+                    // Reset links expire (~1h); the deep-link handler routes
+                    // failures back here. Copy paraphrases the contract's
+                    // prose — no exact string is locked and no mockup shows
+                    // this state (see the PR note).
+                    Text("That link expired — request a new one.")
+                        .font(.signuSubtitle)
+                        .foregroundStyle(SignuColor.gold)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         } bottom: {
@@ -183,6 +213,7 @@ struct ForgotPasswordView: View {
                 Button("Send reset link") {
                     sent = true
                     cooldown = 120
+                    onSend(email)
                 }
                 .buttonStyle(.signuPrimary)
             }
@@ -195,7 +226,9 @@ struct ForgotPasswordView: View {
 
 struct NewPasswordView: View {
     let email: String
-    var onSubmit: () -> Void = {}
+    /// The new password. Success is what ends `.recovering` — until then the
+    /// session is live but the password is still the old one.
+    var onSubmit: (String) -> Void = { _ in }
 
     @State private var password = ""
     @State private var confirm = ""
@@ -212,7 +245,8 @@ struct NewPasswordView: View {
                 AuthField(label: "Confirm new password", placeholder: "Repeat password", text: $confirm, secure: true, submitLabel: .done)
             }
         } bottom: {
-            Button("Set new password", action: onSubmit).buttonStyle(.signuPrimary)
+            Button("Set new password") { onSubmit(password) }
+                .buttonStyle(.signuPrimary)
         }
     }
 }
@@ -221,4 +255,5 @@ struct NewPasswordView: View {
 #Preview("Create account (17b)") { CreateAccountView() }
 #Preview("Confirm email (17c)") { ConfirmEmailView(email: "marina.duarte@gmail.com") }
 #Preview("Forgot password (17d)") { ForgotPasswordView() }
+#Preview("Forgot password · expired link (17d)") { ForgotPasswordView(showExpiredLinkNotice: true) }
 #Preview("New password (17e)") { NewPasswordView(email: "marina.duarte@gmail.com") }
