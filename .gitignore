@@ -9,3 +9,9 @@ backend/supabase/.temp
 
 # macOS
 .DS_Store
+
+# Xcode
+frontend/**/xcuserdata/
+frontend/**/*.xcuserstate
+frontend/DerivedData/
+frontend/build/

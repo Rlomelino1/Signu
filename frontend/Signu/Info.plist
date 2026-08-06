@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Inter-Regular.ttf</string>
+		<string>Inter-Medium.ttf</string>
+		<string>Inter-SemiBold.ttf</string>
+		<string>Inter-Bold.ttf</string>
+	</array>
+	<!-- Static copy of SplashView's wordmark, so launch → splash has no seam.
+	     Replaces the generated blank UILaunchScreen. -->
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<!-- Auth deep links: confirmation and reset emails redirect to
+	     signu://auth-callback (auth flow contract). The same scheme serves both
+	     flows; the Supabase dashboard whitelist is the other half. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>pro.sinatra.signu.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>signu</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
