@@ -1,5 +1,6 @@
 import SwiftUI
 
+#if DEBUG
 /// One-stop preview of the design system — tokens and every reusable
 /// component, on paper. Not part of any navigation flow.
 struct DesignSystemGallery: View {
@@ -160,3 +161,4 @@ struct DesignSystemGallery: View {
 #Preview("Design system") {
     DesignSystemGallery()
 }
+#endif
