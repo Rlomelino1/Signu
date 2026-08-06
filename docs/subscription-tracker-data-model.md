@@ -598,7 +598,7 @@ The user can assert "I cancelled this" from the detail screen.
 
 ## Changelog
 
-- **v17** — CI & BUILD VERIFICATION established (2026-08-06, PR #4). Repo had **no
+- **v18** — CI & BUILD VERIFICATION established (2026-08-06, PR #4). Repo had **no
   CI and no shared Xcode scheme**: `main` did not compile in the Release
   configuration and nothing would have said so. Scheme now shared and committed
   (external tooling can't resolve a scheme living in gitignored `xcuserdata`).
@@ -643,15 +643,27 @@ The user can assert "I cancelled this" from the detail screen.
   guarded against does not apply to a standalone table with no FK pointing at it.
   **Signup metadata key locked**: 17b passes the mandatory Name as `name`, kept
   distinct from Google's `full_name` so the row records its own provenance — a
-  client-side obligation on the real `SessionProvider`. Migration verified by
-  execution, not inspection: applied under `ON_ERROR_STOP` against a stubbed
-  `auth` schema, all three trigger branches exercised, CHECK rejection confirmed.
-  Never applied to the remote (`migration list` showed an empty Remote column),
-  so corrected **in place** rather than via an additive Migration #2 — a pristine
-  initial schema beats a correction pair when there is no data to protect.
-  Also resolves an internal contradiction: the logo-sourcing contract claimed
-  Migration #1 was unwritten while the Migration #1 section said it was
-  implemented.
+  client-side obligation on the real `SessionProvider`.
+
+  **Verified by execution against a real local Supabase stack, not inspection.**
+  `db reset` applied clean on the first attempt. Four assertions, each covering a
+  gap a stubbed `auth` schema cannot reach: (1) `authenticated` holds UPDATE on
+  **exactly seven columns** and **zero table-wide non-SELECT privileges** — the
+  revoke-all-then-regrant sequence holding against Supabase's broader-than-vanilla
+  defaults; (2) the signup trigger fires correctly on the real 35-column
+  `auth.users`, all three fallback branches exercised, including the both-keys-
+  present case where `full_name` correctly wins over `name` — so the three-term
+  precedence is right and `security definer` + `set search_path = ''` behaves;
+  (3) `auth.uid()` resolves with its real signature, all 10 policies live, and
+  isolation genuinely works (own user ⇒ 1 profile visible, stranger ⇒ 0); (4) the
+  `cancelled` status is **enforced, not merely present** — a valid insert succeeds,
+  `status = 'bogus'` raises `subscription_run_status_check`.
+
+  Never applied to the remote (`migration list` showed an empty Remote column), so
+  corrected **in place** rather than via an additive Migration #2 — a pristine
+  initial schema beats a correction pair when there is no data to protect. Also
+  resolves an internal contradiction: the logo-sourcing contract claimed Migration
+  #1 was unwritten while the Migration #1 section said it was implemented.
 
 - **v16** — AUTH GATE CONTRACT locked (2026-08-05, closing the last unimplemented navigation edge). Four states — `restoring` / `unauthenticated` / `recovering` / `authenticated` — wired against a mock `SessionProviding` mirroring the `SignuDataProviding` convention; the Supabase client is a later conformance swap. The load-bearing decision is **`recovering`**: the 17e reset link produces a live session *before* the password is set, so a naive `session != nil` gate swallows 17e and lands the user on Home unchanged — v11 named 17e a deep-link destination without saying how the gate declines it. `restoring` kills the cold-launch flash. Two properties fall out of confirmation-ON rather than being coded for: session-exists ⇒ verified (no unverified branch; **17b → 17c is intra-flow navigation, not a gate transition**), and both destructive exits (12a sign-out, 14a delete) return to 16a for free. Deep-link handler sits above the gate (fires in both signed-out and signed-in states). Root swap = crossfade, no back gesture, Reduce Motion ⇒ none. Gate boundary doubles as the data-provider lifecycle boundary (constructed on entering `authenticated`, released on exit — the real provider needs a `user_id`, stale rows must not outlive sign-out). Splash locked as new ground: 16a-matching wordmark, no spinner, launch screen matched, so `restoring → unauthenticated` moves nothing. **Amends v13**: tab shell extracted from `RootView` into `AppShellView`, and the "previews inside `RootView`" requirement is repointed to `AppShellView` (intent was always "inside the bar shell"); `RootView` gains one preview per gate state. Also locks the **single-funnel rule**: every `gateState` write goes through one `apply(_ event:)` keyed on *(current state, event)*. Manual deep-link testing of the `authenticated → recovering` hop found the second instance of one defect — an expired reset link ejecting a signed-in user, blind assignment applied without regard to current state, the same shape as the restore race — so both collapse into one table instead of two ad-hoc guards. **Amends v11's 17e expired-link branch**: routing to 17d is the sessionless case only; a live session survives a failed link.
 
