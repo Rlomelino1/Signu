@@ -587,6 +587,13 @@ The user can assert "I cancelled this" from the detail screen.
   drift is semantic, the SQL stays valid, and CI goes green against a schema that
   contradicts its own contract. Discovered only by reading the migration against
   the spec line by line.
+  - **One changelog entry per version, longest form wins.** Three drift instances
+    surfaced the same day, all the same class — a hand-maintained source of truth
+    with no check drifting in every direction available to it: spec vs. repo (the
+    `v4` header), spec vs. itself ("Migration #1 unwritten" beside "implemented"
+    in `initial_schema.sql`), and spec vs. itself again (duplicate v13/v14 entries,
+    a long and a short of each; the short ones read as drafts). Trivial as a rule,
+    and it makes a duplicate a visible violation rather than clutter.
 
 ---
 
@@ -601,7 +608,7 @@ The user can assert "I cancelled this" from the detail screen.
 - **v18** — CI & BUILD VERIFICATION established (2026-08-06, PR #4). Repo had **no
   CI and no shared Xcode scheme**: `main` did not compile in the Release
   configuration and nothing would have said so. Scheme now shared and committed
-  (external tooling can't resolve a scheme living in gitignored `xcuserdata`).
+  (external tooling cannot resolve a scheme living in gitignored `xcuserdata`).
   Workflow builds **Debug and Release** for `generic/platform=iOS` with
   `CODE_SIGNING_ALLOWED=NO` (no Developer account) and applies migrations from
   scratch against a real local Supabase stack; public repo, so macOS runner
@@ -612,16 +619,38 @@ The user can assert "I cancelled this" from the detail screen.
   `DesignSystemGallery` wrapped rather than `previewStates` exposed, since all
   external references (`RootView.swift:37/39/41`) already sit inside DEBUG.
   **Verified by execution twice over**: locally on Xcode 26.6 and in CI on 16.4,
-  producing byte-identical diagnostics — same eight errors, same lines and
-  columns — which rules out a toolchain artifact and confirms the defect is
-  preprocessor scoping. That identity is also what makes CI a faithful proxy for
-  the local machine, which is the property branch protection depends on; both
-  checks are now required on `main`. **No test target** (one native target,
-  `<Testables>` empty) — the workflow never calls `xcodebuild test`, and the first
-  thing genuinely worth testing is the detection engine, which is TypeScript on
-  the backend. **Honest limit, stated so it isn't assumed away**: CI catches build
-  breaks only. It cannot catch spec-vs-schema drift — valid SQL applies green
-  against a schema that contradicts its own contract. See v18.
+  producing byte-identical diagnostics — same eight errors, same lines and columns
+  — which rules out a toolchain artifact and confirms the defect is preprocessor
+  scoping. That identity is also what makes CI a faithful proxy for the local
+  machine, which is the property branch protection depends on. **No test target**
+  (one native target, `<Testables>` empty) — the workflow never calls `xcodebuild
+  test`, and the first thing genuinely worth testing is the detection engine,
+  which is TypeScript on the backend.
+
+  Hardening added after a GitHub Actions partial outage made a run undiagnosable:
+  **CLI pinned to 2.109.1** (`latest` means the accepted-service-name list you
+  validated against is not necessarily the one that runs — the same
+  unverified-assumption failure as the `v4` header), corrected `-x` names
+  (`storage-api` → `storage`, `logflare` → `analytics`, both demonstrably working),
+  explicit `concurrency` with `cancel-in-progress`, and `timeout-minutes: 12` so a
+  stalled job **fails with logs** instead of being cancelled without them. A
+  cancelled job retains nothing (`BlobNotFound`), which is what made the first
+  failure unreadable. Operational note: **no CI result produced during a platform
+  outage is trustworthy** — queue delays surface as timeouts that look like real
+  failures. Also silenced a permanently-firing seed WARN via `[db.seed] enabled =
+  false`; removing the block does **not** work, since the CLI falls back to its
+  default `./seed.sql` path — a warning that always fires trains you to ignore
+  warnings, the unread-`v4`-header failure one layer down.
+
+  **Ungated-commit note**: `fde45c5` (the v17 migration) reached `main` without a
+  PR, against the repo's own rule — harmless in practice, since no CI existed to
+  run on it and it was verified by hand more thoroughly than any check would have,
+  but it is the last commit on `main` that no automated gate ever saw. Merging
+  PR #4 runs CI on `main` and retroactively covers it; branch protection then
+  closes the path. **Honest limit, stated so it is not assumed away**: CI catches
+  build breaks only. It cannot catch spec-vs-schema drift — valid SQL applies green
+  against a schema that contradicts its own contract. See v17's schema amendment
+  discipline.
 
 - **v17** — MIGRATION #1 BROUGHT TO SPEC + SCHEMA AMENDMENT DISCIPLINE locked
   (2026-08-06). `initial_schema.sql` was written against **v4** and left
@@ -668,10 +697,6 @@ The user can assert "I cancelled this" from the detail screen.
 - **v16** — AUTH GATE CONTRACT locked (2026-08-05, closing the last unimplemented navigation edge). Four states — `restoring` / `unauthenticated` / `recovering` / `authenticated` — wired against a mock `SessionProviding` mirroring the `SignuDataProviding` convention; the Supabase client is a later conformance swap. The load-bearing decision is **`recovering`**: the 17e reset link produces a live session *before* the password is set, so a naive `session != nil` gate swallows 17e and lands the user on Home unchanged — v11 named 17e a deep-link destination without saying how the gate declines it. `restoring` kills the cold-launch flash. Two properties fall out of confirmation-ON rather than being coded for: session-exists ⇒ verified (no unverified branch; **17b → 17c is intra-flow navigation, not a gate transition**), and both destructive exits (12a sign-out, 14a delete) return to 16a for free. Deep-link handler sits above the gate (fires in both signed-out and signed-in states). Root swap = crossfade, no back gesture, Reduce Motion ⇒ none. Gate boundary doubles as the data-provider lifecycle boundary (constructed on entering `authenticated`, released on exit — the real provider needs a `user_id`, stale rows must not outlive sign-out). Splash locked as new ground: 16a-matching wordmark, no spinner, launch screen matched, so `restoring → unauthenticated` moves nothing. **Amends v13**: tab shell extracted from `RootView` into `AppShellView`, and the "previews inside `RootView`" requirement is repointed to `AppShellView` (intent was always "inside the bar shell"); `RootView` gains one preview per gate state. Also locks the **single-funnel rule**: every `gateState` write goes through one `apply(_ event:)` keyed on *(current state, event)*. Manual deep-link testing of the `authenticated → recovering` hop found the second instance of one defect — an expired reset link ejecting a signed-in user, blind assignment applied without regard to current state, the same shape as the restore race — so both collapse into one table instead of two ad-hoc guards. **Amends v11's 17e expired-link branch**: routing to 17d is the sessionless case only; a live session survives a failed link.
 
 - **v15** — PLATFORM SCOPE & PREVIEW CONVENTION locked (2026-07-21, at completion of the SwiftUI phone build — all 7 steps done: design system, Home, Subscriptions, Review 9a, Detail all-variants incl. run segmentation, Settings, Welcome+Auth). v1 is iPhone-only by deliberate choice; iPad deferred to a dedicated design pass (reversible, nothing stubbed). Every screen carries 17 Pro + 17 Pro Max previews after a width regression (Settings bank-row subtitle wrapped on Pro only). Two detail conflicts resolved in step 5: marker fill = happened (filled = landed, open ring = not-yet-happened; orthogonal to color = event type; older 4b/5a–5d open-ring-on-Charged mockups were stale, 21m/21q correct), and Renews tilde = detected_by-only (no tilde on R1; 21k's tilde was the error). Committed on feature/scaffold-design-system (PR #1).
-
-- **v14** — INACTIVE ROW COPY simplified (2026-07-21, Subscriptions tab approved). Inactive subtitle reduced from "Was R$ X /mo · [last charge/cancelled by you <date>]" to just "Was R$ X /mo". Two-column layout: name-over-subtitle left, badge-over-"Paid through <date>" right rail; ended/cancelled distinction now on badge + right-rail date alone. Cut clause duplicated the right-rail date and truncated (MUBI). Inactive row height matched to active row. Subs tab confirmed inside the v13 auto-hiding shell.
-
-- **v13** — TAB BAR & NAVIGATION CONTRACT locked (2026-07-20, from Home review; deliberate mockup deviation). Safari-style auto-hiding capsule: hides on scroll-down, returns on any scroll-up, revealed at content bottom; always visible when content too short (never unreachable); Reduce Motion ⇒ crossfade; bottom inset = bar + margin + safe area. Reveal-only-at-bottom superseded (would gate tab switching behind scrolling to list end). Previews render inside RootView.
 
 - **v14** — INACTIVE ROW COPY simplified (2026-07-21, during 8a implementation review; Subscriptions tab approved). Inactive-row subtitle reduced from *"Was R$ X /mo · [last charge/cancelled by you \<date\>]"* to just *"Was R$ X /mo"*. Two-column layout confirmed: name-over-subtitle on the left, badge-over-"Paid through \<date\>" on the right rail; the ended/cancelled distinction now rides on the badge + right-rail date alone. Rationale: the cut clause duplicated the right-rail date and collided/truncated when both dates rendered (MUBI); the badge already carries the ended-vs-cancelled split. Inactive row height matched to the active list row (was taller — separate component drift). Also confirmed: Subs tab scrolls inside the same auto-hiding shell as Home (v13), verified in Simulator.
 
