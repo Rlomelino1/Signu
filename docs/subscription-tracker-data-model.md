@@ -553,6 +553,15 @@ The user can assert "I cancelled this" from the detail screen.
   - Rejected for v1: capping content to a centered phone-width column on iPad (deferred rather than shipped as a stopgap), and full iPad design now (no mockups, unjustified pre-need).
 - **Every screen carries both iPhone 17 Pro and 17 Pro Max previews.** Prompted by a width regression: the Settings bank-row subtitle wrapped on the narrower Pro but not Pro Max (fixed widths instead of a flexible text column). Convention: text columns take remaining width (`maxWidth: .infinity`), chips/badges `fixedSize`; both device widths reviewable in the canvas.
 
+- **DEBUG fixture convention (locked v17, 2026-08-06).** `#Preview` bodies are
+  compiled in **every** configuration, not just Debug. So mockup fixture data
+  guarded by `#if DEBUG` must not be referenced from an unguarded preview or an
+  unguarded type — Release fails on missing symbols while Debug passes clean.
+  **Fixtures live in their own file, wrapped entirely in `#if DEBUG`**, not as an
+  extension inside a production component file. Rationale: `previewStates` sat in
+  `SubscriptionHeroCard.swift`, so its guard boundary had to be hand-maintained
+  across three call sites and drifted at two of them.
+
 ---
 
 ## Migration #1 decisions
@@ -588,6 +597,31 @@ The user can assert "I cancelled this" from the detail screen.
 ---
 
 ## Changelog
+
+- **v17** — CI & BUILD VERIFICATION established (2026-08-06, PR #4). Repo had **no
+  CI and no shared Xcode scheme**: `main` did not compile in the Release
+  configuration and nothing would have said so. Scheme now shared and committed
+  (external tooling can't resolve a scheme living in gitignored `xcuserdata`).
+  Workflow builds **Debug and Release** for `generic/platform=iOS` with
+  `CODE_SIGNING_ALLOWED=NO` (no Developer account) and applies migrations from
+  scratch against a real local Supabase stack; public repo, so macOS runner
+  minutes are free. **Release break fixed at two sites** — five `#Preview`s in
+  `SubscriptionHeroCard.swift` sitting past their `#endif`, and
+  `DesignSystemGallery` reading `previewStates` from a file with no guards at all;
+  the second site was missed by the PR #2 report that first flagged the defect.
+  `DesignSystemGallery` wrapped rather than `previewStates` exposed, since all
+  external references (`RootView.swift:37/39/41`) already sit inside DEBUG.
+  **Verified by execution twice over**: locally on Xcode 26.6 and in CI on 16.4,
+  producing byte-identical diagnostics — same eight errors, same lines and
+  columns — which rules out a toolchain artifact and confirms the defect is
+  preprocessor scoping. That identity is also what makes CI a faithful proxy for
+  the local machine, which is the property branch protection depends on; both
+  checks are now required on `main`. **No test target** (one native target,
+  `<Testables>` empty) — the workflow never calls `xcodebuild test`, and the first
+  thing genuinely worth testing is the detection engine, which is TypeScript on
+  the backend. **Honest limit, stated so it isn't assumed away**: CI catches build
+  breaks only. It cannot catch spec-vs-schema drift — valid SQL applies green
+  against a schema that contradicts its own contract. See v18.
 
 - **v17** — MIGRATION #1 BROUGHT TO SPEC + SCHEMA AMENDMENT DISCIPLINE locked
   (2026-08-06). `initial_schema.sql` was written against **v4** and left

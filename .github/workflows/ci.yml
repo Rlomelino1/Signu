@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ios:
     name: iOS build
@@ -31,13 +35,14 @@ jobs:
   schema:
     name: Schema applies
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.109.1
       - name: Apply migrations from scratch
         working-directory: backend
         run: |
-          supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector
+          supabase start -x realtime,storage,imgproxy,studio,edge-runtime,analytics,vector
           supabase db reset
