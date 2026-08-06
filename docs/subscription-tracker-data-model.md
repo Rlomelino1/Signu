@@ -688,11 +688,21 @@ The user can assert "I cancelled this" from the detail screen.
   `cancelled` status is **enforced, not merely present** — a valid insert succeeds,
   `status = 'bogus'` raises `subscription_run_status_check`.
 
-  Never applied to the remote (`migration list` showed an empty Remote column), so
-  corrected **in place** rather than via an additive Migration #2 — a pristine
-  initial schema beats a correction pair when there is no data to protect. Also
-  resolves an internal contradiction: the logo-sourcing contract claimed Migration
-  #1 was unwritten while the Migration #1 section said it was implemented.
+  **Corrected in place rather than via an additive Migration #2** — at the time of
+  correction the remote had never received it (`migration list` showed an empty
+  Remote column), and a pristine initial schema beats a correction pair when there
+  is no data to protect. Pushed to the remote the same day, so that observation is
+  historical and no longer reproducible: `migration list` now shows the version on
+  both sides. The hazard that makes in-place correction dangerous in general — a
+  remote that has *recorded* a version while still holding its old body, which
+  `db push` then skips forever — was checked explicitly by dumping the remote
+  schema, which holds the corrected body (`cancelled` in the CHECK, `cancelled_date`
+  and `reminder_channels` present, `logo_url` absent, seven column-scoped grants and
+  no others). **In-place correction is safe only before first apply**; afterwards the
+  additive migration is the only correct path.
+
+  Also resolves an internal contradiction: the logo-sourcing contract claimed
+  Migration #1 was unwritten while the Migration #1 section said it was implemented.
 
 - **v16** — AUTH GATE CONTRACT locked (2026-08-05, closing the last unimplemented navigation edge). Four states — `restoring` / `unauthenticated` / `recovering` / `authenticated` — wired against a mock `SessionProviding` mirroring the `SignuDataProviding` convention; the Supabase client is a later conformance swap. The load-bearing decision is **`recovering`**: the 17e reset link produces a live session *before* the password is set, so a naive `session != nil` gate swallows 17e and lands the user on Home unchanged — v11 named 17e a deep-link destination without saying how the gate declines it. `restoring` kills the cold-launch flash. Two properties fall out of confirmation-ON rather than being coded for: session-exists ⇒ verified (no unverified branch; **17b → 17c is intra-flow navigation, not a gate transition**), and both destructive exits (12a sign-out, 14a delete) return to 16a for free. Deep-link handler sits above the gate (fires in both signed-out and signed-in states). Root swap = crossfade, no back gesture, Reduce Motion ⇒ none. Gate boundary doubles as the data-provider lifecycle boundary (constructed on entering `authenticated`, released on exit — the real provider needs a `user_id`, stale rows must not outlive sign-out). Splash locked as new ground: 16a-matching wordmark, no spinner, launch screen matched, so `restoring → unauthenticated` moves nothing. **Amends v13**: tab shell extracted from `RootView` into `AppShellView`, and the "previews inside `RootView`" requirement is repointed to `AppShellView` (intent was always "inside the bar shell"); `RootView` gains one preview per gate state. Also locks the **single-funnel rule**: every `gateState` write goes through one `apply(_ event:)` keyed on *(current state, event)*. Manual deep-link testing of the `authenticated → recovering` hop found the second instance of one defect — an expired reset link ejecting a signed-in user, blind assignment applied without regard to current state, the same shape as the restore race — so both collapse into one table instead of two ad-hoc guards. **Amends v11's 17e expired-link branch**: routing to 17d is the sessionless case only; a live session survives a failed link.
 
