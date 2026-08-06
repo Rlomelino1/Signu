@@ -1,6 +1,19 @@
 -- ============================================================
 -- Subscription Tracker — Migration #1: initial schema
--- Source of truth: subscription-tracker-data-model.md (v4, 2026-07-13)
+-- Source of truth: subscription-tracker-data-model.md (v16, 2026-08-06)
+--
+-- This file was originally written against v4 and left unrevised through
+-- twelve amendments. Brought to v16 before first apply; the schema-affecting
+-- decisions folded in are:
+--   * v5  subscription_run.status += 'cancelled'; cancelled_date added
+--   * v5  subscription.remind_before_days added (+ UPDATE grant)
+--   * v9  profiles.reminder_channels added (+ UPDATE grant)
+--   * v11 signup trigger display_name fallback: full_name -> name -> email
+--   * v12 subscription.logo_url dropped
+-- Deliberately NOT folded in: DEVICE_TOKEN (v5). Push is downgraded to
+-- "maybe" pending a paid Apple Developer account; an unused table is exactly
+-- what "don't build it until it hurts" targets, and adding it later is
+-- purely additive.
 --
 -- Locked decisions implemented here:
 --   * text + CHECK constraints (no enums)
@@ -27,9 +40,19 @@
 -- ------------------------------------------------------------
 
 create table public.profiles (
-  id           uuid primary key references auth.users (id) on delete cascade,
-  display_name text,
-  created_at   timestamptz not null default now()
+  id                uuid primary key references auth.users (id) on delete cascade,
+  display_name      text,
+
+  -- How reminders are delivered. Global user preference, deliberately not
+  -- per-subscription: remind_before_days decides whether/when per sub,
+  -- this decides how, once. 'email' is a semantic default (the true birth
+  -- state) — the only channel guaranteed deliverable, since an address
+  -- always exists. The reminder ADDRESS is derived from auth.users.email
+  -- and is never stored here.
+  reminder_channels text not null default 'email'
+                    check (reminder_channels in ('push', 'email', 'both')),
+
+  created_at        timestamptz not null default now()
 );
 
 -- Auto-create a profile the moment anyone signs up, regardless of provider.
@@ -42,10 +65,18 @@ security definer
 set search_path = ''
 as $$
 begin
+  -- Fallback order (v11): Google's full_name -> the mandatory Name field
+  -- passed as user metadata by 17b -> email. Three distinct terms on purpose:
+  -- 'full_name' is Google's key, 'name' is ours, so the row itself records
+  -- which provider supplied the value.
   insert into public.profiles (id, display_name)
   values (
     new.id,
-    coalesce(new.raw_user_meta_data ->> 'full_name', new.email)
+    coalesce(
+      new.raw_user_meta_data ->> 'full_name',
+      new.raw_user_meta_data ->> 'name',
+      new.email
+    )
   );
   return new;
 end;
@@ -130,7 +161,16 @@ create table public.subscription (
   merchant_key   text not null,                -- matching attribute; NON-unique
   dedupe_key     text not null,                -- identity; engine-assigned
   category       text,                         -- seeded by detection, user-editable
-  logo_url       text,
+
+  -- logo_url deliberately absent (v12): the logo chain resolves at render
+  -- time from MERCHANT_CATALOG.domain, so a stored URL would have no writer,
+  -- no reader, and would go stale on rebrand. Re-adding is a one-line
+  -- additive migration if a user-supplied-override feature ever exists.
+
+  -- Reminder lead time. Null = off; the detail-screen toggle maps to it
+  -- (e.g. 2 = remind two days before). User-owned.
+  remind_before_days integer,
+
   identification text not null default 'auto'
                  check (identification in ('auto', 'user_confirmed', 'user_renamed')),
   ignored        boolean not null default false,
@@ -147,7 +187,14 @@ create table public.subscription_run (
   billing_interval   text not null
                      check (billing_interval in ('monthly', 'annual')),
   status             text not null
-                     check (status in ('possible', 'active', 'overdue', 'ended')),
+                     check (status in ('possible', 'active', 'overdue',
+                                       'ended', 'cancelled')),
+                                               -- 'ended'     = engine inferred death at +10
+                                               -- 'cancelled' = user asserted it, via the
+                                               --               cancel Edge Function (status
+                                               --               is not a user-owned column).
+                                               -- Added in v5 — the case that justified
+                                               -- CHECK over enums.
   detected_by        text not null
                      check (detected_by in ('R1', 'R3', 'R4')),
                                                -- engine-stated, no default; powers
@@ -157,7 +204,15 @@ create table public.subscription_run (
                                                -- confirming pattern re-stamps R1/R3.
                                                -- R2 is backfill, never creation —
                                                -- it never appears here.
-  next_expected_date date,                     -- engine cache; powers renewal alerts
+  cancelled_date     date,                     -- set by the cancel Edge Function; null on
+                                               -- every non-cancelled run. date, not
+                                               -- timestamptz, per the date-granularity
+                                               -- doctrine. end_date stays paid-through.
+  next_expected_date date,                     -- engine cache; powers renewal alerts.
+                                               -- NULLed on cancellation and stays null even
+                                               -- if an R5 trailing charge appends: cancelled
+                                               -- runs never appear in "Coming up" and can
+                                               -- never trip overdue.
   created_at         timestamptz not null default now()
 );
 
@@ -306,9 +361,12 @@ grant select on public.profiles,
 
 -- user-owned columns only ("sync-owned vs user-owned never overlap",
 -- now enforced as a permission boundary, not a convention)
-grant update (display_name)                on public.profiles     to authenticated;
-grant update (nickname)                    on public.bank_account to authenticated;
-grant update (nickname, category, ignored) on public.subscription to authenticated;
+grant update (display_name, reminder_channels)
+  on public.profiles     to authenticated;
+grant update (nickname)
+  on public.bank_account to authenticated;
+grant update (nickname, category, ignored, remind_before_days)
+  on public.subscription to authenticated;
 
 
 -- ------------------------------------------------------------
