@@ -149,7 +149,7 @@ struct GoogleGLogo: View {
 
 #Preview("Auth field") {
     struct Host: View {
-        @State private var email = "marina.duarte@gmail.com"
+        @State private var email = "marina.duarte@example.com"
         @State private var pass = "Secret123"
         var body: some View {
             VStack(spacing: 20) {

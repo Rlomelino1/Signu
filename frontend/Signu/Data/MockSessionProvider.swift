@@ -45,7 +45,7 @@ final class MockSessionProvider: SessionProviding {
     /// and the resend action work against.
     private var pendingConfirmationEmail: String?
 
-    init(scenario: Scenario = .signedOut, sessionEmail: String = "rafael.souza@gmail.com") {
+    init(scenario: Scenario = .signedOut, sessionEmail: String = "rafael.souza@example.com") {
         self.scenario = scenario
         self.sessionEmail = sessionEmail
     }

@@ -253,7 +253,7 @@ struct NewPasswordView: View {
 
 #Preview("Sign in (17a)") { SignInView() }
 #Preview("Create account (17b)") { CreateAccountView() }
-#Preview("Confirm email (17c)") { ConfirmEmailView(email: "marina.duarte@gmail.com") }
+#Preview("Confirm email (17c)") { ConfirmEmailView(email: "marina.duarte@example.com") }
 #Preview("Forgot password (17d)") { ForgotPasswordView() }
 #Preview("Forgot password · expired link (17d)") { ForgotPasswordView(showExpiredLinkNotice: true) }
-#Preview("New password (17e)") { NewPasswordView(email: "marina.duarte@gmail.com") }
+#Preview("New password (17e)") { NewPasswordView(email: "marina.duarte@example.com") }

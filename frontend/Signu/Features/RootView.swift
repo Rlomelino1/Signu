@@ -216,10 +216,10 @@ private struct AuthDebugView: View {
     var body: some View {
         switch name {
         case "create": CreateAccountView()
-        case "confirm": ConfirmEmailView(email: "marina.duarte@gmail.com")
+        case "confirm": ConfirmEmailView(email: "marina.duarte@example.com")
         case "forgot": ForgotPasswordView()
         case "expired": ForgotPasswordView(showExpiredLinkNotice: true)
-        case "newpassword": NewPasswordView(email: "marina.duarte@gmail.com")
+        case "newpassword": NewPasswordView(email: "marina.duarte@example.com")
         default: SignInView()
         }
     }

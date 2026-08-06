@@ -74,7 +74,7 @@ final class MockDataProvider: SignuDataProviding {
         profileValue = Profile(
             id: UUID(),
             displayName: "Rafael Souza",
-            email: "rafael.souza@gmail.com",
+            email: "rafael.souza@example.com",
             providers: ["google", "email"],
             createdAt: Self.date(2025, 10, 4)
         )
