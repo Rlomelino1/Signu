@@ -630,8 +630,7 @@ The user can assert "I cancelled this" from the detail screen.
   Hardening added after a GitHub Actions partial outage made a run undiagnosable:
   **CLI pinned to 2.109.1** (`latest` means the accepted-service-name list you
   validated against is not necessarily the one that runs — the same
-  unverified-assumption failure as the `v4` header), corrected `-x` names
-  (`storage-api` → `storage`, `logflare` → `analytics`, both demonstrably working),
+  unverified-assumption failure as the `v4` header),
   explicit `concurrency` with `cancel-in-progress`, and `timeout-minutes: 12` so a
   stalled job **fails with logs** instead of being cancelled without them. A
   cancelled job retains nothing (`BlobNotFound`), which is what made the first
@@ -641,6 +640,20 @@ The user can assert "I cancelled this" from the detail screen.
   false`; removing the block does **not** work, since the CLI falls back to its
   default `./seed.sql` path — a warning that always fires trains you to ignore
   warnings, the unread-`v4`-header failure one layer down.
+
+  **The `-x` names were never wrong, and "fixing" them broke the exclusions.**
+  `supabase start --help` advertises *service* names (`storage`, `analytics`);
+  the runtime validates *container* names and accepts only `storage-api` and
+  `logflare`. Validating against the help text looked like exactly the diligence
+  this entry preaches and produced the opposite of the truth — the change stopped
+  excluding the two services it claimed to exclude. It surfaced only as
+  `WARNING: The following container names are not valid to exclude`, buried in a
+  **green** job, and was caught by reading the log of a passing run rather than by
+  the run's own verdict. Reverted to the original list, verified warning-free with
+  all eight services reported stopped. Two lessons, both sharper than the one that
+  caused it: **a documented list is not the accepted list — only the runtime is**,
+  and **green is not the same as correct**; an invalid name here is a warning, not
+  an error, so the pipeline reports success while doing less than it claims.
 
   **Ungated-commit note**: `fde45c5` (the v17 migration) reached `main` without a
   PR, against the repo's own rule — harmless in practice, since no CI existed to

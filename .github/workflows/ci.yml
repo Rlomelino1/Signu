@@ -44,5 +44,9 @@ jobs:
       - name: Apply migrations from scratch
         working-directory: backend
         run: |
-          supabase start -x realtime,storage,imgproxy,studio,edge-runtime,analytics,vector
+          # Container names, NOT the service names in `supabase start --help`.
+          # The help text lists storage/analytics; the runtime rejects both and
+          # accepts storage-api/logflare. An invalid name is only a WARNING, so a
+          # wrong list silently stops excluding and the job still goes green.
+          supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector
           supabase db reset
