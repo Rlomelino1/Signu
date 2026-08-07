@@ -675,19 +675,23 @@ The user can assert "I cancelled this" from the detail screen.
   PR #4 ran CI on `main` (both jobs green on `f025994`), which retroactively
   covers it.
 
-  **Branch protection: `iOS build` required, `strict` on, force-pushes and
-  deletions off — `enforce_admins` deliberately off.** `Schema applies` is *not*
-  required, on the rule that a check earns required status by having gone green
-  reliably, not by existing; it has two passes on one day and sits on a
-  third-party action already carrying a Node 20 deprecation notice, so requiring
-  it now would volunteer to be blocked by someone else's maintenance schedule.
-  With `enforce_admins` off, the sole admin can still push straight to `main`, so
-  the rule **does not close the ungated path for the one person who uses this
-  repo** — it is a convention with a retained escape hatch, not an enforced gate,
-  and saying otherwise would be the same false-comfort this entry is about. That
-  is the deliberate trade: an enforced gate routinely bypassed is worse than an
-  unenforced one respected, and on a solo repo the hatch is what makes a genuine
-  emergency fixable. Flip `enforce_admins` on the day a second person commits.
+  **Branch protection: `iOS build` required, PRs required with zero approvals,
+  `enforce_admins` ON, `strict` on, force-pushes and deletions off.** The
+  ungated path is now genuinely closed, admin included — the rule binds the only
+  person who uses the repo, which is the only way it binds anyone here. Zero
+  required approvals is the honest setting for a solo repo: self-approval would be
+  ceremony, and the gate that matters is the build, not a rubber stamp. `strict`
+  keeps a branch from merging stale, so the green that authorizes a merge is a
+  green against what `main` will actually become. An admin bypass was considered
+  and rejected: a hatch that exists is a hatch that gets used, and the whole reason
+  this entry exists is that the last ungated commit went unexamined by anything but
+  hand-checking. The cost is accepted with eyes open — every change to `main`,
+  including a one-character emergency fix, now takes a branch, a PR, and a passing
+  build. `Schema applies` is deliberately **not** required, on the rule that a
+  check earns required status by having gone green reliably rather than by
+  existing: it has two passes on a single day and sits on a third-party action
+  already carrying a Node 20 deprecation notice, so requiring it now would
+  volunteer to be blocked by someone else's maintenance schedule.
 
   **Honest limit, stated so it is not assumed away**: CI catches build breaks
   only. It cannot catch spec-vs-schema drift — valid SQL applies green against a
