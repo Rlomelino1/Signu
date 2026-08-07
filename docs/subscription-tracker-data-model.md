@@ -627,19 +627,32 @@ The user can assert "I cancelled this" from the detail screen.
   test`, and the first thing genuinely worth testing is the detection engine,
   which is TypeScript on the backend.
 
-  Hardening added after a GitHub Actions partial outage made a run undiagnosable:
-  **CLI pinned to 2.109.1** (`latest` means the accepted-service-name list you
-  validated against is not necessarily the one that runs — the same
-  unverified-assumption failure as the `v4` header),
-  explicit `concurrency` with `cancel-in-progress`, and `timeout-minutes: 12` so a
-  stalled job **fails with logs** instead of being cancelled without them. A
-  cancelled job retains nothing (`BlobNotFound`), which is what made the first
-  failure unreadable. Operational note: **no CI result produced during a platform
-  outage is trustworthy** — queue delays surface as timeouts that look like real
-  failures. Also silenced a permanently-firing seed WARN via `[db.seed] enabled =
-  false`; removing the block does **not** work, since the CLI falls back to its
-  default `./seed.sql` path — a warning that always fires trains you to ignore
-  warnings, the unread-`v4`-header failure one layer down.
+  Hardening added after a GitHub Actions partial outage made a run undiagnosable.
+  **CLI pinned to 2.109.1**: `latest` means the version that runs is not the
+  version anything was verified against, and a third-party action silently moving
+  under you is the same unverified-assumption shape as the `v4` header. The pin is
+  the verified-thing-is-the-running-thing rule, applied to a dependency.
+  **`concurrency` with `cancel-in-progress`** makes supersede-cancel intentional
+  and stops burning runner minutes on runs whose head has already moved.
+  **`timeout-minutes: 12`** so a stalled job fails with retrievable logs instead of
+  being cancelled without them — a cancelled job retains nothing (`BlobNotFound`),
+  which is precisely what made the first failure unreadable. **That third one did
+  not work as intended, and the limit is worth stating**: cancellation is not
+  timeout. When the outage killed the next run, both jobs came back `cancelled`
+  with *zero steps recorded* — the job died before any step ran, so there was no
+  timeout to trip and again no logs. The timeout protects against a job that hangs
+  while running; nothing in the workflow's control protects against one the
+  platform kills. Hence the operational rule, which is the actual mitigation:
+  **no CI result produced during a platform outage is trustworthy** — queue delays
+  and cancellations surface as failures indistinguishable from real ones, so the
+  correct response to a red run during an incident is to re-run it afterwards, not
+  to debug it. Also silenced a permanently-firing seed WARN via
+  `[db.seed] enabled = false`; deleting the block does **not** work, since the CLI
+  then falls back to its own default `./seed.sql` path — absence means "use the
+  default", not "disabled". A warning that always fires trains you to ignore
+  warnings, the unread-`v4`-header failure one layer down, and it mattered within
+  the day: the invalid-`-x`-name warning below was found in a log that had been
+  emitting a routine WARN on every run.
 
   **The `-x` names were never wrong, and "fixing" them broke the exclusions.**
   `supabase start --help` advertises *service* names (`storage`, `analytics`);
@@ -658,12 +671,32 @@ The user can assert "I cancelled this" from the detail screen.
   **Ungated-commit note**: `fde45c5` (the v17 migration) reached `main` without a
   PR, against the repo's own rule — harmless in practice, since no CI existed to
   run on it and it was verified by hand more thoroughly than any check would have,
-  but it is the last commit on `main` that no automated gate ever saw. Merging
-  PR #4 runs CI on `main` and retroactively covers it; branch protection then
-  closes the path. **Honest limit, stated so it is not assumed away**: CI catches
-  build breaks only. It cannot catch spec-vs-schema drift — valid SQL applies green
-  against a schema that contradicts its own contract. See v17's schema amendment
-  discipline.
+  but it was the last commit on `main` that no automated gate ever saw. Merging
+  PR #4 ran CI on `main` (both jobs green on `f025994`), which retroactively
+  covers it.
+
+  **Branch protection: `iOS build` required, `strict` on, force-pushes and
+  deletions off — `enforce_admins` deliberately off.** `Schema applies` is *not*
+  required, on the rule that a check earns required status by having gone green
+  reliably, not by existing; it has two passes on one day and sits on a
+  third-party action already carrying a Node 20 deprecation notice, so requiring
+  it now would volunteer to be blocked by someone else's maintenance schedule.
+  With `enforce_admins` off, the sole admin can still push straight to `main`, so
+  the rule **does not close the ungated path for the one person who uses this
+  repo** — it is a convention with a retained escape hatch, not an enforced gate,
+  and saying otherwise would be the same false-comfort this entry is about. That
+  is the deliberate trade: an enforced gate routinely bypassed is worse than an
+  unenforced one respected, and on a solo repo the hatch is what makes a genuine
+  emergency fixable. Flip `enforce_admins` on the day a second person commits.
+
+  **Honest limit, stated so it is not assumed away**: CI catches build breaks
+  only. It cannot catch spec-vs-schema drift — valid SQL applies green against a
+  schema that contradicts its own contract, and `Schema applies` would have passed
+  through all twelve versions of the v4 migration, since that file applied
+  perfectly cleanly the entire time it was wrong. It also cannot catch a step that
+  succeeds while doing less than it claims, as the `-x` reversal above proves. Both
+  failures are semantic; both were found by reading, not by a verdict. See v17's
+  schema amendment discipline.
 
 - **v17** — MIGRATION #1 BROUGHT TO SPEC + SCHEMA AMENDMENT DISCIPLINE locked
   (2026-08-06). `initial_schema.sql` was written against **v4** and left
