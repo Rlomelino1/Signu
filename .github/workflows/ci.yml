@@ -44,9 +44,28 @@ jobs:
       - name: Apply migrations from scratch
         working-directory: backend
         run: |
+          # pipefail is NOT set by the default `bash -e {0}` shell, and both
+          # commands below are piped into tee. Without it, a failing supabase
+          # command would exit 0 through tee and this step would pass while
+          # doing nothing.
+          set -eo pipefail
+
           # Container names, NOT the service names in `supabase start --help`.
           # The help text lists storage/analytics; the runtime rejects both and
           # accepts storage-api/logflare. An invalid name is only a WARNING, so a
           # wrong list silently stops excluding and the job still goes green.
-          supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector
-          supabase db reset
+          supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector 2>&1 | tee cli.log
+          supabase db reset 2>&1 | tee -a cli.log
+
+          # Warning gate. The CLI reports some real problems as warnings, not
+          # errors, so a passing step can be doing less than it claims: an
+          # invalid `-x` name sat in a green log for a full run before anyone
+          # read it. This makes that reading automatic. Scoped to the CLI's own
+          # output on purpose -- runner-level annotations (e.g. the Node 20
+          # deprecation notice on the actions themselves) are emitted outside
+          # this stream and cannot false-positive it.
+          if grep -qiE "warn(ing)?:" cli.log; then
+            echo "::error::Supabase CLI emitted a warning; a green step here would be dishonest. See the step log."
+            grep -iE "warn(ing)?:" cli.log
+            exit 1
+          fi
