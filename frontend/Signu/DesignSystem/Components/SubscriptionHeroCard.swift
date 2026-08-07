@@ -169,10 +169,10 @@ struct HeroStatesGallery: View {
         .background(SignuColor.paper)
     }
 }
-#endif
 
 #Preview("Hero · active") { SubscriptionHeroCard.previewStates[0].card.padding(20).background(SignuColor.paper) }
 #Preview("Hero · overdue") { SubscriptionHeroCard.previewStates[1].card.padding(20).background(SignuColor.paper) }
 #Preview("Hero · cancelled") { SubscriptionHeroCard.previewStates[2].card.padding(20).background(SignuColor.paper) }
 #Preview("Hero · ended") { SubscriptionHeroCard.previewStates[3].card.padding(20).background(SignuColor.paper) }
 #Preview("All hero states") { HeroStatesGallery() }
+#endif

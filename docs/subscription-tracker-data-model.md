@@ -553,6 +553,15 @@ The user can assert "I cancelled this" from the detail screen.
   - Rejected for v1: capping content to a centered phone-width column on iPad (deferred rather than shipped as a stopgap), and full iPad design now (no mockups, unjustified pre-need).
 - **Every screen carries both iPhone 17 Pro and 17 Pro Max previews.** Prompted by a width regression: the Settings bank-row subtitle wrapped on the narrower Pro but not Pro Max (fixed widths instead of a flexible text column). Convention: text columns take remaining width (`maxWidth: .infinity`), chips/badges `fixedSize`; both device widths reviewable in the canvas.
 
+- **DEBUG fixture convention (locked v17, 2026-08-06).** `#Preview` bodies are
+  compiled in **every** configuration, not just Debug. So mockup fixture data
+  guarded by `#if DEBUG` must not be referenced from an unguarded preview or an
+  unguarded type — Release fails on missing symbols while Debug passes clean.
+  **Fixtures live in their own file, wrapped entirely in `#if DEBUG`**, not as an
+  extension inside a production component file. Rationale: `previewStates` sat in
+  `SubscriptionHeroCard.swift`, so its guard boundary had to be hand-maintained
+  across three call sites and drifted at two of them.
+
 ---
 
 ## Migration #1 decisions
@@ -578,6 +587,13 @@ The user can assert "I cancelled this" from the detail screen.
   drift is semantic, the SQL stays valid, and CI goes green against a schema that
   contradicts its own contract. Discovered only by reading the migration against
   the spec line by line.
+  - **One changelog entry per version, longest form wins.** Three drift instances
+    surfaced the same day, all the same class — a hand-maintained source of truth
+    with no check drifting in every direction available to it: spec vs. repo (the
+    `v4` header), spec vs. itself ("Migration #1 unwritten" beside "implemented"
+    in `initial_schema.sql`), and spec vs. itself again (duplicate v13/v14 entries,
+    a long and a short of each; the short ones read as drafts). Trivial as a rule,
+    and it makes a duplicate a visible violation rather than clutter.
 
 ---
 
@@ -588,6 +604,66 @@ The user can assert "I cancelled this" from the detail screen.
 ---
 
 ## Changelog
+
+- **v18** — CI & BUILD VERIFICATION established (2026-08-06, PR #4). Repo had **no
+  CI and no shared Xcode scheme**: `main` did not compile in the Release
+  configuration and nothing would have said so. Scheme now shared and committed
+  (external tooling cannot resolve a scheme living in gitignored `xcuserdata`).
+  Workflow builds **Debug and Release** for `generic/platform=iOS` with
+  `CODE_SIGNING_ALLOWED=NO` (no Developer account) and applies migrations from
+  scratch against a real local Supabase stack; public repo, so macOS runner
+  minutes are free. **Release break fixed at two sites** — five `#Preview`s in
+  `SubscriptionHeroCard.swift` sitting past their `#endif`, and
+  `DesignSystemGallery` reading `previewStates` from a file with no guards at all;
+  the second site was missed by the PR #2 report that first flagged the defect.
+  `DesignSystemGallery` wrapped rather than `previewStates` exposed, since all
+  external references (`RootView.swift:37/39/41`) already sit inside DEBUG.
+  **Verified by execution twice over**: locally on Xcode 26.6 and in CI on 16.4,
+  producing byte-identical diagnostics — same eight errors, same lines and columns
+  — which rules out a toolchain artifact and confirms the defect is preprocessor
+  scoping. That identity is also what makes CI a faithful proxy for the local
+  machine, which is the property branch protection depends on. **No test target**
+  (one native target, `<Testables>` empty) — the workflow never calls `xcodebuild
+  test`, and the first thing genuinely worth testing is the detection engine,
+  which is TypeScript on the backend.
+
+  Hardening added after a GitHub Actions partial outage made a run undiagnosable:
+  **CLI pinned to 2.109.1** (`latest` means the accepted-service-name list you
+  validated against is not necessarily the one that runs — the same
+  unverified-assumption failure as the `v4` header),
+  explicit `concurrency` with `cancel-in-progress`, and `timeout-minutes: 12` so a
+  stalled job **fails with logs** instead of being cancelled without them. A
+  cancelled job retains nothing (`BlobNotFound`), which is what made the first
+  failure unreadable. Operational note: **no CI result produced during a platform
+  outage is trustworthy** — queue delays surface as timeouts that look like real
+  failures. Also silenced a permanently-firing seed WARN via `[db.seed] enabled =
+  false`; removing the block does **not** work, since the CLI falls back to its
+  default `./seed.sql` path — a warning that always fires trains you to ignore
+  warnings, the unread-`v4`-header failure one layer down.
+
+  **The `-x` names were never wrong, and "fixing" them broke the exclusions.**
+  `supabase start --help` advertises *service* names (`storage`, `analytics`);
+  the runtime validates *container* names and accepts only `storage-api` and
+  `logflare`. Validating against the help text looked like exactly the diligence
+  this entry preaches and produced the opposite of the truth — the change stopped
+  excluding the two services it claimed to exclude. It surfaced only as
+  `WARNING: The following container names are not valid to exclude`, buried in a
+  **green** job, and was caught by reading the log of a passing run rather than by
+  the run's own verdict. Reverted to the original list, verified warning-free with
+  all eight services reported stopped. Two lessons, both sharper than the one that
+  caused it: **a documented list is not the accepted list — only the runtime is**,
+  and **green is not the same as correct**; an invalid name here is a warning, not
+  an error, so the pipeline reports success while doing less than it claims.
+
+  **Ungated-commit note**: `fde45c5` (the v17 migration) reached `main` without a
+  PR, against the repo's own rule — harmless in practice, since no CI existed to
+  run on it and it was verified by hand more thoroughly than any check would have,
+  but it is the last commit on `main` that no automated gate ever saw. Merging
+  PR #4 runs CI on `main` and retroactively covers it; branch protection then
+  closes the path. **Honest limit, stated so it is not assumed away**: CI catches
+  build breaks only. It cannot catch spec-vs-schema drift — valid SQL applies green
+  against a schema that contradicts its own contract. See v17's schema amendment
+  discipline.
 
 - **v17** — MIGRATION #1 BROUGHT TO SPEC + SCHEMA AMENDMENT DISCIPLINE locked
   (2026-08-06). `initial_schema.sql` was written against **v4** and left
@@ -609,23 +685,41 @@ The user can assert "I cancelled this" from the detail screen.
   guarded against does not apply to a standalone table with no FK pointing at it.
   **Signup metadata key locked**: 17b passes the mandatory Name as `name`, kept
   distinct from Google's `full_name` so the row records its own provenance — a
-  client-side obligation on the real `SessionProvider`. Migration verified by
-  execution, not inspection: applied under `ON_ERROR_STOP` against a stubbed
-  `auth` schema, all three trigger branches exercised, CHECK rejection confirmed.
-  Never applied to the remote (`migration list` showed an empty Remote column),
-  so corrected **in place** rather than via an additive Migration #2 — a pristine
-  initial schema beats a correction pair when there is no data to protect.
+  client-side obligation on the real `SessionProvider`.
+
+  **Verified by execution against a real local Supabase stack, not inspection.**
+  `db reset` applied clean on the first attempt. Four assertions, each covering a
+  gap a stubbed `auth` schema cannot reach: (1) `authenticated` holds UPDATE on
+  **exactly seven columns** and **zero table-wide non-SELECT privileges** — the
+  revoke-all-then-regrant sequence holding against Supabase's broader-than-vanilla
+  defaults; (2) the signup trigger fires correctly on the real 35-column
+  `auth.users`, all three fallback branches exercised, including the both-keys-
+  present case where `full_name` correctly wins over `name` — so the three-term
+  precedence is right and `security definer` + `set search_path = ''` behaves;
+  (3) `auth.uid()` resolves with its real signature, all 10 policies live, and
+  isolation genuinely works (own user ⇒ 1 profile visible, stranger ⇒ 0); (4) the
+  `cancelled` status is **enforced, not merely present** — a valid insert succeeds,
+  `status = 'bogus'` raises `subscription_run_status_check`.
+
+  **Corrected in place rather than via an additive Migration #2** — at the time of
+  correction the remote had never received it (`migration list` showed an empty
+  Remote column), and a pristine initial schema beats a correction pair when there
+  is no data to protect. Pushed to the remote the same day, so that observation is
+  historical and no longer reproducible: `migration list` now shows the version on
+  both sides. The hazard that makes in-place correction dangerous in general — a
+  remote that has *recorded* a version while still holding its old body, which
+  `db push` then skips forever — was checked explicitly by dumping the remote
+  schema, which holds the corrected body (`cancelled` in the CHECK, `cancelled_date`
+  and `reminder_channels` present, `logo_url` absent, seven column-scoped grants and
+  no others). **In-place correction is safe only before first apply**; afterwards the
+  additive migration is the only correct path.
+
   Also resolves an internal contradiction: the logo-sourcing contract claimed
-  Migration #1 was unwritten while the Migration #1 section said it was
-  implemented.
+  Migration #1 was unwritten while the Migration #1 section said it was implemented.
 
 - **v16** — AUTH GATE CONTRACT locked (2026-08-05, closing the last unimplemented navigation edge). Four states — `restoring` / `unauthenticated` / `recovering` / `authenticated` — wired against a mock `SessionProviding` mirroring the `SignuDataProviding` convention; the Supabase client is a later conformance swap. The load-bearing decision is **`recovering`**: the 17e reset link produces a live session *before* the password is set, so a naive `session != nil` gate swallows 17e and lands the user on Home unchanged — v11 named 17e a deep-link destination without saying how the gate declines it. `restoring` kills the cold-launch flash. Two properties fall out of confirmation-ON rather than being coded for: session-exists ⇒ verified (no unverified branch; **17b → 17c is intra-flow navigation, not a gate transition**), and both destructive exits (12a sign-out, 14a delete) return to 16a for free. Deep-link handler sits above the gate (fires in both signed-out and signed-in states). Root swap = crossfade, no back gesture, Reduce Motion ⇒ none. Gate boundary doubles as the data-provider lifecycle boundary (constructed on entering `authenticated`, released on exit — the real provider needs a `user_id`, stale rows must not outlive sign-out). Splash locked as new ground: 16a-matching wordmark, no spinner, launch screen matched, so `restoring → unauthenticated` moves nothing. **Amends v13**: tab shell extracted from `RootView` into `AppShellView`, and the "previews inside `RootView`" requirement is repointed to `AppShellView` (intent was always "inside the bar shell"); `RootView` gains one preview per gate state. Also locks the **single-funnel rule**: every `gateState` write goes through one `apply(_ event:)` keyed on *(current state, event)*. Manual deep-link testing of the `authenticated → recovering` hop found the second instance of one defect — an expired reset link ejecting a signed-in user, blind assignment applied without regard to current state, the same shape as the restore race — so both collapse into one table instead of two ad-hoc guards. **Amends v11's 17e expired-link branch**: routing to 17d is the sessionless case only; a live session survives a failed link.
 
 - **v15** — PLATFORM SCOPE & PREVIEW CONVENTION locked (2026-07-21, at completion of the SwiftUI phone build — all 7 steps done: design system, Home, Subscriptions, Review 9a, Detail all-variants incl. run segmentation, Settings, Welcome+Auth). v1 is iPhone-only by deliberate choice; iPad deferred to a dedicated design pass (reversible, nothing stubbed). Every screen carries 17 Pro + 17 Pro Max previews after a width regression (Settings bank-row subtitle wrapped on Pro only). Two detail conflicts resolved in step 5: marker fill = happened (filled = landed, open ring = not-yet-happened; orthogonal to color = event type; older 4b/5a–5d open-ring-on-Charged mockups were stale, 21m/21q correct), and Renews tilde = detected_by-only (no tilde on R1; 21k's tilde was the error). Committed on feature/scaffold-design-system (PR #1).
-
-- **v14** — INACTIVE ROW COPY simplified (2026-07-21, Subscriptions tab approved). Inactive subtitle reduced from "Was R$ X /mo · [last charge/cancelled by you <date>]" to just "Was R$ X /mo". Two-column layout: name-over-subtitle left, badge-over-"Paid through <date>" right rail; ended/cancelled distinction now on badge + right-rail date alone. Cut clause duplicated the right-rail date and truncated (MUBI). Inactive row height matched to active row. Subs tab confirmed inside the v13 auto-hiding shell.
-
-- **v13** — TAB BAR & NAVIGATION CONTRACT locked (2026-07-20, from Home review; deliberate mockup deviation). Safari-style auto-hiding capsule: hides on scroll-down, returns on any scroll-up, revealed at content bottom; always visible when content too short (never unreachable); Reduce Motion ⇒ crossfade; bottom inset = bar + margin + safe area. Reveal-only-at-bottom superseded (would gate tab switching behind scrolling to list end). Previews render inside RootView.
 
 - **v14** — INACTIVE ROW COPY simplified (2026-07-21, during 8a implementation review; Subscriptions tab approved). Inactive-row subtitle reduced from *"Was R$ X /mo · [last charge/cancelled by you \<date\>]"* to just *"Was R$ X /mo"*. Two-column layout confirmed: name-over-subtitle on the left, badge-over-"Paid through \<date\>" on the right rail; the ended/cancelled distinction now rides on the badge + right-rail date alone. Rationale: the cut clause duplicated the right-rail date and collided/truncated when both dates rendered (MUBI); the badge already carries the ended-vs-cancelled split. Inactive row height matched to the active list row (was taller — separate component drift). Also confirmed: Subs tab scrolls inside the same auto-hiding shell as Home (v13), verified in Simulator.
 
