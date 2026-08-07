@@ -378,8 +378,69 @@ The user can assert "I cancelled this" from the detail screen.
 ### Structure
 
 - **Single scrollable screen** (12a) with exactly **one sub-page**: connection detail (12b). Everything else lives inline or in confirmation sheets.
-- Sections: **Profile** (name, email, sign-in method chips — read from `auth.users` identities), **Connected banks**, **Dismissed suggestions**, **Data** (delete account). No Notifications section yet — `remind_before_days` is per-subscription and its toggle lives on the detail screen; a global section has nothing real to control until delivery infrastructure exists.
+- Sections: **Profile** (name, email, sign-in method chips — read from
+  `auth.users` identities — plus the two auth actions below), **Connected banks**,
+  **Dismissed suggestions**, **Data** (delete account). No Notifications section
+  yet — `remind_before_days` is per-subscription and its toggle lives on the
+  detail screen; a global section has nothing real to control until delivery
+  infrastructure exists.
 - **No Appearance/currency section**: primary currency is derived, never stored/configured (home contract) — a currency setting would either violate that doctrine or be a dead toggle.
+
+### Profile auth rows (12a) — locked v19, 2026-08-06
+
+*Deliberate deviation from the mockups, which predate the auth gate and show
+Profile as pure read-out — same standing as the v13 tab bar. Do not "fix"
+implementations back to the 21-series rendering.*
+
+- **Both rows live in Profile, not Data.** Data's job is destructive data
+  operations; a session action isn't one. Placement also keeps sign-out at the top
+  of the screen and Delete account at the bottom, separated by the whole scroll —
+  a benign, frequently-tapped row must not sit adjacent to the most irreversible
+  action in the app, and 14a's type-to-confirm shouldn't have to absorb misfires
+  it was never designed for. Bottom-of-screen standalone (the common iOS
+  placement) was rejected for exactly that adjacency.
+- **Profile stops being a read-only section.** Accepted knowingly: the section
+  already owns the sign-in-method concept via its identity chips, and both rows
+  are that same concept made actionable.
+
+**Password row — state-driven off the identities the chips already read:**
+
+- Password identity present ⇒ **"Change password"**. Google-only ⇒ **"Set a
+  password"**, subtitle *"You sign in with Google. A password gives you a second
+  way in."* Same distinction, same reason, as v11 naming 17d "set" not "reset" —
+  a Google-first account has no old password to change.
+- **Mechanism: reuse 17d's send action; render no new screen.** Tap sends a link
+  to the session's address. Chosen over an inline current/new-password form
+  because it is **the only mechanism that serves both identity states** — a
+  Google-only account has no current password to enter, so the inline path needs
+  two variants, one of them unverified. The email round-trip *is* the identity
+  proof. v11 already locked "the Forgot-password path **is** the set-password
+  flow"; this is that same hatch reachable while signed in. One mechanism, two
+  entry points — the shape of 12b serving both Settings and the Home banner.
+- **17d is never rendered from Settings**: the address comes from the session, so
+  there is no form. The row calls the same send and owns its own sent state.
+- **Sent-state copy does not hedge.** 17d says *"If an account exists for
+  \<email\>…"* because the public API refuses to confirm existence. From Settings
+  the session proves it, so the enumeration-safe doctrine — *no screen may claim
+  knowledge the API refuses to give* — permits the direct statement here:
+  *"Check \<email\> for a link to set your password."* The doctrine tracks what
+  the API actually yields **per surface**, not one globally cautious phrasing.
+- **Sent state carries a countdown, reusing 17c's 120s cooldown** — not polish:
+  Supabase rate-limits the reset endpoint at ~60s, so a second tap fails silently
+  without it. One cooldown constant, two surfaces, never diverging.
+- **17e still returns to Home after submit, even when the flow began in Settings.**
+  One destination, no origin tracking. Stated explicitly so it isn't "fixed" later.
+
+**Sign-out row:**
+
+- Last row of Profile. **No confirmation** — nothing is lost, the data is
+  server-side, and signing back in is one tap. A Google-only user who signs out
+  lands on 16a with Continue with Google right there.
+- Both destructive exits now exist and both are free: sign-out and 14a kill the
+  session, and the gate returns to 16a with no explicit routing (v16).
+
+**Zero schema impact.** Uses `SessionProviding.requestPasswordReset` and
+`signOut`, both already on the protocol.
 
 ### Connected banks (12a rows → 12b detail)
 
@@ -605,6 +666,30 @@ The user can assert "I cancelled this" from the detail screen.
 
 ## Changelog
 
+- **v19** — PROFILE AUTH ROWS locked (2026-08-06), closing the gap PR #2 reported:
+  Settings had **no sign-out row**, so deleting the account was the only way out
+  of one. Both rows go in **Profile**, not Data — a session action isn't a data
+  operation, and the placement keeps a frequently-tapped row from sitting next to
+  14a. Profile stops being read-only, accepted knowingly (it already owns the
+  sign-in-method concept via its chips). Password row is **state-driven off those
+  same identities**: "Change password" with a password identity, "Set a password"
+  for Google-only — the v11 set-vs-reset distinction on a new surface.
+  **Mechanism: reuse 17d's send, render no new screen** — the only path that
+  serves both identity states, since a Google-only account has no current password
+  and the email round-trip *is* the identity proof; 17d itself never renders from
+  Settings (the address comes from the session, so there is no form). **Sent copy
+  drops 17d's hedge**: the session proves the account exists, so the
+  enumeration-safe doctrine is read per-surface rather than as one globally
+  cautious phrasing. Countdown reuses 17c's 120s constant — required, not polish,
+  since Supabase rate-limits the endpoint at ~60s. Sign-out takes no confirmation.
+  17e still lands on Home even when the flow started in Settings (one destination,
+  no origin tracking). **Amends v16**: the expired-recovery-link-while-signed-in
+  case is no longer a silent no-op — it routes to Settings → Profile with the
+  notice and a re-armed send, delivered as a **one-shot navigation intent inside
+  `.authenticated`, not a fifth gate state**, so v16's transition table stays
+  exhaustive. Deliberate mockup deviation on the v13 precedent: the 21-series
+  shows Profile as read-out. Zero schema impact.
+
 - **v18** — CI & BUILD VERIFICATION established (2026-08-06, PR #4). Repo had **no
   CI and no shared Xcode scheme**: `main` did not compile in the Release
   configuration and nothing would have said so. Scheme now shared and committed
@@ -755,6 +840,18 @@ The user can assert "I cancelled this" from the detail screen.
   Migration #1 was unwritten while the Migration #1 section said it was implemented.
 
 - **v16** — AUTH GATE CONTRACT locked (2026-08-05, closing the last unimplemented navigation edge). Four states — `restoring` / `unauthenticated` / `recovering` / `authenticated` — wired against a mock `SessionProviding` mirroring the `SignuDataProviding` convention; the Supabase client is a later conformance swap. The load-bearing decision is **`recovering`**: the 17e reset link produces a live session *before* the password is set, so a naive `session != nil` gate swallows 17e and lands the user on Home unchanged — v11 named 17e a deep-link destination without saying how the gate declines it. `restoring` kills the cold-launch flash. Two properties fall out of confirmation-ON rather than being coded for: session-exists ⇒ verified (no unverified branch; **17b → 17c is intra-flow navigation, not a gate transition**), and both destructive exits (12a sign-out, 14a delete) return to 16a for free. Deep-link handler sits above the gate (fires in both signed-out and signed-in states). Root swap = crossfade, no back gesture, Reduce Motion ⇒ none. Gate boundary doubles as the data-provider lifecycle boundary (constructed on entering `authenticated`, released on exit — the real provider needs a `user_id`, stale rows must not outlive sign-out). Splash locked as new ground: 16a-matching wordmark, no spinner, launch screen matched, so `restoring → unauthenticated` moves nothing. **Amends v13**: tab shell extracted from `RootView` into `AppShellView`, and the "previews inside `RootView`" requirement is repointed to `AppShellView` (intent was always "inside the bar shell"); `RootView` gains one preview per gate state. Also locks the **single-funnel rule**: every `gateState` write goes through one `apply(_ event:)` keyed on *(current state, event)*. Manual deep-link testing of the `authenticated → recovering` hop found the second instance of one defect — an expired reset link ejecting a signed-in user, blind assignment applied without regard to current state, the same shape as the restore race — so both collapse into one table instead of two ad-hoc guards. **Amends v11's 17e expired-link branch**: routing to 17d is the sessionless case only; a live session survives a failed link.
+  - **Expired recovery link while signed in — routing locked** (added by v19).
+    v16 correctly stopped the link from ejecting a live session, but left the tap a
+    silent no-op — acceptable only while there was nowhere to route. With the
+    Profile password row existing, there is: the link routes to **Settings →
+    Profile**, notice on the password row (*"That link expired — request a new
+    one."*), send affordance armed. This closes the last silent dead end and honors
+    v11's "never a silent dead end" for the signed-in case.
+  - **This is not a fifth gate state.** `gateState` stays `.authenticated`; the
+    transition table is untouched. The link emits a **one-shot navigation intent**
+    that `AppShellView` consumes (select the Settings tab, surface the notice) —
+    navigation *within* a gate state, not a gate state. The four-state table stays
+    exhaustive.
 
 - **v15** — PLATFORM SCOPE & PREVIEW CONVENTION locked (2026-07-21, at completion of the SwiftUI phone build — all 7 steps done: design system, Home, Subscriptions, Review 9a, Detail all-variants incl. run segmentation, Settings, Welcome+Auth). v1 is iPhone-only by deliberate choice; iPad deferred to a dedicated design pass (reversible, nothing stubbed). Every screen carries 17 Pro + 17 Pro Max previews after a width regression (Settings bank-row subtitle wrapped on Pro only). Two detail conflicts resolved in step 5: marker fill = happened (filled = landed, open ring = not-yet-happened; orthogonal to color = event type; older 4b/5a–5d open-ring-on-Charged mockups were stale, 21m/21q correct), and Renews tilde = detected_by-only (no tilde on R1; 21k's tilde was the error). Committed on feature/scaffold-design-system (PR #1).
 
