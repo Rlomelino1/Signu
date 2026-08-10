@@ -414,3 +414,9 @@ enabled = true
 # declarative_schema_path = "./database"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+[functions.pluggy-sync]
+# No JWT to verify: the caller is a scheduler, not a signed-in user, so the
+# function gates on a shared secret in `x-sync-secret` instead. Leaving
+# verify_jwt at its default would reject every cron invocation with a 401.
+verify_jwt = false
