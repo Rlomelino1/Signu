@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-10** (v24) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-10** (v25) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -174,7 +174,8 @@ Managed entirely by Supabase Auth — not part of our schema.
 - **Transaction immutability, precisely**: `raw_description` / `date` / `amount` are frozen once posted; pending rows are drafts (may update or vanish); `normalized_merchant` is derived and rewritable by the pipeline.
 - **Sign convention (locked, Option A — faithful mirror)**: `amount` is stored **exactly as Pluggy sends it**, `type` numeric. Pluggy's dialects differ: bank accounts negative = outflow; credit cards positive = new charge. The sync-owned column `TRANSACTION.type` (DEBIT / CREDIT — Pluggy's explicit direction signal) is what detection keys direction off, **never the sign**. Outflow = type DEBIT; refunds = type CREDIT (still ignored by detection). The raw layer stays a literal record of the aggregator; no interpretation smuggled into the evidence.
   - Consequence for doctrine: "same amount" in R1/continuation compares **magnitudes** — `abs(amount)` — so cross-account-type comparisons never break on sign.
-  - **Money is compared exactly, never with a float epsilon** (locked v23). `abs(amount)` equality means `numeric` equality in SQL, or integer cents in any other language — never `abs(a - b) < 0.01`. `abs(6.46 - 6.45)` is `0.009999999999999787` in IEEE float, so an epsilon test makes two amounts a cent apart compare **equal**. That is not a rounding nicety: R1 fires on *same* amount, and a cent-tolerant comparison invents pairs that do not exist. It already produced one false anchor on real data.
+  - **Money is compared exactly, never with a float epsilon** (locked v23), and **always with its currency** (locked v25). `abs(amount)` equality means `numeric` equality in SQL, or integer cents in any other language — never `abs(a - b) < 0.01`. `abs(6.46 - 6.45)` is `0.009999999999999787` in IEEE float, so an epsilon test makes two amounts a cent apart compare **equal**. That is not a rounding nicety: R1 fires on *same* amount, and a cent-tolerant comparison invents pairs that do not exist. It already produced one false anchor on real data.
+  - **Equality of money means equality of currency AND cents** (locked v25). There is no amount-only comparison in the codebase: one merchant already bills in two currencies in real data — Valve charges under a single CNPJ in both BRL and USD across 47 debits — so 6.45 USD and 6.45 BRL must never compare equal. This applies wherever amounts are tested for *equality* (R1's anchor, the internal-transfer filter, R3's distinct-amount count) and nowhere else: continuation is amount-flexible and therefore currency-agnostic, and totals resolve everything to the account currency, so a run may legitimately contain charges in more than one currency.
 - **`currency` on TRANSACTION and CHARGE**: 3-char, NOT NULL, no default; always written explicitly. No more BRL default — sync copies Pluggy's `currencyCode`; detection copies the source transaction's currency onto the charge.
 - **Writer-states-everything doctrine**: no status column anywhere has a DB default. Sync states status for the raw chain, the engine states it for runs. Rationale: a connection is not "active" until verified; defaults that guess hide bugs, explicit writes surface them. Only semantic defaults kept: `subscription.identification = 'auto'` and `ignored = false` (the true birth state of every subscription).
 - **Refunds**: never rewrite a charge; a refund is a separate transaction (type CREDIT) in the raw layer, ignored by detection (DEBITs only). Optional later: `refund_transaction_id` link on CHARGE, purely additive.
@@ -1139,6 +1140,35 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v25** — MONEY CARRIES ITS CURRENCY (2026-08-10). v23 fixed *how precisely*
+  amounts are compared; this fixes *what* is compared. The engine compared cents
+  alone, which is unsound the moment one merchant bills in two currencies — and
+  that is already true: **Valve charges under a single CNPJ in both BRL and USD
+  across 47 debits.** No amounts collide across currencies in today's data, so
+  nothing was mis-anchored, but the exposure was structural and sitting in the
+  ledger. Same shape as v23: a comparison that looks correct because the data has
+  not punished it yet.
+  **Three sites, and the middle one is the dangerous direction.** R1's anchor
+  would pair a 6.45 BRL with a 6.45 USD charge a month apart into a phantom
+  subscription. The **internal-transfer filter** would pair a USD card charge with
+  a numerically equal BRL bank credit and thereby *hide a real transaction* — the
+  same hides-rows direction that made v23's second site worse than the first. R3's
+  distinct-amount count collapsed cross-currency values into one, which could
+  suppress a legitimate suggestion.
+  **The amount-only comparison was removed, not deprecated.** `sameAmount` is
+  gone; `sameMoney(a, b)` and `moneyKey(m)` are the only exports. A footgun left
+  in a shared module gets picked up by the next call site, which is precisely how
+  the epsilon reached three sites.
+  **Scoped deliberately to equality tests.** Continuation stays amount-flexible
+  and therefore currency-agnostic, so a subscription repriced from BRL to USD is
+  still one run; totals resolve to the account currency, so a mixed-currency run
+  is renderable. The guard belongs only where amounts are tested for *sameness*.
+  Verified against the real 258 rows: the genuine Steam subscription still anchors
+  (R1, active, two charges, both USD), so the guard closed the hole without
+  closing the door. 32 rule tests, five of them new for this.
+  **Migration disposition: no action** — a comparison change in engine code. No
+  schema, and no stored value changes meaning.
 
 - **v24** — DETECTION ENGINE CONTRACT locked (2026-08-10). **Full recompute**,
   **R1 stays auto-confirming**, **rules in TypeScript** for testability. Two
