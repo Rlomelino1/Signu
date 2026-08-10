@@ -50,6 +50,23 @@ def cents(x) -> int:
     return int(round(abs(float(x)) * 100))
 
 
+def money(r):
+    """(currency, cents) -- the v25 comparison unit.
+
+    Must stay identical to _shared/money.ts's sameMoney/moneyKey. Comparing cents
+    alone is unsound once one merchant bills in two currencies, which is already
+    true here: Valve charges under a single CNPJ in both BRL and USD. This harness
+    lagged the TypeScript engine by one version and the two agreed only because no
+    cross-currency amounts happen to collide in this data -- accidental parity,
+    which is precisely what detection-parity.py now guards against.
+
+    Reads either key so the same function serves Pluggy-shaped JSON
+    (`currencyCode`) and database-shaped rows (`currency`).
+    """
+    cur = (r.get('currencyCode') or r.get('currency') or '').strip().upper()
+    return (cur, cents(r['amount']))
+
+
 def dt(r): return date.fromisoformat(str(r['date'])[:10])
 def desc(r): return (r.get('description') or '').upper().strip()
 def meta(r): return r.get('creditCardMetadata') or {}
@@ -89,7 +106,7 @@ credits=[(a,r) for a,r in rows if r['type']=='CREDIT']
 def is_internal(a,r):
     if r['type']!='DEBIT': return False
     for a2,c in credits:
-        if a2!=a and cents(c['amount'])==cents(r['amount']) and abs((dt(c)-dt(r)).days)<=3:
+        if a2!=a and money(c)==money(r) and abs((dt(c)-dt(r)).days)<=3:
             return True
     return False
 
@@ -124,7 +141,7 @@ for k,v in sorted(g.items(), key=lambda x:-len(x[1])):
     for i in range(len(v)):
         for j in range(i+1,len(v)):
             gap=(dt(v[j])-dt(v[i])).days
-            if 25<=gap<=36 and cents(v[i]['amount'])==cents(v[j]['amount']):
+            if 25<=gap<=36 and money(v[i])==money(v[j]):
                 nm=bn(v[i]) or k
                 print(f"  R1 ANCHOR  {nm[:34]:<34} R${abs(v[i]['amount']):.2f}  "
                       f"{dt(v[i])} -> {dt(v[j])}  gap={gap}d")
@@ -142,7 +159,7 @@ print("\n"+"="*70); print("  R3 UNDER v21 DEFINITION (>=80% within +/-3d of circ
 r3=0
 for k,v in sorted(((k,v) for k,v in g.items() if len(v)>=3), key=lambda x:-len(x[1])):
     v=sorted(v,key=dt)
-    amts={cents(x['amount']) for x in v}
+    amts={money(x) for x in v}
     frac=circ_aligned(v)
     nm=bn(v[0]) or k
     if frac>=0.8 and len(amts)>1:

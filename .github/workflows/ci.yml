@@ -69,3 +69,38 @@ jobs:
             grep -iE "warn(ing)?:" cli.log
             exit 1
           fi
+
+  detection:
+    name: Detection tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # NO permission flags. The drafted version of this job passed
+      # `--allow-none`, which is NOT a valid Deno flag -- 2.9.5 rejects it with
+      # "tip: to pass '--allow-none' as a value, use '-- --allow-none'" and the
+      # job would have failed on its first run. Verified against a real Deno
+      # before committing, on a cold cache to match this runner: the tests are
+      # pure functions needing no permissions, and Deno 2 already allows imports
+      # from deno.land and esm.sh by default, so no flag is required at all.
+      - name: Type-check
+        run: |
+          deno check \
+            backend/supabase/functions/_shared/detection.ts \
+            backend/supabase/functions/run-detection/index.ts \
+            backend/supabase/functions/pluggy-sync/index.ts
+
+      - name: Lint
+        run: deno lint backend/supabase/functions
+
+      # Thirty-two tests encoding every historical bug: the v23 epsilon
+      # regression, the presence-based fee filter, the card-payment R3, the
+      # dedupe ordinal, the v25 cross-currency pairs. Before this job they lived
+      # in a file nothing executed on a PR -- the same shape as the correctness
+      # gap v18 closed for the schema.
+      - name: Test
+        run: deno test backend/supabase/functions/_shared/
