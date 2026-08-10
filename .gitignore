@@ -19,3 +19,6 @@ frontend/**/xcuserdata/
 frontend/**/*.xcuserstate
 frontend/DerivedData/
 frontend/build/
+
+# Pluggy probe raw dump — real transaction history, never commit
+pluggy-probe-raw.json
