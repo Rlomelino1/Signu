@@ -1,0 +1,149 @@
+// run-detection — the interpreted chain. Thin shell around a pure core (v24).
+//
+// Owns subscription / subscription_run / charge and never writes the raw chain.
+// Separate from pluggy-sync on the replayability doctrine: a detection bug must
+// not be able to fail a sync, and detection must be re-runnable over stored
+// history without touching Pluggy. pluggy-sync chains into this on success;
+// both stay independently invokable, which is what replay needs.
+//
+// This file does three things and no more: load, call detect(), apply in one
+// RPC. Every decision lives in _shared/detection.ts, where it is testable
+// without a database.
+
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
+import { detect, type EngineInput, type TxRow } from '../_shared/detection.ts'
+
+async function secretsMatch(given: string, expected: string): Promise<boolean> {
+  const enc = new TextEncoder()
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(given)),
+    crypto.subtle.digest('SHA-256', enc.encode(expected)),
+  ])
+  const va = new Uint8Array(a)
+  const vb = new Uint8Array(b)
+  let diff = 0
+  for (let i = 0; i < va.length; i++) diff |= va[i] ^ vb[i]
+  return diff === 0
+}
+
+/** Candidate evaluation is per-USER, not per-account: the internal-transfer
+ *  filter compares a DEBIT against CREDITs on the user's other accounts, so
+ *  sharding by account would silently disable it (v24). */
+async function loadUser(db: SupabaseClient, userId: string): Promise<EngineInput['rows']> {
+  const { data, error } = await db
+    .from('transaction')
+    .select(
+      'id, provider_tx_id, account_id, status, type, date, amount, currency, ' +
+        'raw_description, normalized_merchant, withdrawn_at, installment_number, ' +
+        'total_installments, fee_type_additional_info, provider_merchant_name, ' +
+        'provider_merchant_cnpj, bank_account!inner(connection!inner(user_id))',
+    )
+    .eq('bank_account.connection.user_id', userId)
+  if (error) throw new Error(`load transactions: ${error.message}`)
+  return (data ?? []) as unknown as TxRow[]
+}
+
+Deno.serve(async (req: Request) => {
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body, null, 2), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+  if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
+
+  const expected = Deno.env.get('SYNC_SECRET')
+  if (!expected) return json({ error: 'SYNC_SECRET not configured' }, 500)
+  if (!(await secretsMatch(req.headers.get('x-sync-secret') ?? '', expected))) {
+    return json({ error: 'forbidden' }, 403)
+  }
+
+  const db = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    { auth: { persistSession: false } },
+  )
+
+  // `today` is resolved ONCE here and passed in. No rule reads a clock, so a
+  // replay is deterministic given (raw, assertions, today) — and "identical
+  // state" means same-day identical (v24).
+  let today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+  let onlyUserId: string | null = null
+  try {
+    const body = await req.json()
+    onlyUserId = body?.userId ?? null
+    // Overridable so a replay can be reproduced against a fixed date.
+    if (typeof body?.today === 'string') today = body.today
+  } catch {
+    // no body is the normal post-sync case
+  }
+
+  const { data: profiles, error: pErr } = onlyUserId
+    ? await db.from('profiles').select('id').eq('id', onlyUserId)
+    : await db.from('profiles').select('id')
+  if (pErr) return json({ error: `select profiles: ${pErr.message}` }, 500)
+  if (!profiles?.length) return json({ ok: true, note: 'no users', results: [] })
+
+  const results: unknown[] = []
+  const failures: unknown[] = []
+
+  for (const p of profiles) {
+    try {
+      const rows = await loadUser(db, p.id)
+
+      const [{ data: subs, error: sErr }, { data: runs, error: rErr }] = await Promise.all([
+        db.from('subscription').select('id, dedupe_key, merchant_key, service_name, identification, ignored').eq('user_id', p.id),
+        db.from('subscription_run').select('id, subscription_id, start_date, end_date, billing_interval, status, detected_by, cancelled_date, next_expected_date, subscription!inner(user_id)').eq('subscription.user_id', p.id),
+      ])
+      if (sErr) throw new Error(`select subscription: ${sErr.message}`)
+      if (rErr) throw new Error(`select subscription_run: ${rErr.message}`)
+
+      const runIds = (runs ?? []).map((r: { id: string }) => r.id)
+      let charges: unknown[] = []
+      if (runIds.length) {
+        const { data: ch, error: cErr } = await db
+          .from('charge')
+          .select('id, run_id, transaction_id, date, amount, currency, card_label')
+          .in('run_id', runIds)
+        if (cErr) throw new Error(`select charge: ${cErr.message}`)
+        charges = ch ?? []
+      }
+
+      const desired = detect({
+        today,
+        rows,
+        subscriptions: (subs ?? []) as EngineInput['subscriptions'],
+        runs: (runs ?? []) as unknown as EngineInput['runs'],
+        charges: charges as EngineInput['charges'],
+      })
+
+      // Single transactional write. Everything above is a read; everything the
+      // applier writes was decided by the pure core.
+      const { data: applied, error: aErr } = await db.rpc('apply_detection', {
+        p_user_id: p.id,
+        p_desired: {
+          subscriptions: desired.subscriptions,
+          delete_run_ids: desired.delete_run_ids,
+        },
+      })
+      if (aErr) throw new Error(`apply_detection: ${aErr.message}`)
+
+      results.push({
+        userId: p.id,
+        today,
+        diagnostics: desired.diagnostics,
+        subscriptions: desired.subscriptions.length,
+        applied,
+      })
+    } catch (e) {
+      failures.push({ userId: p.id, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  return json({ ok: failures.length === 0, results, failures }, failures.length ? 207 : 200)
+})

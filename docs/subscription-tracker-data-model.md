@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-10** (v22) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-10** (v24) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -174,7 +174,7 @@ Managed entirely by Supabase Auth — not part of our schema.
 - **Transaction immutability, precisely**: `raw_description` / `date` / `amount` are frozen once posted; pending rows are drafts (may update or vanish); `normalized_merchant` is derived and rewritable by the pipeline.
 - **Sign convention (locked, Option A — faithful mirror)**: `amount` is stored **exactly as Pluggy sends it**, `type` numeric. Pluggy's dialects differ: bank accounts negative = outflow; credit cards positive = new charge. The sync-owned column `TRANSACTION.type` (DEBIT / CREDIT — Pluggy's explicit direction signal) is what detection keys direction off, **never the sign**. Outflow = type DEBIT; refunds = type CREDIT (still ignored by detection). The raw layer stays a literal record of the aggregator; no interpretation smuggled into the evidence.
   - Consequence for doctrine: "same amount" in R1/continuation compares **magnitudes** — `abs(amount)` — so cross-account-type comparisons never break on sign.
-  - **Money is compared exactly, never with a float epsilon** (locked by the v21 correction below). `abs(amount)` equality means `numeric` equality in SQL, or integer cents in any other language — never `abs(a - b) < 0.01`. `abs(6.46 - 6.45)` is `0.009999999999999787` in IEEE float, so an epsilon test makes two amounts a cent apart compare **equal**. That is not a rounding nicety: R1 fires on *same* amount, and a cent-tolerant comparison invents pairs that do not exist. It already produced one false anchor on real data.
+  - **Money is compared exactly, never with a float epsilon** (locked v23). `abs(amount)` equality means `numeric` equality in SQL, or integer cents in any other language — never `abs(a - b) < 0.01`. `abs(6.46 - 6.45)` is `0.009999999999999787` in IEEE float, so an epsilon test makes two amounts a cent apart compare **equal**. That is not a rounding nicety: R1 fires on *same* amount, and a cent-tolerant comparison invents pairs that do not exist. It already produced one false anchor on real data.
 - **`currency` on TRANSACTION and CHARGE**: 3-char, NOT NULL, no default; always written explicitly. No more BRL default — sync copies Pluggy's `currencyCode`; detection copies the source transaction's currency onto the charge.
 - **Writer-states-everything doctrine**: no status column anywhere has a DB default. Sync states status for the raw chain, the engine states it for runs. Rationale: a connection is not "active" until verified; defaults that guess hide bugs, explicit writes surface them. Only semantic defaults kept: `subscription.identification = 'auto'` and `ignored = false` (the true birth state of every subscription).
 - **Refunds**: never rewrite a charge; a refund is a separate transaction (type CREDIT) in the raw layer, ignored by detection (DEBITs only). Optional later: `refund_transaction_id` link on CHARGE, purely additive.
@@ -197,7 +197,7 @@ Replayable over full history, date granularity only. **Strict to create, generou
 |---|---|---|
 | **R1 — anchor** | auto | 2 charges, same merchant+amount, one cadence apart (monthly = 28–33d, ±3d window). Continuation is amount-flexible (price hikes never split a run). **Amended v20**: a row carrying `installment_number` or `total_installments` is disqualified — see [Pluggy reality contract](#pluggy-reality-contract). |
 | **R2 — backfill** | auto | On confirmation, claim an unclaimed same-merchant charge ~1 interval before run start, any amount; fix `start_date`. |
-| **R3 — cadence-beats-amount** | suggest-only | 3+ date-aligned charges, varying amounts (FX-priced subs, utilities). User confirms/ignores. On BR credit cards, international (USD-priced) subs post converted to BRL with fluctuating amounts — **R3 is what catches them**; the currency column does not (it will read BRL). **Amended v20**: the IOF line accompanying such a charge is itself varying-amount and date-aligned — excluded via `fee_type_additional_info`, see [Pluggy reality contract](#pluggy-reality-contract). |
+| **R3 — cadence-beats-amount** | suggest-only | 3+ date-aligned charges, varying amounts (FX-priced subs, utilities). User confirms/ignores. **Amended v24, the prediction was wrong.** It assumed an FX-priced sub arrives converted, with `currency` reading BRL and a fluctuating amount, so only R3 could catch it. Live data through connector 200 is the opposite: `currency` reads **USD**, `amount` is the **stable foreign amount** (6.45 every month), and the fluctuating BRL figure sits in Pluggy's `amountInAccountCurrency` — which **sync does not store**. So **R1 catches FX-priced subs directly**, on an amount that does not move. 57 of 258 rows are USD. Consequence recorded under [scope limits](#scope-limits-stated): totals cannot be summed across currencies until the BRL amount is stored. **Amended v20**: the IOF line accompanying such a charge is itself varying-amount and date-aligned — excluded via `fee_type_additional_info`, see [Pluggy reality contract](#pluggy-reality-contract). |
 | **R4 — catalog fast path** | suggest-only | 1 charge from a known subscription-only merchant ⇒ "possible" immediately. Interval is asked, not guessed — see [R4 billing interval](#r4-billing-interval-locked-2026-07-15). |
 | **R5 — trailing charge on cancelled runs** | auto | See below. |
 
@@ -536,6 +536,157 @@ reappears under the same `provider_tx_id` is un-withdrawn by the next re-scan.
 withdraw the entire pre-window history on every run, since it is absent from a
 365-day response by construction. This is the one place where getting the scope
 wrong hides transactions from detection rather than merely adding noise.
+
+---
+
+## Detection engine contract
+
+*Locked 2026-08-10. `run-detection` owns the interpreted chain and never writes
+the raw one. Sync chains into it on success (v22); both stay independently
+invokable, which is what replay needs.*
+
+### Shape: pure core, thin shell, atomic apply
+
+- **The rules are pure functions** over plain inputs — candidate rows in, desired
+  runs and charges out. No database access, no clock reads, no I/O. `today` is
+  passed **in** as a parameter, never read inside a rule, so every rule is
+  testable against a fixed date.
+- **TypeScript, not SQL**, chosen for testability. The cost is that integer-cents
+  discipline must be re-established in a second language — the exact site where
+  the float-epsilon bug lived (v23). Money comparison is therefore centralised in
+  **one** helper, and every rule calls it; no rule performs its own arithmetic on
+  amounts.
+- **The write phase is a single Postgres function** invoked by RPC, taking the
+  computed desired state as its argument. Rationale: PostgREST has no transaction
+  across calls, and a recompute that fails halfway leaves the interpreted chain in
+  a state no rule produced — the thing chaining sync into detection exists to
+  prevent. The function is a **dumb applier**: no rules, no arithmetic, no
+  interpretation. Rule logic living in SQL is what this shape refuses; a
+  transactional write boundary is not rule logic.
+- **Every false positive the dry run found is a regression test.** Intent was to
+  fixture the real 258 rows from v20's probe; that is **not possible in a public
+  repo** — `pluggy-probe-raw.json` is gitignored real bank history. The committed
+  tests are therefore the *structural equivalent* of each finding, reduced to the
+  minimum rows that reproduce it, and the real-258-row check stays local via
+  `backend/pluggy-detection-dryrun.py`. Stated rather than quietly substituted,
+  because "fixtures are the real rows" would otherwise read as true.
+
+### What "full recompute" means, and where it stops
+
+Recompute is **reconcile, not rebuild.** The engine computes desired state as a
+pure function of `(candidate transactions, user assertions, today)` and applies the
+difference. Two boundaries scope it:
+
+- **Frozen region — charges with `transaction_id IS NULL`.** Their raw backing was
+  deleted by the remove-bank-link flow, on purpose. They are immutable historical
+  records: **never recomputed, never deleted, never re-parented.** A run holding
+  them reconciles *around* them — including when `start_date` derives from one.
+  This is the practical limit of "the interpreted chain is fully replayable over
+  the raw chain": it is replayable over the raw chain *that still exists*.
+- **User assertions are read, never written.** Enumerated below.
+
+Everything else is derived and rewritten freely.
+
+### User assertions vs derived state
+
+`detected_by` is what distinguishes a derived status from an asserted one — no new
+column is needed.
+
+| Field | Derived or asserted | Rule |
+|---|---|---|
+| `subscription.nickname`, `category`, `ignored`, `remind_before_days` | asserted | never written by the engine |
+| `subscription.service_name` | both | engine-seeded; frozen once `identification = 'user_renamed'` |
+| `subscription.identification` | asserted | never written by the engine |
+| `run.status` where `detected_by = 'R1'` | derived | recomputed freely |
+| `run.status` where `detected_by IN ('R3','R4')` **and** stored status ≠ `possible` | **asserted** | the user confirmed a suggestion — preserved |
+| `run.status = 'cancelled'` + `cancelled_date` | **asserted** | preserved regardless of `detected_by` |
+| `run.billing_interval` where `detected_by = 'R4'` and the run is confirmed | **asserted** | the confirm flow's authoritative write (v11 R4 rule) |
+| `run.start_date`, `end_date`, `next_expected_date` | derived | recomputed |
+| all `charge` columns | derived | recomputed, except the frozen region |
+
+**R2 stops being an event and becomes a consequence.** Doctrine says R2 fires "on
+confirmation." Under recompute it is re-derived every run: confirmation state is
+preserved, so R2's precondition holds, so the backfill re-applies and reproduces
+the same `start_date`. Nothing needs to remember that R2 ran.
+
+### Run identity across recomputes
+
+A stored run and a desired run are the same run when they **share at least one
+claimed transaction**, matched greedily by descending overlap. No stored anchor
+column: a frozen derived pointer is the thing this project keeps refusing, and
+overlap is computable from state that already exists.
+
+- Two runs of one subscription never share a charge, so overlap is unambiguous.
+- **R5 un-claiming is the one case that needs the greedy ordering** and gets an
+  explicit test: the trailing charge moves to a new run, so the new run overlaps
+  the cancelled run on exactly one charge while the cancelled run overlaps itself
+  on many. Highest overlap wins, so the cancelled run keeps its identity and the
+  new run is correctly new. This is already flagged as *the only place a charge
+  moves between runs*.
+- **A stored run whose every live charge has vanished is deleted**, even if it
+  carried a user assertion. Its basis is gone; keeping a confirmed run with no
+  evidence would be the system asserting something it cannot support. Exception:
+  a run holding frozen charges always survives, because those *are* its basis.
+
+### Determinism
+
+Recompute must converge: two runs over identical inputs produce byte-identical
+state. Three requirements, each a test.
+
+- **Ordering is total.** Candidates are processed by `(date, provider_tx_id)`.
+  Date alone is not a total order — Pluggy's within-day `order` field is not
+  stored — and an unstable sort makes anchor selection nondeterministic.
+- **`dedupe_key` assignment is deterministic, and this is load-bearing.** Keys are
+  `UNIQUE(user_id, dedupe_key)` and fork to `netflix:2` when one merchant hosts two
+  concurrent subscriptions. If the fork ordinal came from discovery order, a
+  recompute could renumber and silently re-attach a user's nickname, category and
+  reminder settings **to the wrong subscription**. The ordinal is therefore
+  assigned by ascending first-charge date, tie-broken by `provider_tx_id`.
+- **`today` is an input, not a clock read.** `next_expected_date`, `overdue` and
+  ended-at-+10 all depend on it, so "identical state" means *same-day* identical.
+  Replay is deterministic given `(raw, assertions, today)` — a run on a later date
+  legitimately differs, and a test that asserts otherwise is testing the wrong
+  thing.
+
+### Idempotency
+
+**Run it twice; the second run changes nothing.** This is the convergence check
+that caught the epsilon bug in v23 — two implementations of one rule disagreeing on
+a count they should share. Asserted as a test, not assumed.
+
+### Withdrawn transactions
+
+A withdrawn row still exists but is not a candidate, so no charge is produced for
+it and its stored charge is deleted; the replacement row arrives under a new id and
+anchors normally. If a withdrawal is transient, history briefly loses a charge and
+the next run restores it — "re-runs repair," working as designed rather than
+tolerated. This closes the question parked since v20 about what a withdrawn
+transaction does to its charge: nothing is patched, because charges are derived.
+
+### Cross-account scope
+
+The internal-transfer filter compares a `DEBIT` against `CREDIT`s on *other*
+accounts of the same user, so the candidate pass is **per-user, not per-account**.
+Detection cannot be sharded by account without silently disabling that filter.
+
+### Scope limits, stated
+
+- **MERCHANT_CATALOG does not exist**, so **R4 cannot fire.** The engine ships with
+  R1, R2, R3 and R5; R4 is contract-only until the catalog table exists. Said out
+  loud because a rule that silently never fires reads as a rule that works.
+- **R1's positive path has fired on exactly one anchor** in real data, and that
+  anchor only exists because v21 switched `merchant_key` to CNPJ. Zero false
+  positives across 163 POSTED rows is evidence about the filters, not about the
+  positive path.
+- **Amounts are not summable across currencies, and the BRL figure is not
+  stored.** 57 of 258 rows carry `currency = USD` with `amount` in USD; Pluggy's
+  `amountInAccountCurrency` holds the BRL value and no column receives it. The
+  engine is unaffected — R1 compares like with like inside one merchant, which is
+  single-currency in practice — but **any total that sums `charge.amount` across
+  subscriptions is wrong today**, mixing USD and BRL. This blocks the hero totals
+  in the [subscriptions tab contract](#subscriptions-tab-contract) and needs a
+  column before those render. Found on the first real engine run, not reasoned
+  about in advance.
 
 ---
 
@@ -989,6 +1140,87 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v24** — DETECTION ENGINE CONTRACT locked (2026-08-10). **Full recompute**,
+  **R1 stays auto-confirming**, **rules in TypeScript** for testability. Two
+  constraints the decisions did not anticipate, both found by reading the schema
+  before writing code. **`charge.transaction_id`'s `ON DELETE SET NULL` puts a hard
+  boundary on recompute**: charges orphaned by the remove-bank-link flow have no
+  raw backing by design, so they cannot be recomputed and delete-and-rebuild would
+  destroy the permanent history the product promises. They are a **frozen region**
+  — never recomputed, never deleted — and runs reconcile around them, which
+  narrows "the interpreted chain is fully replayable over the raw chain" to *the
+  raw chain that still exists*. **And TypeScript plus full recompute collides with
+  atomicity**: PostgREST has no transaction across calls, so a half-applied
+  recompute would leave state no rule produced — the exact failure chaining sync
+  into detection was meant to prevent. Resolved as **pure TypeScript core plus a
+  single-RPC dumb applier**; rules stay unit-testable, the write is atomic, and no
+  rule logic moves into SQL. **Recompute is reconcile, not rebuild**: user
+  assertions are read and never written, and **`detected_by` alone distinguishes
+  derived status from asserted** — `R1` status is derived, while `R3`/`R4` status
+  above `possible` means the user confirmed, so no new column is needed.
+  **R2 stops being an event**: confirmation state is preserved, so the backfill
+  re-derives every run and nothing remembers that it fired. **Run identity is
+  maximal overlap of claimed transactions**, not a stored anchor — a frozen derived
+  pointer is what this project keeps refusing — with R5 un-claiming as the case
+  that requires greedy descending-overlap ordering and gets an explicit test.
+  **`dedupe_key` fork ordinals are assigned by ascending first-charge date, and
+  this is load-bearing**: discovery-order numbering would let a recompute renumber
+  `netflix:2` and silently re-attach a user's nickname, category and reminders to
+  the wrong subscription. **`today` is an input, not a clock read**, so replay is
+  deterministic given `(raw, assertions, today)` and "identical state" means
+  same-day identical. **Withdrawn transactions need no special handling** — the
+  charge is simply not re-derived, closing the question parked since v20. Candidate
+  evaluation is **per-user, not per-account**, because the internal-transfer filter
+  reads across accounts. **R4 cannot fire**: MERCHANT_CATALOG does not exist, so
+  the engine ships R1/R2/R3/R5 and R4 is contract-only — stated because a rule that
+  silently never fires reads as one that works.
+  **Migration disposition: Migration #4, additive — corrected from the drafted "no
+  action".** The drafted disposition reasoned that "the atomic applier is a
+  function, not schema", which conflates *not a table* with *not schema*: a
+  `create function` is a schema object, and an unversioned database function is
+  precisely the drift v17 exists to prevent. Migration #4 creates
+  `public.apply_detection(uuid, jsonb)` — `security definer`, `search_path` pinned,
+  executable by `service_role` only. It adds no table, column, constraint, index or
+  RLS policy, and `detected_by` carrying the derived-vs-asserted distinction is
+  what avoids needing a column.
+
+- **v23** — MONEY IS COMPARED EXACTLY (2026-08-10). The dry-run harness reported
+  two R1 anchors on real data; there is **one**.
+  `pluggy-detection-dryrun.py` compared amounts with `abs(a - b) < 0.01`, and
+  `abs(6.46 - 6.45)` is `0.009999999999999787` in IEEE float — it slips under the
+  threshold, so two Valve charges **a cent apart compared equal** and the script
+  invented a pair. Postgres `numeric` reports `6.46 <> 6.45` correctly, and R1
+  fires on the *same* amount, not a nearby one.
+  **Found by disagreement, not by inspection**: the rule was re-implemented as SQL
+  against the synced rows, and the two implementations differed on a count they
+  should have shared. Neither looked wrong alone — only the mismatch did. This is
+  the two-implementations-must-converge check that also guards replay.
+  **Fixed at all three comparison sites**, found by grepping for every amount
+  comparison rather than only the one the discrepancy surfaced: R1, the
+  internal-transfer pairing, and R3's distinct-amount count. The middle one is the
+  dangerous direction — pairing a `DEBIT` with a `CREDIT` a cent apart would have
+  silently *excluded* a genuine transaction from detection rather than merely
+  inventing a spurious one.
+  **Generalised into doctrine** under [transactions & sign
+  convention](#transactions--sign-convention): `abs(amount)` equality means
+  `numeric` equality in SQL or integer cents elsewhere, never an epsilon —
+  recorded there rather than only here, because someone implementing R1 reads the
+  doctrine section, not a changelog entry.
+  Both implementations now agree at one anchor, and every other count is unchanged
+  (128 candidates, 12 internal transfers, 0 R3 suggestions), confirming the epsilon
+  only ever affected R1. **No prose revised**: "two charges of R$6.45" was always
+  correct — there genuinely are two charges of 6.45. Only the *count of anchors*
+  was inflated. **Migration disposition: no action** — a comparison bug in a
+  diagnostic script and one doctrine sentence; no schema, no engine code existed
+  yet.
+  Also, unrelated and in the same commit range: **`.vscode` config so Edge
+  Functions are analyzed as Deno**. The built-in TypeScript server reported nine
+  false errors in `pluggy-sync/index.ts` (`Cannot find name 'Deno'`, plus an
+  unresolvable `https://` specifier). Never real — `deno check`/`deno lint` pass and
+  the function has written 258 rows. Scoped with `deno.enablePaths`, since this repo
+  is mostly Swift and enabling Deno globally would point the wrong analyzer at
+  everything else.
+
 - **v22** — SYNC FUNCTION built and verified end-to-end (2026-08-10), the first
   code to touch Pluggy in anger. Three decisions locked up front and one defect
   found by running it.
@@ -1114,24 +1346,8 @@ implementations back to the 21-series rendering.*
   R$1.11–R$88.51, nothing recurs within ±15% at a monthly gap, and **April 2026
   has no Steam debit at all**, which a monthly subscription cannot do. Either it
   bills to an account that is not connected, or it is inside the lumped amounts.
-  - **Corrected same day, by a database cross-check: the anchor count is one, not
-    two.** `pluggy-detection-dryrun.py` compared amounts with a float epsilon
-    (`abs(a - b) < 0.01`), and `abs(6.46 - 6.45)` is `0.009999999999999787` in
-    IEEE float — so the two Valve charges a cent apart compared **equal** and the
-    script reported a second anchor that does not exist. Postgres `numeric`
-    reports `6.46 <> 6.45` correctly, and R1 fires on the *same* amount. Found by
-    re-implementing the rule as SQL against the synced rows and noticing the two
-    implementations disagreed on a count they should have shared — the same
-    two-implementations-must-converge check that catches replay bugs. The harness
-    now compares integer cents at **all three** sites: R1, the internal-transfer
-    pairing (where the identical bug would have *hidden* rows rather than added
-    them, the more dangerous direction), and R3's distinct-amount count.
-    Generalised into doctrine under [transactions & sign
-    convention](#transactions--sign-convention): money is never compared with a
-    float epsilon. Both implementations now report one anchor, and every other
-    count is unchanged — 128 candidates, 12 internal transfers, 0 R3 suggestions.
-    The prose above needs no revision: "two charges of R$6.45" was always the
-    correct description of the pair; only the *count of anchors* was inflated.
+  - **Anchor count corrected from two to one in v23** — a float-epsilon bug in
+    the harness, not a finding about the data.
 
 - **v20** — PLUGGY REALITY CONTRACT locked (2026-08-10), closing the last entry
   under Open questions and replacing inference with observation from a live probe

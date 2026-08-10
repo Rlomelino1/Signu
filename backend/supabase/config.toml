@@ -420,3 +420,8 @@ enabled = true
 # function gates on a shared secret in `x-sync-secret` instead. Leaving
 # verify_jwt at its default would reject every cron invocation with a 401.
 verify_jwt = false
+
+[functions.run-detection]
+# Same reasoning as pluggy-sync: the caller is either the sync function or a
+# scheduler, never a signed-in user, so it gates on the shared secret instead.
+verify_jwt = false
