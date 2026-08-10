@@ -23,6 +23,7 @@ export interface TxRow {
   date: string
   amount: number | string
   currency: string
+  amount_in_account_currency: number | string | null
   raw_description: string
   normalized_merchant: string | null
   withdrawn_at: string | null
@@ -40,6 +41,7 @@ export interface StoredCharge {
   date: string
   amount: number | string
   currency: string
+  amount_in_account_currency: number | string | null
   card_label: string | null
 }
 
@@ -79,6 +81,10 @@ export interface DesiredCharge {
   date: string
   amount: number
   currency: string
+  /** Copied through, not computed. Null when `amount` is already in the
+   *  account's currency; `coalesce(this, amount)` is therefore always in the
+   *  account currency, which is what makes a total a plain sum (v26). */
+  amount_in_account_currency: number | null
   card_label: string | null
 }
 
@@ -529,8 +535,10 @@ export function detect(input: EngineInput): DesiredState {
         charges: proto.charges.map((c) => ({
           transaction_id: c.id,
           date: c.date,
-          amount: typeof c.amount === 'string' ? Number(c.amount) : c.amount,
+          amount: num(c.amount),
           currency: c.currency,
+          amount_in_account_currency:
+            c.amount_in_account_currency === null ? null : num(c.amount_in_account_currency),
           card_label: null,
         })),
       }
@@ -573,6 +581,10 @@ export function detect(input: EngineInput): DesiredState {
     delete_run_ids,
     diagnostics: { ...diagnostics, r1_runs: r1Runs, r3_runs: r3Runs },
   }
+}
+
+function num(v: number | string): number {
+  return typeof v === 'string' ? Number(v) : v
 }
 
 function deriveServiceName(first: TxRow): string {

@@ -57,6 +57,9 @@ interface PluggyTransaction {
   type?: string
   date: string
   amount: number
+  /** Present only when the transaction currency differs from the account's.
+   *  Not derivable from `amount`: the implied FX rate moves per transaction. */
+  amountInAccountCurrency?: number | null
   currencyCode?: string
   description?: string
   category?: string | null
@@ -68,6 +71,7 @@ interface PluggyAccount {
   id: string
   type?: string
   subtype?: string
+  currencyCode?: string | null
   name?: string | null
   marketingName?: string | null
   number?: string | null
@@ -98,6 +102,7 @@ interface TransactionRow {
   date: string
   amount: number
   currency: string
+  amount_in_account_currency: number | null
   raw_description: string
   normalized_merchant: string
   provider_category: string | null
@@ -323,6 +328,12 @@ function toTransactionRow(accountRowId: string, t: PluggyTransaction): Transacti
     // keys direction off `type`, never off sign, and compares magnitudes.
     amount: t.amount,
     currency: String(t.currencyCode ?? '').toUpperCase(),
+    // Stored exactly as sent: null when the transaction is already in the
+    // account's currency, where `amount` IS the account-currency figure. Both
+    // are kept because neither reconstructs the other -- the implied FX rate
+    // moves per transaction -- and because R1 needs the stable transaction
+    // amount while totals need this one (v26).
+    amount_in_account_currency: t.amountInAccountCurrency ?? null,
     raw_description: raw,
     normalized_merchant: normalizeMerchant(raw),
     provider_category: t.category ?? null,
@@ -441,6 +452,9 @@ async function syncConnection(db: SupabaseClient, conn: ConnectionRow, apiKey: s
           // under creditData, which is absent entirely on checking accounts.
           brand: acct.creditData?.brand ?? null,
           last4: lastFour(acct.number),
+          // The unit for transaction.amount_in_account_currency. Without it
+          // "account currency" would be an assumption rather than a fact (v26).
+          currency: acct.currencyCode ? String(acct.currencyCode).toUpperCase() : null,
           // marketingName is the fuller label where present ('… (Conta
           // Pré-paga)'); `name` alone is 'platinum' on the card, which reads as
           // a tier rather than an account. Column is sync-owned and overwritable.
