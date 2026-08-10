@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-10** (v21) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-10** (v22) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -458,6 +458,86 @@ no business existing, and all four are purely additive later.*
 
 ---
 
+## Sync contract (locked v22)
+
+*Implemented in `backend/supabase/functions/pluggy-sync/`, verified end-to-end
+against the real item: 1 connection, 2 accounts, 258 transactions.*
+
+### Shape
+
+- **Two functions, not one.** `pluggy-sync` owns the raw chain (connection,
+  bank_account, transaction) and never writes subscription / subscription_run /
+  charge. Detection is separate on the replayability doctrine: a detection bug
+  must not be able to fail a sync, and detection must be re-runnable over stored
+  history without touching Pluggy — which is the recovery path v20 relies on for
+  withdrawn rows.
+- **Sync chains into detection on success** rather than the two being separately
+  scheduled. An independent schedule lets detection wake mid-sync and interpret a
+  half-written raw chain; it would self-heal next run ("re-runs repair"), but
+  producing knowingly-wrong state in the meantime is avoidable. Both stay
+  independently invokable, which is what replay needs.
+- **Poll-only, full 365-day re-scan every run**, per v20. Idempotent on
+  `UNIQUE (account_id, provider_tx_id)`, which is what makes re-scanning the
+  whole window cheap enough to be the baseline.
+- **Invocation is gated by a shared secret in `x-sync-secret`, not a JWT**
+  (`verify_jwt = false` in `config.toml`). A scheduler has no user session, and
+  the URL is publicly addressable. Compared as SHA-256 digests so neither content
+  nor length leaks by timing.
+
+### Deliberate gaps
+
+- **No schedule yet.** Chosen sequencing: build and verify the function against
+  the real item first, then automate. `pg_cron` + `net.http_post` would be
+  versioned with the migrations, but needs two extensions plus a secret that
+  cannot live in a public repo (Vault, provisioned by hand); the dashboard
+  alternative needs no secret but drifts invisibly. Deferred **because it is
+  purely additive**, not because it is hard.
+- **`connection` is seeded by hand** via `supabase/seed/seed-connection.sql`,
+  with the itemId passed in rather than committed. The real path is Pluggy Connect
+  in SwiftUI writing this row; that screen is not designed. Committed as a
+  parameterized script rather than an `INSERT` typed once, because a manual step
+  living only in shell history is invisible in the way this project keeps getting
+  bitten by. When the in-app flow lands the file is deleted, not adapted.
+
+### Timezone — dates are São Paulo, not UTC
+
+`transaction.date` and `purchase_date` are `date` columns; Pluggy sends ISO
+timestamps in **UTC** and its docs say to convert to GMT-3 to read them as
+Brazilian time. **Sync converts to `America/Sao_Paulo` before truncating.**
+
+Measured, not assumed: **37 of 258 rows** carry a UTC time of 00:00–02:59 and
+land on the previous day once converted — one of them crossing a month boundary
+(`2026-06-01` → `2026-05-31`), which would have filed a charge in the wrong
+billing month. Naive truncation misplaces ~14% of the ledger, perturbing exactly
+the gap arithmetic R1/R3 depend on. Named IANA zone rather than a fixed `-3`:
+Brazil abolished DST in 2019 but earlier history was GMT-2 in summer.
+
+### Mapping traps (each one verified against a live payload)
+
+| Trap | Correct handling |
+|---|---|
+| `status` CHECK is **lowercase** (`'pending','posted'`) but `type` CHECK is **uppercase** (`'DEBIT','CREDIT'`) | Pluggy sends both uppercase; status is lowercased, type passes through |
+| `bank_account.type` | Maps from Pluggy's **`subtype`** (`CREDIT_CARD`/`CHECKING_ACCOUNT`), not its `type` (`CREDIT`/`BANK`) — different vocabularies, same field name |
+| `last4` | Pluggy's `number` is `'2049'` on cards but `'88120381-6'` on checking, where the last 4 *characters* are `'81-6'`. Digits only, then last 4 |
+| `brand` | Lives at `creditData.brand`; `creditData` is absent entirely on checking accounts, which is why the column is documented null for non-cards |
+| `official_name` | `marketingName` where present, else `name` — `name` alone is `'platinum'` on the card, a tier rather than an account |
+| `provider_merchant_name` | From `businessName`; `name` is present on 5 of 258 rows (v21) |
+| `''` | Coerced to NULL on write. Verified: 94 merchant objects, 4 with an empty `businessName`, **90 rows written non-null** |
+| `fee_type_additional_info` | Stored **raw**, including the `'NA'` sentinel — 104 `NA`, 60 `IOF…`, 94 null. Interpretation is a detection-time denylist (v21) |
+
+### Withdrawn detection
+
+A row absent from the feed is soft-deleted (`withdrawn_at`), never removed, and a
+row present in the feed has `withdrawn_at` explicitly set to NULL — so a row that
+reappears under the same `provider_tx_id` is un-withdrawn by the next re-scan.
+
+**Scoped to `date >= windowStart`.** Comparing against every stored row would
+withdraw the entire pre-window history on every run, since it is absent from a
+365-day response by construction. This is the one place where getting the scope
+wrong hides transactions from detection rather than merely adding noise.
+
+---
+
 ## Run lifecycle
 
 - **Asymmetric matching window** around the expected date: −3/+3 days = normal charge matching.
@@ -876,6 +956,7 @@ implementations back to the 21-series rendering.*
 - **RLS** (settled, was an open question): enabled on all 7 tables. Direct `user_id` check on profiles/connection/subscription; join-based EXISTS up the chain for bank_account/transaction/run/charge. `(select auth.uid())` idiom for per-query evaluation.
   - Posture: `authenticated` role = SELECT everywhere + column-scoped UPDATE grants on user-owned columns only — **seven columns**: `profiles.{display_name,reminder_channels}`, `bank_account.nickname`, `subscription.{nickname,category,ignored,remind_before_days}`; no INSERT/DELETE ever; `anon` = nothing. (List corrected in v20: v17 folded `reminder_channels` and `remind_before_days` into the grants but left this enumeration at five.)
   - All writes go through Edge Functions (service role, bypasses RLS). Sync/detection never pay the RLS join cost.
+    - **Half of this was never implemented, corrected in Migration #3 (v22).** The RLS-bypass half was true (`service_role` carries `rolbypassrls = t`); the *writes* half was not — the revoke/grant block above names only `anon` and `authenticated`, and `service_role` does not inherit from `authenticated`. Its actual ACL was `service_role=Dxtm/postgres`: TRUNCATE, REFERENCES, TRIGGER, MAINTAIN, and **no INSERT/SELECT/UPDATE/DELETE**. Found by running the sync, which failed on its first query with `permission denied for table connection`. Grants are now stated explicitly rather than inherited from platform defaults — writer-states-everything, applied to permissions.
 - **Indexes (minimal, migration #1)**: FK-support indexes on `bank_account(connection_id)`, `subscription_run(subscription_id)`, `charge(run_id)`; transaction's widened to `(account_id, date)` — one index serves FK support **and** the engine's fundamental scan. Everything else (`normalized_merchant`, `next_expected_date`, partial status indexes) deferred until real query patterns exist.
 - **Signup trigger**: on `auth.users` insert, a security-definer function creates the profiles row. `display_name` fallback order (amended by the [auth flow contract](#auth-flow-contract), v11): Google `full_name` metadata → signup-provided name (17b passes the mandatory Name field in user metadata) → email. Works for both providers.
 
@@ -906,6 +987,67 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v22** — SYNC FUNCTION built and verified end-to-end (2026-08-10), the first
+  code to touch Pluggy in anger. Three decisions locked up front and one defect
+  found by running it.
+  **Two functions, not one**: `pluggy-sync` owns the raw chain and never writes
+  the interpreted one, on the replayability doctrine — a detection bug must not be
+  able to fail a sync, and detection must be re-runnable over stored history
+  without touching Pluggy, which is exactly the recovery path v20 leans on for
+  withdrawn rows. **Sync chains into detection on success** rather than the two
+  being separately scheduled, because an independent schedule lets detection wake
+  mid-sync and interpret a half-written raw chain; it would self-heal next run,
+  but producing knowingly-wrong state in the meantime is avoidable.
+  **The schedule is deliberately absent.** Sequencing chosen on purpose: verify
+  against the real item first, automate second, since scheduling is purely
+  additive. `pg_cron` + `net.http_post` is the versioned option but needs two
+  extensions plus a secret that cannot live in a public repo; the dashboard
+  option needs no secret but drifts invisibly. Neither is decided.
+  **`connection` is seeded by hand** and said so out loud, as a committed
+  parameterized script with the itemId passed in — the real path is Pluggy Connect
+  in SwiftUI, a screen that does not exist. A manual step living only in shell
+  history is invisible in the way this project keeps getting bitten by.
+  **The defect: Migration #1's posture "all writes go through Edge Functions
+  (service role, bypasses RLS)" was half-implemented.** The RLS half was true;
+  the *writes* half was never granted. The revoke/grant block names only `anon`
+  and `authenticated`, `service_role` does not inherit from `authenticated`, and
+  its real ACL was `service_role=Dxtm/postgres` — TRUNCATE, REFERENCES, TRIGGER,
+  MAINTAIN, and **no INSERT/SELECT/UPDATE/DELETE**. The sync failed on its very
+  first query with `permission denied for table connection`. A documented posture
+  with nothing enforcing it, invisible until something actually tried to write.
+  **Migration disposition: Migration #3, additive** — `grant select, insert,
+  update, delete` to `service_role` on all seven tables. No RLS policy changes, no
+  column-scoped grants, and the `authenticated` posture is untouched (verified
+  after: SELECT-only at table level, exactly the seven column-scoped UPDATEs).
+  Stated explicitly rather than inherited, because a permission that arrives by
+  platform default can leave by platform default.
+  **New doctrine: dates are São Paulo, not UTC.** Pluggy sends UTC timestamps and
+  `transaction.date` is a `date`. Measured before writing the mapping: **37 of 258
+  rows** carry a UTC time of 00:00–02:59 and belong to the previous day once
+  converted, one of them crossing a month boundary (`2026-06-01` → `2026-05-31`)
+  and so filing a charge in the wrong billing month. Naive truncation misplaces
+  ~14% of the ledger, precisely perturbing the gap arithmetic R1/R3 depend on.
+  Converted via the named zone `America/Sao_Paulo`, not a fixed `-3`, since
+  pre-2019 history was GMT-2 in summer. Verified after the run: exactly 37 stored
+  dates differ from naive UTC truncation, each by one day.
+  **Seven mapping traps recorded rather than discovered twice**, each confirmed
+  against a live payload — most sharply that `status`'s CHECK is lowercase while
+  `type`'s is uppercase and Pluggy sends both uppercase, and that
+  `bank_account.type` maps from Pluggy's `subtype` rather than its `type`, two
+  different vocabularies wearing the same field name. Also: `last4` from digits
+  only (`'88120381-6'` sliced by character gives `'81-6'`), `brand` from
+  `creditData` which is absent on checking accounts, `''` coerced to NULL (94
+  merchant objects, 4 empty, 90 written).
+  **Verified end-to-end, not asserted**: 1 connection, 2 accounts, 258
+  transactions; `status` stored as `pending`/`posted` and `type` as
+  `DEBIT`/`CREDIT`; 7 installment rows and 7 `purchase_date`s; fee info raw at
+  104 `NA` / 60 `IOF…` / 94 null; 0 empty strings; 0 withdrawn. The 403/403/405
+  paths on the auth gate were exercised too, and `deno check` and `deno lint` are
+  both clean.
+  **Known scope limit**: `run-detection` does not exist, so the chained call
+  reports "not deployed yet" and nothing is interpreted. The raw chain is real;
+  the interpreted chain is still empty.
 
 - **v21** — DETECTION DRY RUN against the 258 real transactions v20's probe
   captured (2026-08-10), run **before** the engine exists so the findings cost a
