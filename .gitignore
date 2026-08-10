@@ -7,9 +7,18 @@ backend/supabase/.temp
 backend/cli.log
 
 # Environment files
+#
+# Ignore every .env variant rather than enumerating them. The previous list
+# (.env, .env.local, .env.*.local) did NOT cover .env.production, and
+# backend/supabase/.env.production already existed on disk holding a live Pluggy
+# client secret and the SYNC_SECRET -- one `git add -A` from a public repo.
+# Enumerating filenames leaves the same hole open for the next variant
+# (.env.staging, .env.remote), so the pattern is the class.
 .env
-.env.local
-.env.*.local
+.env.*
+
+# ...except a committed template, which by convention holds only placeholders.
+!.env.example
 
 # macOS
 .DS_Store
