@@ -9,7 +9,7 @@
 // written, and charges whose transaction_id is NULL are a frozen region that is
 // never recomputed, never deleted and never re-parented.
 
-import { cents, sameAmount } from './money.ts'
+import { moneyKey, sameMoney } from './money.ts'
 import { addInterval, circularDomDistance, daysBetween, type Interval } from './dates.ts'
 
 // ----------------------------------------------------------------------- input
@@ -143,7 +143,9 @@ export function isInternalTransfer(r: TxRow, allRows: TxRow[]): boolean {
     (c) =>
       c.type === 'CREDIT' &&
       c.account_id !== r.account_id &&
-      sameAmount(c.amount, r.amount) &&
+      // Currency-aware: a USD card charge numerically matching a BRL bank
+      // credit would wrongly EXCLUDE a real transaction (v25).
+      sameMoney(c, r) &&
       Math.abs(daysBetween(c.date, r.date)) <= 3,
   )
 }
@@ -238,7 +240,9 @@ function anchorR1(group: TxRow[]): ProtoRun[] {
       const gap = daysBetween(group[i].date, group[j].date)
       if (gap > MONTHLY_MAX) break
       if (gap < MONTHLY_MIN) continue
-      if (!sameAmount(group[i].amount, group[j].amount)) continue
+      // Same money, not same number: one merchant bills in two currencies
+      // in real data, so an amount-only test anchors a phantom run (v25).
+      if (!sameMoney(group[i], group[j])) continue
 
       const run: ProtoRun = { charges: [group[i], group[j]], detected_by: 'R1', interval: 'monthly' }
       claimed.add(group[i].id)
@@ -270,7 +274,9 @@ function anchorR1(group: TxRow[]): ProtoRun[] {
  *  loose reading fires on 26 Steam purchases spread over 16 days (v21). */
 function suggestR3(group: TxRow[]): ProtoRun | null {
   if (group.length < R3_MIN_CHARGES) return null
-  const amounts = new Set(group.map((c) => cents(c.amount)))
+  // Keyed on currency+cents so a cross-currency pair counts as two values
+  // rather than collapsing into one (v25).
+  const amounts = new Set(group.map((c) => moneyKey(c)))
   if (amounts.size < 2) return null
 
   const doms = group.map((c) => Number(c.date.slice(8, 10))).sort((a, b) => a - b)

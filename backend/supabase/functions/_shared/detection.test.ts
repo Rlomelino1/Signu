@@ -11,7 +11,7 @@
 // Run:  deno test --allow-none backend/supabase/functions/_shared/detection.test.ts
 
 import { assert, assertEquals, assertFalse } from 'https://deno.land/std@0.224.0/assert/mod.ts'
-import { cents, sameAmount } from './money.ts'
+import { cents, moneyKey, sameMoney } from './money.ts'
 import { addMonths, circularDomDistance, daysBetween } from './dates.ts'
 import {
   detect,
@@ -52,7 +52,7 @@ const EMPTY = { subscriptions: [], runs: [], charges: [] }
 // --------------------------------------------------------------------- money
 
 Deno.test('v23 regression: amounts a cent apart are NOT the same amount', () => {
-  assertFalse(sameAmount(6.46, 6.45))
+  assertFalse(sameMoney({ amount: 6.46, currency: 'BRL' }, { amount: 6.45, currency: 'BRL' }))
   assert(Math.abs(6.46 - 6.45) < 0.01, 'the float epsilon that caused the bug still misfires')
   assertEquals(cents(6.45), 645)
   assertEquals(cents(-6.45), 645, 'magnitude, so card and bank sign dialects compare')
@@ -402,4 +402,54 @@ Deno.test('lifecycle: active -> overdue -> ended at +10, end_date paid-through',
 Deno.test('addMonths clamps rather than overflowing the month', () => {
   assertEquals(addMonths('2026-01-31', 1), '2026-02-28')
   assertEquals(addMonths('2026-01-31', 12), '2027-01-31')
+})
+
+// ------------------------------------------------------------------- currency
+
+Deno.test('v25: the same number in two currencies is not the same money', () => {
+  assertFalse(sameMoney({ amount: 6.45, currency: 'USD' }, { amount: 6.45, currency: 'BRL' }))
+  assert(sameMoney({ amount: 6.45, currency: 'usd' }, { amount: 6.45, currency: ' USD ' }), 'case/space tolerant')
+  assert(moneyKey({ amount: 6.45, currency: 'USD' }) !== moneyKey({ amount: 6.45, currency: 'BRL' }))
+})
+
+Deno.test('v25: R1 does NOT anchor a cross-currency pair', () => {
+  // Real exposure: Valve bills under one CNPJ in both BRL and USD.
+  const rows = [
+    row({ date: '2026-01-10', amount: 6.45, currency: 'USD', provider_merchant_cnpj: 'CNPJ-SYNTHETIC-1' }),
+    row({ date: '2026-02-09', amount: 6.45, currency: 'BRL', provider_merchant_cnpj: 'CNPJ-SYNTHETIC-1' }),
+  ]
+  const d = detect({ today: '2026-02-20', rows, ...EMPTY })
+  assertEquals(d.diagnostics.r1_runs, 0, 'same number, different money')
+})
+
+Deno.test('v25: R1 still anchors when both charges share a currency', () => {
+  // The real Steam subscription: 6.45 USD every month. Must survive the guard.
+  const rows = [
+    row({ date: '2026-06-19', amount: 6.45, currency: 'USD', provider_merchant_cnpj: 'CNPJ-SYNTHETIC-1' }),
+    row({ date: '2026-07-19', amount: 6.45, currency: 'USD', provider_merchant_cnpj: 'CNPJ-SYNTHETIC-1' }),
+  ]
+  const d = detect({ today: '2026-07-25', rows, ...EMPTY })
+  assertEquals(d.diagnostics.r1_runs, 1)
+  assertEquals(d.subscriptions[0].runs[0].charges.length, 2)
+})
+
+Deno.test('v25: internal-transfer filter does not fire across currencies', () => {
+  // This direction HIDES a real transaction, so it is the dangerous one.
+  const debit = row({ account_id: 'acct-checking', amount: 100, currency: 'BRL', date: '2026-01-10' })
+  const credit = row({ account_id: 'acct-card', type: 'CREDIT', amount: 100, currency: 'USD', date: '2026-01-10' })
+  assertFalse(isInternalTransfer(debit, [debit, credit]))
+
+  const sameCur = row({ account_id: 'acct-card', type: 'CREDIT', amount: 100, currency: 'BRL', date: '2026-01-10' })
+  assert(isInternalTransfer(debit, [debit, sameCur]), 'and still fires when it should')
+})
+
+Deno.test('v25: R3 counts cross-currency amounts as distinct', () => {
+  // Three date-aligned charges whose NUMBERS repeat but whose money does not.
+  const rows = [
+    row({ date: '2026-01-10', amount: 10, currency: 'USD' }),
+    row({ date: '2026-02-10', amount: 10, currency: 'BRL' }),
+    row({ date: '2026-03-11', amount: 10, currency: 'USD' }),
+  ]
+  const d = detect({ today: '2026-03-20', rows, ...EMPTY })
+  assertEquals(d.diagnostics.r3_runs, 1, 'varying money, so R3 has something to suggest')
 })
