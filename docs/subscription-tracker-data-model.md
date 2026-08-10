@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-05** (v16) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-10** (v20) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -88,6 +88,15 @@ Managed entirely by Supabase Auth — not part of our schema.
 | `normalized_merchant` | string | Derived; pipeline may rewrite anytime |
 | `provider_category` | string | Aggregator's hint, nullable, sync-owned |
 | `created_at` | timestamptz | = first import of this row |
+| `withdrawn_at` | timestamptz | Soft-delete. Set when Pluggy stops returning the row; **never hard-delete**. Detection reads only `withdrawn_at is null` — see [Pluggy reality contract](#pluggy-reality-contract) |
+| `installment_number` | integer | Parcel number. **Presence disqualifies the row from R1** |
+| `total_installments` | integer | Parcels in the purchase. Same R1 disqualification |
+| `purchase_date` | date | Original purchase date, preserved across every parcel while `date` shifts. `(merchant, purchase_date)` groups one purchase |
+| `fee_type_additional_info` | string | Raw fee descriptor (`IOF_COMPRA_INTERNACIONAL`, …). Fee exclusion keys off **this**, not `feeType`. Never stored as a derived `is_fee` boolean |
+| `provider_merchant_name` | string | Pluggy-enriched merchant name; ~40% coverage. Stored, **not yet adopted** |
+| `provider_merchant_cnpj` | string | Pluggy-enriched CNPJ; ~40% coverage. Stored, **not yet adopted** |
+
+*The last seven are sync-owned, added by Migration #2 (additive). All nullable, no defaults.*
 
 ### SUBSCRIPTION
 
@@ -185,9 +194,9 @@ Replayable over full history, date granularity only. **Strict to create, generou
 
 | Rule | Mode | What it does |
 |---|---|---|
-| **R1 — anchor** | auto | 2 charges, same merchant+amount, one cadence apart (monthly = 28–33d, ±3d window). Continuation is amount-flexible (price hikes never split a run). |
+| **R1 — anchor** | auto | 2 charges, same merchant+amount, one cadence apart (monthly = 28–33d, ±3d window). Continuation is amount-flexible (price hikes never split a run). **Amended v20**: a row carrying `installment_number` or `total_installments` is disqualified — see [Pluggy reality contract](#pluggy-reality-contract). |
 | **R2 — backfill** | auto | On confirmation, claim an unclaimed same-merchant charge ~1 interval before run start, any amount; fix `start_date`. |
-| **R3 — cadence-beats-amount** | suggest-only | 3+ date-aligned charges, varying amounts (FX-priced subs, utilities). User confirms/ignores. On BR credit cards, international (USD-priced) subs post converted to BRL with fluctuating amounts — **R3 is what catches them**; the currency column does not (it will read BRL). |
+| **R3 — cadence-beats-amount** | suggest-only | 3+ date-aligned charges, varying amounts (FX-priced subs, utilities). User confirms/ignores. On BR credit cards, international (USD-priced) subs post converted to BRL with fluctuating amounts — **R3 is what catches them**; the currency column does not (it will read BRL). **Amended v20**: the IOF line accompanying such a charge is itself varying-amount and date-aligned — excluded via `fee_type_additional_info`, see [Pluggy reality contract](#pluggy-reality-contract). |
 | **R4 — catalog fast path** | suggest-only | 1 charge from a known subscription-only merchant ⇒ "possible" immediately. Interval is asked, not guessed — see [R4 billing interval](#r4-billing-interval-locked-2026-07-15). |
 | **R5 — trailing charge on cancelled runs** | auto | See below. |
 
@@ -214,6 +223,161 @@ R4 creates a run from a **single charge** — cadence cannot be measured, so the
 ### Possible state
 
 R3/R4 suggestions live as real runs; user says yes ⇒ `active`, no ⇒ parent subscription `ignored = true` (recoverable in the settings screen).
+
+---
+
+## Pluggy reality contract
+
+*Locked 2026-08-10, after a live probe of connector 200 against real bank data.
+Everything here replaces an inference with an observation. Where a documented
+claim and the live feed disagreed, the live feed won and the disagreement is
+recorded — the documentation is not silently trusted again.*
+
+### Sync shape: poll-only, no webhook endpoint
+
+- **A full daily re-scan is the sync**, not an incremental cursor. ~500 rows per
+  page, ~6 requests per account for a year of history, against a 360 req/min
+  limit. Whole-history re-scan costs on the order of two dozen requests.
+- **This is not a preference — polling incrementally is impossible.** There is no
+  `updatedAtFrom` query parameter. `createdAtFrom` catches only rows Pluggy first
+  ingested after T, so it misses every PENDING→POSTED transition and every
+  `billId` acquisition. A re-scan is the *only* mechanism that observes updates,
+  so the documented cost of missing an update webhook ("you must re-scan") is
+  **zero when the re-scan is the baseline**.
+- **A re-scan detects all three change classes in one pass**: ids absent locally
+  are creations; ids present with a newer `updatedAt` are updates; ids held
+  locally and absent from the response are deletions.
+- **No webhook endpoint is built.** Reversal of an earlier position that webhooks
+  were required for correctness — true for a multi-tenant app polling narrow
+  windows, false here. Also avoids a real hazard: **Pluggy offers no webhook
+  signature.** No HMAC, no signing scheme. Authenticating a public Edge Function
+  would rest on a bearer header that does not bind to the payload plus a single
+  hard-coded IP with no documented change policy.
+- **Freshness is bounded by the source, not by us**: `nextAutoSyncAt` runs ~27h
+  after `lastUpdatedAt`, landing at ~14:42Z. Our sync is scheduled **after** it
+  (~15:30Z). A daily scan is exactly as fresh as data that refreshes daily;
+  webhooks would buy sub-daily latency on data that has none.
+
+### Deleted and recreated transactions
+
+- **Pluggy's `id` is a content hash, not a stable surrogate key.** When a row's
+  date, description, or amount change enough to break the hash, Pluggy deletes
+  it and creates a new one with a **new id**. The same happens when a bank
+  transiently stops returning a row for 1–3 days and then returns it. Two
+  documented causes, one code path.
+- **We never hard-delete. `transaction.withdrawn_at` is set instead**, and
+  detection reads only `withdrawn_at is null`. Rationale: the deletion is
+  frequently temporary, the row is evidence for a replayable interpreted chain,
+  and hard-deleting destroys a charge's evidence over what may be a three-day
+  bank hiccup.
+- **Re-linking is never attempted.** No fuzzy matching on amount-and-date, no
+  supersession chain. A detection re-run re-derives the link — "re-runs repair"
+  is exactly the doctrine this case exists for. Heuristic identity matching in
+  the sync layer would smuggle interpretation into the raw chain.
+- `charge.transaction_id` keeps `ON DELETE SET NULL` for connection deletion,
+  where it was designed to fire. It never fires for this reason.
+
+### Credit-card lifecycle (verified, not assumed)
+
+- **PENDING while the invoice is open; POSTED when the invoice falls due** —
+  *vence*, not *fecha*. The docs describe a typical 7–10 day window between
+  close and due in which further parcels can still appear.
+- **`billId` correlates exactly with POSTED**: 163 POSTED rows all carry it, both
+  PENDING rows carry `billForecastDate` and no `billId`.
+- **`billId` survives connector 200 despite `isOpenFinance: false`.** The docs
+  restrict `billId` to Open Finance connectors; the proxy passes it through
+  anyway. The "Open Finance only" tag is field-specific in what survives, not a
+  blanket rule — so it cannot be read as a reliable availability guarantee in
+  either direction.
+- **The PENDING→POSTED lag has no documented bound** and can exceed a full
+  billing cycle. **A PENDING row older than ~45 days is a signal something was
+  missed**, not a normal state.
+- **`date` semantics are not uniform.** Parcel 1 carries the purchase date;
+  parcels 2..N carry the bill-posting date. `date` is stable per id — a change
+  to it is precisely what produces a new id — but the mapping from a real-world
+  purchase to a `date` value is not stable.
+
+### Installments vs subscriptions — R1's blind spot
+
+- **The threat is real and grounded in Pluggy's own documentation.** Padrão B —
+  parcels created one per month, documented as the most common pattern among
+  major banks — produces same-merchant, same-amount, one-cadence-apart charges.
+  **That is exactly R1's trigger condition**, and R1 is auto, not suggest-only.
+  Left undefended, a 12× R$50 purchase silently becomes a tracked R$50/month
+  subscription on the second parcel.
+- **R1 amendment (locked): presence of `installment_number` or
+  `total_installments` disqualifies a transaction from R1**, and from
+  continuation of an existing run. Verified populated on every installment row
+  observed, so the defence has live evidence behind it.
+- **Where a bank omits those fields there is no defence, and the false positive
+  is accepted.** Single-user deployment; the review surface and `ignored` flag
+  already carry the cost, which is one dismissal.
+- **`purchase_date` is the grouping key Pluggy says does not exist.** Their docs
+  state Open Finance returns no identifier grouping parcels of one purchase and
+  recommend heuristics; `purchase_date` is preserved across every parcel while
+  `date` shifts, so `(merchant, purchase_date)` groups a purchase exactly. Better
+  than the heuristic Pluggy recommends.
+- **Truncated installment runs at the history boundary are normal.** A 5× purchase
+  whose first parcels predate the 365-day window appears as parcels 3, 4, 5. Not
+  data loss; do not "repair" it.
+
+### Fees masquerading as subscriptions (found by the probe, in no documentation)
+
+- **36% of card rows are IOF lines on international purchases** (60 of 165). A
+  USD-priced subscription posts **twice** monthly: the converted charge, and its
+  IOF line. IOF is a percentage of a fluctuating base, so the amounts vary —
+  **which is R3's trigger condition**, the very rule that exists to catch
+  FX-priced subscriptions. The tax on the subscription looks like a subscription,
+  and with several such subs the IOF lines share a descriptor and land multiple
+  times per cycle, forking instances under the dedupe_key doctrine.
+- **Detection excludes rows whose `fee_type_additional_info` identifies a fee.**
+- **The signal is in `fee_type_additional_info`, not `feeType`.** `feeType` is
+  `'OTHER'` on 164/165 rows and carries nothing. Same shape as every other
+  lesson this week: the documented field is not the usable field.
+- Stored **raw**, never as a derived `is_fee` boolean — the set of fee-indicating
+  values will grow, and a stored boolean freezes today's reading into the
+  immutable raw chain and defeats replay.
+
+### Enrichment: better than expected
+
+- **`merchant` and `category` are populated on the free path**, contradicting
+  their documented "requires Pro subscription level" gating. `category` on 258/258
+  rows, `merchant` on 94. Detection is **not** limited to raw description strings.
+- **`provider_merchant_name` and `provider_merchant_cnpj` are stored now, and
+  adopting them is a separate decision.** Stored because raw evidence not
+  captured is evidence lost — Pluggy retains 12 months, and detection cannot
+  replay over data never written. **`merchant_key` derivation is unchanged by
+  this version** and remains open; a CNPJ is a far stronger merchant identity
+  than a descriptor, but ~40% coverage means it can supplement description
+  matching, not replace it, and how a CNPJ-present and CNPJ-absent row for the
+  same merchant unify is undecided.
+
+### Deliberately not stored
+
+*Documented by Pluggy, not returned by these banks. Excluded on the same
+principle as any unobserved field: a column whose value no writer can state has
+no business existing, and all four are purely additive later.*
+
+- **`totalAmount`** — additionally, its meaning is contested three ways (prose
+  docs and OpenAPI say sum of all parcels; the SDK comment says the single parcel
+  amount). Derivable as `amount × total_installments` regardless.
+- **`payeeMCC`**, **`cardNumber`** — unobserved.
+- **`otherCreditsType`** — `'OTHER'` on 164/165, no signal today. **Watch item**:
+  its `BILL_INSTALLMENT` value means an installment plan on the *bill itself*
+  (parcelar a fatura), which generates monthly charges and would read as
+  recurring. If a card bill is ever parcelled, this becomes a live
+  false-positive source and earns a column.
+
+### Still open
+
+- **Padrão A vs B for these banks** — settleable only longitudinally, by watching
+  whether next month's parcel arrives as a new transaction. **No longer
+  blocking**: the R1 disqualification works under either pattern because the
+  fields are populated. Note that `created_at` cannot answer it — on a freshly
+  connected item every row shares one ingest timestamp.
+- **`merchant_key` derivation from CNPJ** (above).
+- **Webhook availability on the free path** — pricing page says absent, technical
+  docs are silent. **Now moot**: poll-only needs no answer.
 
 ---
 
@@ -633,7 +797,7 @@ implementations back to the 21-series rendering.*
 - **FK delete map**: CASCADE on all seven FKs **except** `charge.transaction_id`, which is `ON DELETE SET NULL`. That single clause implements deletion tier (b) "preserve history": the raw-chain cascade nulls the bridge, the charge survives self-described. `profiles.id → auth.users(id)` also CASCADEs, so tier (a) is one `auth.admin.deleteUser()` call.
   - **Sequencing rule**: tier (b) "delete history too" is **not** handled by cascade (the interpreted chain hangs off profiles, not connection). The Edge Function must find + delete affected subscriptions **before** deleting the connection — after it, `transaction_id`s are NULL and the linkage is gone.
 - **RLS** (settled, was an open question): enabled on all 7 tables. Direct `user_id` check on profiles/connection/subscription; join-based EXISTS up the chain for bank_account/transaction/run/charge. `(select auth.uid())` idiom for per-query evaluation.
-  - Posture: `authenticated` role = SELECT everywhere + column-scoped UPDATE grants on user-owned columns only (`profiles.display_name`, `bank_account.nickname`, `subscription.{nickname,category,ignored}`); no INSERT/DELETE ever; `anon` = nothing.
+  - Posture: `authenticated` role = SELECT everywhere + column-scoped UPDATE grants on user-owned columns only — **seven columns**: `profiles.{display_name,reminder_channels}`, `bank_account.nickname`, `subscription.{nickname,category,ignored,remind_before_days}`; no INSERT/DELETE ever; `anon` = nothing. (List corrected in v20: v17 folded `reminder_channels` and `remind_before_days` into the grants but left this enumeration at five.)
   - All writes go through Edge Functions (service role, bypasses RLS). Sync/detection never pay the RLS join cost.
 - **Indexes (minimal, migration #1)**: FK-support indexes on `bank_account(connection_id)`, `subscription_run(subscription_id)`, `charge(run_id)`; transaction's widened to `(account_id, date)` — one index serves FK support **and** the engine's fundamental scan. Everything else (`normalized_merchant`, `next_expected_date`, partial status indexes) deferred until real query patterns exist.
 - **Signup trigger**: on `auth.users` insert, a security-definer function creates the profiles row. `display_name` fallback order (amended by the [auth flow contract](#auth-flow-contract), v11): Google `full_name` metadata → signup-provided name (17b passes the mandatory Name field in user metadata) → email. Works for both providers.
@@ -660,11 +824,54 @@ implementations back to the 21-series rendering.*
 
 ## Open questions
 
-- **Pluggy delete/recreate**: Pluggy may delete a transaction and create a new one (new id) when its data changes too much to confirm identity. Interacts with idempotent sync (`UNIQUE provider_tx_id`) and with `charge.transaction_id` links (a claimed transaction could vanish and reappear under a new id — the charge would go NULL via SET NULL if we hard-delete, or point at a ghost if we don't). Needs a decision when designing the sync function: hard-delete vs soft-delete vanished transactions, and whether re-linking is attempted.
+*None blocking. Pluggy delete/recreate — the sole entry here — was resolved in v20; the remaining non-blocking items live under [Pluggy reality contract → Still open](#still-open).*
 
 ---
 
 ## Changelog
+
+- **v20** — PLUGGY REALITY CONTRACT locked (2026-08-10), closing the last entry
+  under Open questions and replacing inference with observation from a live probe
+  of connector 200. **Sync is poll-only, no webhook endpoint** — a reversal of the
+  earlier "webhooks are required for correctness" position, which held for a
+  multi-tenant app polling narrow windows and not here: there is no
+  `updatedAtFrom`, so a full re-scan is the *only* way to observe updates, and at
+  ~24 requests for a year of history the documented penalty for missing an update
+  webhook is zero when the re-scan **is** the baseline. Also sidesteps a genuine
+  hazard — **Pluggy offers no webhook signature**, so a public endpoint would rest
+  on a non-binding bearer header plus one hard-coded IP. Freshness is
+  source-bounded: `nextAutoSyncAt` lands ~14:42Z, our scan runs after it.
+  **Delete/recreate resolved**: Pluggy's `id` is a content hash, not a surrogate
+  key — a hash-breaking content change *or* a 1–3 day bank drop produces a new id.
+  `transaction.withdrawn_at` is set instead of deleting, detection filters
+  `withdrawn_at is null`, and **re-linking is never attempted** ("re-runs repair").
+  **R1 amended: `installment_number` / `total_installments` presence disqualifies**
+  — Padrão B, documented as the most common bank pattern, emits same-merchant
+  same-amount monthly charges that *are* R1's trigger, so an undefended 12x
+  purchase became a tracked subscription on parcel two; where a bank omits the
+  fields the false positive is accepted (one dismissal, single-user).
+  **`purchase_date` is the parcel grouping key Pluggy's docs say Open Finance does
+  not provide.** **New finding in no documentation: 36% of card rows are IOF
+  lines**, so an FX-priced subscription posts twice monthly with a varying-amount
+  tax line — **R3's** trigger, the rule meant to catch FX subs. Excluded via
+  `fee_type_additional_info`; note `feeType` is `'OTHER'` on 164/165 and useless,
+  the documented field again not being the usable one. Stored raw, never as a
+  derived boolean, so a growing value set stays replayable. **Two documented
+  claims contradicted by live data**: `merchant`/`category` are populated despite
+  Pro-gating (so detection is not description-only), and `billId` survives
+  connector 200 despite `isOpenFinance: false` — the Open-Finance-only tag is
+  field-specific in what the proxy passes, not a blanket rule in either
+  direction. Four documented-but-unobserved fields deliberately excluded
+  (`totalAmount` — also contested three ways and derivable; `payeeMCC`;
+  `cardNumber`; `otherCreditsType` — a watch item, since `BILL_INSTALLMENT` would
+  read as recurring if a bill were ever parcelled). **Migration disposition
+  (first application of the v17 discipline): folded into Migration #2, additive**
+  — seven sync-owned columns on TRANSACTION, no defaults, no RLS grant changes
+  (none are user-owned), no new index. Additive rather than in-place because
+  Migration #1 is applied to the remote, exactly as v17 requires. Verified by
+  execution on top of the applied #1: columns nullable and default-free, grants
+  unchanged at seven, and a withdrawn IOF-marked installment row correctly
+  excluded by the detection filter.
 
 - **v19** — PROFILE AUTH ROWS locked (2026-08-06), closing the gap PR #2 reported:
   Settings had **no sign-out row**, so deleting the account was the only way out
