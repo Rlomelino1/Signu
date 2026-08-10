@@ -36,6 +36,20 @@ from collections import defaultdict, Counter
 SRC = sys.argv[1] if len(sys.argv) > 1 else 'pluggy-probe-raw.json'
 d=json.load(open(SRC))
 ACCTS=list(d['transactions'])
+def cents(x) -> int:
+    """Money as integer cents. Never compare amounts with a float epsilon.
+
+    abs(6.46 - 6.45) is 0.009999999999999787 in IEEE float, which slips under a
+    `< 0.01` threshold and makes two amounts a cent apart compare EQUAL. That
+    inflated this script's R1 anchor count from 1 to 2 on real data: the Valve
+    charges of 6.46 and 6.45 are not the same amount, and R1 requires the same
+    amount. Postgres `numeric`, which the engine will actually use, reports
+    6.46 <> 6.45 correctly -- the discrepancy between this script and a SQL
+    implementation of the same rule is what exposed it.
+    """
+    return int(round(abs(float(x)) * 100))
+
+
 def dt(r): return date.fromisoformat(str(r['date'])[:10])
 def desc(r): return (r.get('description') or '').upper().strip()
 def meta(r): return r.get('creditCardMetadata') or {}
@@ -75,7 +89,7 @@ credits=[(a,r) for a,r in rows if r['type']=='CREDIT']
 def is_internal(a,r):
     if r['type']!='DEBIT': return False
     for a2,c in credits:
-        if a2!=a and abs(abs(c['amount'])-abs(r['amount']))<0.01 and abs((dt(c)-dt(r)).days)<=3:
+        if a2!=a and cents(c['amount'])==cents(r['amount']) and abs((dt(c)-dt(r)).days)<=3:
             return True
     return False
 
@@ -110,7 +124,7 @@ for k,v in sorted(g.items(), key=lambda x:-len(x[1])):
     for i in range(len(v)):
         for j in range(i+1,len(v)):
             gap=(dt(v[j])-dt(v[i])).days
-            if 25<=gap<=36 and abs(abs(v[i]['amount'])-abs(v[j]['amount']))<0.01:
+            if 25<=gap<=36 and cents(v[i]['amount'])==cents(v[j]['amount']):
                 nm=bn(v[i]) or k
                 print(f"  R1 ANCHOR  {nm[:34]:<34} R${abs(v[i]['amount']):.2f}  "
                       f"{dt(v[i])} -> {dt(v[j])}  gap={gap}d")
@@ -128,7 +142,7 @@ print("\n"+"="*70); print("  R3 UNDER v21 DEFINITION (>=80% within +/-3d of circ
 r3=0
 for k,v in sorted(((k,v) for k,v in g.items() if len(v)>=3), key=lambda x:-len(x[1])):
     v=sorted(v,key=dt)
-    amts={round(abs(x['amount']),2) for x in v}
+    amts={cents(x['amount']) for x in v}
     frac=circ_aligned(v)
     nm=bn(v[0]) or k
     if frac>=0.8 and len(amts)>1:

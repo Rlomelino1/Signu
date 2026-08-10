@@ -174,6 +174,7 @@ Managed entirely by Supabase Auth — not part of our schema.
 - **Transaction immutability, precisely**: `raw_description` / `date` / `amount` are frozen once posted; pending rows are drafts (may update or vanish); `normalized_merchant` is derived and rewritable by the pipeline.
 - **Sign convention (locked, Option A — faithful mirror)**: `amount` is stored **exactly as Pluggy sends it**, `type` numeric. Pluggy's dialects differ: bank accounts negative = outflow; credit cards positive = new charge. The sync-owned column `TRANSACTION.type` (DEBIT / CREDIT — Pluggy's explicit direction signal) is what detection keys direction off, **never the sign**. Outflow = type DEBIT; refunds = type CREDIT (still ignored by detection). The raw layer stays a literal record of the aggregator; no interpretation smuggled into the evidence.
   - Consequence for doctrine: "same amount" in R1/continuation compares **magnitudes** — `abs(amount)` — so cross-account-type comparisons never break on sign.
+  - **Money is compared exactly, never with a float epsilon** (locked by the v21 correction below). `abs(amount)` equality means `numeric` equality in SQL, or integer cents in any other language — never `abs(a - b) < 0.01`. `abs(6.46 - 6.45)` is `0.009999999999999787` in IEEE float, so an epsilon test makes two amounts a cent apart compare **equal**. That is not a rounding nicety: R1 fires on *same* amount, and a cent-tolerant comparison invents pairs that do not exist. It already produced one false anchor on real data.
 - **`currency` on TRANSACTION and CHARGE**: 3-char, NOT NULL, no default; always written explicitly. No more BRL default — sync copies Pluggy's `currencyCode`; detection copies the source transaction's currency onto the charge.
 - **Writer-states-everything doctrine**: no status column anywhere has a DB default. Sync states status for the raw chain, the engine states it for runs. Rationale: a connection is not "active" until verified; defaults that guess hide bugs, explicit writes surface them. Only semantic defaults kept: `subscription.identification = 'auto'` and `ignored = false` (the true birth state of every subscription).
 - **Refunds**: never rewrite a charge; a refund is a separate transaction (type CREDIT) in the raw layer, ignored by detection (DEBITs only). Optional later: `refund_transaction_id` link on CHARGE, purely additive.
@@ -1113,6 +1114,24 @@ implementations back to the 21-series rendering.*
   R$1.11–R$88.51, nothing recurs within ±15% at a monthly gap, and **April 2026
   has no Steam debit at all**, which a monthly subscription cannot do. Either it
   bills to an account that is not connected, or it is inside the lumped amounts.
+  - **Corrected same day, by a database cross-check: the anchor count is one, not
+    two.** `pluggy-detection-dryrun.py` compared amounts with a float epsilon
+    (`abs(a - b) < 0.01`), and `abs(6.46 - 6.45)` is `0.009999999999999787` in
+    IEEE float — so the two Valve charges a cent apart compared **equal** and the
+    script reported a second anchor that does not exist. Postgres `numeric`
+    reports `6.46 <> 6.45` correctly, and R1 fires on the *same* amount. Found by
+    re-implementing the rule as SQL against the synced rows and noticing the two
+    implementations disagreed on a count they should have shared — the same
+    two-implementations-must-converge check that catches replay bugs. The harness
+    now compares integer cents at **all three** sites: R1, the internal-transfer
+    pairing (where the identical bug would have *hidden* rows rather than added
+    them, the more dangerous direction), and R3's distinct-amount count.
+    Generalised into doctrine under [transactions & sign
+    convention](#transactions--sign-convention): money is never compared with a
+    float epsilon. Both implementations now report one anchor, and every other
+    count is unchanged — 128 candidates, 12 internal transfers, 0 R3 suggestions.
+    The prose above needs no revision: "two charges of R$6.45" was always the
+    correct description of the pair; only the *count of anchors* was inflated.
 
 - **v20** — PLUGGY REALITY CONTRACT locked (2026-08-10), closing the last entry
   under Open questions and replacing inference with observation from a live probe
