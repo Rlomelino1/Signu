@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-10** (v20) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-10** (v21) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -164,7 +164,7 @@ Managed entirely by Supabase Auth — not part of our schema.
 
 ### Connections & accounts
 
-- **Connection death never deletes data**: expiry / revocation / disconnect changes status and stops syncing, but all downstream rows survive. (Explicit user-initiated deletion is separate — see [User deletion tiers](#user-deletion-tiers).)
+- **Connection death never deletes data**: expiry / revocation / disconnect changes status and stops syncing, but all downstream rows survive. (Explicit user-initiated deletion is separate — see [Remove-bank-link flow](#remove-bank-link-flow-12c--deletion-tier-b-made-concrete) for tier (b) and [Delete account](#delete-account-12a12d-data-section--14a) for tier (a).)
 - **`UNIQUE(user_id, provider_connection_id)`**: the DB rejects duplicate registration of the same bank link (double-tap / retry / duplicate webhook).
 - **Accounts die independently of connections**: closed card ⇒ `status = closed`, data survives. Card replacement = new `BANK_ACCOUNT` row (new provider id / last4); subscriptions are unaffected since they belong to the user, not the card.
 - **Sync-owned vs user-owned columns never overlap**: `official_name` is sync's, `nickname` is the user's. Now **enforced**, not convention — see [RLS](#migration-1-decisions).
@@ -223,6 +223,48 @@ R4 creates a run from a **single charge** — cadence cannot be measured, so the
 ### Possible state
 
 R3/R4 suggestions live as real runs; user says yes ⇒ `active`, no ⇒ parent subscription `ignored = true` (recoverable in the settings screen).
+
+### Detection candidate filter (locked v21, from a dry run against real data)
+
+Every rule sees the same candidate set. A row is a candidate only if **all** of these hold. Stated here, where the rules live, because the first condition was already doctrine but buried in the [refunds bullet](#transactions--sign-convention) and read as a refund detail rather than a global filter.
+
+| # | Exclusion | Mechanism |
+|---|---|---|
+| 1 | **`type = CREDIT`** | Refunds, reversals, and bill payments received. Was already implied ("ignored by detection (DEBITs only)"); restated as a filter. |
+| 2 | **Fees** | `fee_type_additional_info` **holds a fee-indicating value**. Match on the value, never on presence — see the trap below. |
+| 3 | **Installments** | `installment_number` or `total_installments` present. Disqualifies from R1 anchoring *and* from continuing a run. |
+| 4 | **Internal transfers** | **New in v21.** See below. |
+
+**Filter 2 is a trap, and the dry run fell into it.** `fee_type_additional_info` is **populated on 164 of 165 card rows** — `'NA'` on 104, `IOF_COMPRA_INTERNACIONAL` on 60. **Presence therefore carries no information whatsoever.** A first pass at this filter tested `IS NOT NULL`, excluded 146 of 258 rows, and detection found nothing at all — including the one true subscription in the data. The whole observed value set is `{NULL, 'NA', 'IOF_COMPRA_INTERNACIONAL'}`.
+
+- **The rule is a growing denylist of fee-indicating values**, with `NULL`, `''`, `'NA'` and `'N/A'` explicitly meaning *no fee*. New institutions will bring new spellings of both sides; an unrecognized fee value silently admits a fee, an unrecognized not-applicable sentinel silently excludes everything.
+- This is consistent with storing the field raw: interpretation lives in detection, where the denylist can grow and a re-run repairs history. It is the reason a derived `is_fee` boolean was refused in v20.
+- **Symptom to watch for**: candidate count collapsing far below row count. It looks like a quiet, working filter, not a bug.
+
+**Internal transfers — the exclusion the dry run forced.** Paying the credit-card bill produces *two* rows when both accounts are connected: a `CREDIT` on the card and a `DEBIT` on the checking account. Filter 1 catches the card side. **Nothing caught the checking side**, and it is the strongest false positive in the real data — 12 consecutive months, day-of-month 10, gaps 28–33 every time, amounts varying from R$110 to R$5,245. That is R3's trigger condition executed perfectly, and confirming it would have tracked the user's entire card spend as a subscription.
+
+Rule: **a `DEBIT` whose `abs(amount)` equals that of a `CREDIT` on a different `bank_account` of the same user, dated within ±3 days, is an internal transfer and is excluded — both sides.** Verified 12/12 on real data, every pair matching same-day and to the cent.
+
+- **Structural, not lexical, on purpose.** No descriptor blacklist. `PAGAMENTO DE FATURA` / `PAGAMENTO RECEBIDO` are one bank's wording; the amount-and-date correspondence is what the event actually *is*, and it survives translation, rewording, and institutions we have never seen.
+- **Known limitation, accepted**: the rule needs *both* accounts connected. Pay the card from an unconnected account and the pairing is invisible, leaving a perfect monthly varying-amount candidate with no defence. It surfaces as an R3 suggestion, which is suggest-only, so the cost is one dismissal — the same bargain as the installment case.
+- Excluded at **detection** time, never stored as a flag on the raw row. Which rows pair depends on which accounts are connected *now*; freezing that into the raw chain would defeat replay.
+
+### `merchant_key` derivation (locked v21)
+
+Closes the question v20 left open. **`merchant_key` is `provider_merchant_cnpj` when present, else the normalized descriptor.**
+
+The dry run made this non-optional rather than merely nicer. One real merchant — Valve — bills under **three** descriptors (`STEAMGAMES.COM`, `WL *STEAM PURCHASE`, `STEAM PURCHASE`), all carrying the same CNPJ. Two charges of R$6.45, 30 days apart, landed under two *different* descriptors, so **descriptor-keyed R1 never saw a pair and detected nothing.** CNPJ-keyed, it anchors. Across the card, 15 descriptors collapse to 5 CNPJs, and no descriptor ever maps to more than one CNPJ.
+
+- **Normalization is case and whitespace only. Do not strip trailing digits.** Tried and rejected: a digit-stripping pass merged `LS4246147` with `LS4289481` — two unrelated transactions — and merged nothing else. On this data the aggressive version is pure loss. The feared `PAG*NETFLIX` / `NETFLIX.COM` digit variance does not occur; fragmentation is by *descriptor variant*, which CNPJ solves and string surgery does not.
+- **Aggregator exception, and it is load-bearing in the other direction.** One CNPJ (`PAYPAL DO BRASIL`) covers five unrelated merchants — `PAYPAL *RIOTGAMESIN`, `PAYPAL *C.TAFFY11`, `PAYPAL *JAST USA`, `PAYPAL *LOADED COM`, `PAYPAL *ADHOC STUDI`. Keyed on CNPJ alone they become one merchant, and two same-amount purchases a cadence apart would anchor a **phantom** subscription. For CNPJs on an aggregator list, `merchant_key` is `cnpj + ':' + descriptor suffix`. The list starts with PayPal and grows by observation; an unlisted aggregator is a live false-positive source.
+- **`''` is not a value.** `businessName` arrives as an empty string on 4 of 66 card rows with a merchant object. Sync coerces `''` → NULL on write, so `IS NOT NULL` means what it says.
+- CNPJ coverage is ~40%, so the descriptor fallback is the majority path, not an edge case. Both branches are load-bearing.
+
+### R3 date-alignment, defined (locked v21)
+
+"3+ date-aligned charges" was undefined, and the gap is not academic: under a loose reading — *any* two gaps in the monthly band — `STEAMGAMES.COM` fires with 26 charges spread across 16 distinct days of the month, which would be badly wrong.
+
+**Date-aligned = at least 80% of the charges fall within ±3 days of the median day-of-month, computed circularly** so month-end and month-start are near each other, not 28 days apart. On real data this fires on exactly one group and rejects the six others that a loose reading admits.
 
 ---
 
@@ -309,9 +351,13 @@ recorded — the documentation is not silently trusted again.*
   `total_installments` disqualifies a transaction from R1**, and from
   continuation of an existing run. Verified populated on every installment row
   observed, so the defence has live evidence behind it.
-- **Where a bank omits those fields there is no defence, and the false positive
-  is accepted.** Single-user deployment; the review surface and `ignored` flag
-  already carry the cost, which is one dismissal.
+- **Where a bank omits those fields there is a fallback, found in the dry run.**
+  The descriptor itself carries the parcel marker: `AMAZON MARKETPLACE 1/2`,
+  `2/2`. A `\b\d{1,2}/\d{1,2}\b` test on the descriptor agreed with the metadata
+  **7/7, with zero disagreements in either direction** across 165 rows — no
+  descriptor marker without metadata, no metadata without a marker. Used as a
+  secondary signal only, since 7 rows is a small sample; where both are absent the
+  false positive is still accepted (single-user, one dismissal).
 - **`purchase_date` is the grouping key Pluggy says does not exist.** Their docs
   state Open Finance returns no identifier grouping parcels of one purchase and
   recommend heuristics; `purchase_date` is preserved across every parcel while
@@ -327,13 +373,31 @@ recorded — the documentation is not silently trusted again.*
   USD-priced subscription posts **twice** monthly: the converted charge, and its
   IOF line. IOF is a percentage of a fluctuating base, so the amounts vary —
   **which is R3's trigger condition**, the very rule that exists to catch
-  FX-priced subscriptions. The tax on the subscription looks like a subscription,
-  and with several such subs the IOF lines share a descriptor and land multiple
-  times per cycle, forking instances under the dedupe_key doctrine.
+  FX-priced subscriptions. The tax on the subscription looks like a subscription.
+- **Corrected in v21** (v20 said these "fork instances under the dedupe_key
+  doctrine" — they do the opposite). 53 of the 60 share a single *generic*
+  descriptor, `IOF DE COMPRA INTERNACIONAL`, naming no merchant, so they
+  **collapse into one group** of 53 at up to 11 per month rather than forking per
+  parent. Only 3 rows name their parent.
+- **The exclusion is safe, and this was worth checking rather than assuming**: all
+  60 IOF rows literally contain `IOF` in the descriptor and share **zero**
+  descriptors with the other 105 rows. They are separate tax lines, not
+  international purchases carrying IOF metadata — so excluding them cannot
+  exclude a subscription. Reversals (`ESTORNO DE IOF...`) carry the same field and
+  are caught too.
+- **Wholesale exclusion is the only option, which is stronger than v20's
+  reasoning.** Parent attribution is impossible for ~95% of IOF rows: the
+  descriptor is generic, only 18 of 60 land on the same date as any non-IOF
+  charge (46 within one day, all 60 within two), and 6 have more than one
+  candidate parent on their date.
 - **Detection excludes rows whose `fee_type_additional_info` identifies a fee.**
 - **The signal is in `fee_type_additional_info`, not `feeType`.** `feeType` is
   `'OTHER'` on 164/165 rows and carries nothing. Same shape as every other
   lesson this week: the documented field is not the usable field.
+- **But `fee_type_additional_info` is populated on 164/165 rows too** — `'NA'` on
+  104 of them. Only its *value* discriminates, never its presence. v21 states the
+  filter as a denylist for exactly this reason; testing `IS NOT NULL` excludes 146
+  of 258 rows and detects nothing.
 - Stored **raw**, never as a derived `is_fee` boolean — the set of fee-indicating
   values will grow, and a stored boolean freezes today's reading into the
   immutable raw chain and defeats replay.
@@ -343,14 +407,18 @@ recorded — the documentation is not silently trusted again.*
 - **`merchant` and `category` are populated on the free path**, contradicting
   their documented "requires Pro subscription level" gating. `category` on 258/258
   rows, `merchant` on 94. Detection is **not** limited to raw description strings.
-- **`provider_merchant_name` and `provider_merchant_cnpj` are stored now, and
-  adopting them is a separate decision.** Stored because raw evidence not
-  captured is evidence lost — Pluggy retains 12 months, and detection cannot
-  replay over data never written. **`merchant_key` derivation is unchanged by
-  this version** and remains open; a CNPJ is a far stronger merchant identity
-  than a descriptor, but ~40% coverage means it can supplement description
-  matching, not replace it, and how a CNPJ-present and CNPJ-absent row for the
-  same merchant unify is undecided.
+- **`provider_merchant_name` and `provider_merchant_cnpj` are stored now.** Stored
+  because raw evidence not captured is evidence lost — Pluggy retains 12 months,
+  and detection cannot replay over data never written. **Adoption is settled in
+  v21** — see [`merchant_key` derivation](#merchant_key-derivation-locked-v21).
+- **`provider_merchant_name` is populated from `merchant.businessName`, not
+  `merchant.name`.** Locked v21 after a live count: `name` is present on **5 of
+  258 rows**, `businessName` on 94. Wiring the column to the field its name
+  suggests would leave it ~98% null. No migration — the column already exists and
+  this is a sync mapping, but it has to be written down or it will be wired the
+  obvious wrong way.
+- `businessName` is sometimes the **empty string** (4 rows), not null. Sync
+  coerces `''` → NULL.
 
 ### Deliberately not stored
 
@@ -375,9 +443,18 @@ no business existing, and all four are purely additive later.*
   blocking**: the R1 disqualification works under either pattern because the
   fields are populated. Note that `created_at` cannot answer it — on a freshly
   connected item every row shares one ingest timestamp.
-- **`merchant_key` derivation from CNPJ** (above).
+- ~~**`merchant_key` derivation from CNPJ**~~ — **closed in v21**, see
+  [`merchant_key` derivation](#merchant_key-derivation-locked-v21).
 - **Webhook availability on the free path** — pricing page says absent, technical
   docs are silent. **Now moot**: poll-only needs no answer.
+- **The aggregator list has one entry.** PayPal was found because it happened to
+  be in one year of one card. Any unlisted aggregator sharing a CNPJ across
+  merchants is an undefended phantom-subscription source, and there is no way to
+  enumerate them in advance from Pluggy's data.
+- **R1's positive path has never fired on real data.** A year of it contains no
+  clean same-merchant same-amount monthly pair except the R$6.45 Valve case that
+  only v21's CNPJ keying exposes. R1 is verified to produce **zero false
+  positives** across 163 POSTED rows; it is not verified to produce a true one.
 
 ---
 
@@ -829,6 +906,71 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v21** — DETECTION DRY RUN against the 258 real transactions v20's probe
+  captured (2026-08-10), run **before** the engine exists so the findings cost a
+  spec edit rather than a rewrite. It found one silent miss, one undefended false
+  positive, and two claims of v20's that were wrong.
+  **The miss, and it kills descriptor-keyed matching outright**: Valve bills under
+  three descriptors (`STEAMGAMES.COM`, `WL *STEAM PURCHASE`, `STEAM PURCHASE`)
+  carrying one CNPJ. Two R$6.45 charges 30 days apart landed under two of them, so
+  **descriptor-keyed R1 saw no pair and detected nothing**; CNPJ-keyed it anchors.
+  **`merchant_key` derivation is therefore closed** (v20 left it open): CNPJ where
+  present, normalized descriptor otherwise — with an **aggregator exception**,
+  because one PayPal CNPJ covers five unrelated merchants and keying on it alone
+  would anchor a *phantom* subscription. Both directions of the same problem, and
+  the list has one entry, found by luck. **Normalization is case and whitespace
+  only**: a digit-stripping pass merged two unrelated `LS…` transactions and
+  merged nothing else, and the feared `PAG*NETFLIX` digit variance does not occur
+  at all — fragmentation is by descriptor *variant*, which string surgery cannot
+  fix.
+  **The false positive**: paying the card writes two rows when both accounts are
+  connected. The card-side CREDIT was already excluded by the DEBITs-only rule —
+  which existed but sat in the refunds bullet, reading as a refund detail rather
+  than a global filter, so it is **restated as a candidate filter where the rules
+  live**. The checking-side DEBIT was caught by nothing, and it is the cleanest R3
+  trigger in the data: 12 consecutive months, day-of-month 10, gaps 28–33 every
+  time, amounts R$110–R$5,245. Confirming it would have tracked the user's whole
+  card spend as a subscription. Excluded **structurally, not lexically** — a DEBIT
+  whose magnitude matches a CREDIT on another of the user's accounts within ±3
+  days — which survives rewording and unseen institutions where a descriptor
+  blacklist would not. Verified 12/12, every pair same-day and to the cent.
+  Accepted limitation: it needs both accounts connected.
+  **R3's "date-aligned" is now defined** (≥80% of charges within ±3 days of the
+  circular median day-of-month) because it was undefined and the loose reading
+  fires on 26 Steam purchases spread over 16 days of the month.
+  **Two v20 claims corrected.** The IOF lines do not "fork instances under the
+  dedupe_key doctrine" — 53 of 60 share one generic descriptor and collapse into a
+  single group; the exclusion is right but the reason is that parent attribution is
+  *impossible* for ~95% of them (generic descriptor, only 18/60 same-day, 6 with
+  ambiguous parents). And `provider_merchant_name` must map from
+  `merchant.businessName`, not `merchant.name` — `name` is present on **5 of 258
+  rows**, so wiring the column to the field its own name suggests would leave it
+  ~98% null; `businessName` also arrives as `''` on 4 rows, coerced to NULL.
+  **One free win**: the descriptor carries parcel markers (`AMAZON MARKETPLACE
+  1/2`) agreeing with the installment metadata 7/7 with no disagreement either
+  way, so v20's accepted false positive gains a secondary defence.
+  **Caught by re-running the check against the amended doctrine, which is the
+  point of doing it twice**: v20's fee wording ("rows whose
+  `fee_type_additional_info` identifies a fee") reads as a presence test, and
+  implementing it that way excludes **146 of 258 rows** and detects nothing —
+  because the field is populated on 164/165 card rows, `'NA'` on 104 of them.
+  Presence carries no information at all. Restated as a **denylist of
+  fee-indicating values** with `NULL`/`''`/`'NA'`/`'N/A'` meaning no fee, plus the
+  symptom to watch for, since a filter that silently eats 57% of the ledger looks
+  like a working filter rather than a bug.
+  **Migration disposition: no action, and why** — every v21 change is a detection
+  rule or a sync mapping over columns Migration #2 already added. The
+  internal-transfer exclusion is deliberately *not* stored as a flag: which rows
+  pair depends on which accounts are connected at the time, and freezing that into
+  the immutable raw chain would defeat replay.
+  **Recorded as unresolved rather than papered over**: R1's positive path has still
+  never fired on real data — zero false positives across 163 POSTED rows, but the
+  only true pair is one v21's own change exposes. A reported ~R$35/month Steam
+  subscription could not be found: 45 Steam debits over 10 months range
+  R$1.11–R$88.51, nothing recurs within ±15% at a monthly gap, and **April 2026
+  has no Steam debit at all**, which a monthly subscription cannot do. Either it
+  bills to an account that is not connected, or it is inside the lumped amounts.
 
 - **v20** — PLUGGY REALITY CONTRACT locked (2026-08-10), closing the last entry
   under Open questions and replacing inference with observation from a live probe
