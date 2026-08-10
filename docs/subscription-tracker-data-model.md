@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-10** (v25) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-10** (v26) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -70,6 +70,7 @@ Managed entirely by Supabase Auth — not part of our schema.
 | `official_name` | string | Bank's display name; **sync may overwrite** |
 | `nickname` | string | User's own label; **never touched by sync** |
 | `status` | string | active / closed; no default, sync states it |
+| `currency` | string | 3-char, nullable. The **unit** for `amount_in_account_currency` — without it "account currency" is an assumption. Sync copies Pluggy's account `currencyCode` |
 | `created_at` | timestamptz | |
 
 ### TRANSACTION
@@ -83,7 +84,8 @@ Managed entirely by Supabase Auth — not part of our schema.
 | `type` | string | DEBIT / CREDIT; Pluggy's direction signal; **detection keys off this, never off sign** |
 | `date` | date | When the purchase happened; drives interval detection |
 | `amount` | numeric | Exactly as sent; sign varies by account type (cards: positive = charge) |
-| `currency` | string | 3-char, NOT NULL, no default; sync copies Pluggy `currencyCode` |
+| `currency` | string | 3-char, NOT NULL, no default; sync copies Pluggy `currencyCode`. **May be a foreign currency** — 57 of 258 real rows are USD |
+| `amount_in_account_currency` | numeric | The same movement in the *account's* currency. Nullable, and **null exactly when `currency` already is the account currency** (verified 0 violations over 258 rows). Not derivable from `amount`: the implied FX rate moves per transaction. `coalesce(amount_in_account_currency, amount)` is therefore always in the account currency |
 | `raw_description` | string | Immutable once posted |
 | `normalized_merchant` | string | Derived; pipeline may rewrite anytime |
 | `provider_category` | string | Aggregator's hint, nullable, sync-owned |
@@ -139,6 +141,7 @@ Managed entirely by Supabase Auth — not part of our schema.
 | `date` | date | Duplicated on purpose (self-contained history) |
 | `amount` | numeric | Duplicated on purpose |
 | `currency` | string | 3-char, NOT NULL, no default; engine copies from source transaction |
+| `amount_in_account_currency` | numeric | Duplicated for the same reason as `amount`: a frozen charge with no account-currency figure could never be totalled, and the frozen region is permanent. Copied through, never computed |
 | `card_label` | string | Snapshot at billing time, e.g. "Visa 4821"; survives raw-data deletion |
 | `created_at` | timestamptz | |
 
@@ -679,15 +682,12 @@ Detection cannot be sharded by account without silently disabling that filter.
   anchor only exists because v21 switched `merchant_key` to CNPJ. Zero false
   positives across 163 POSTED rows is evidence about the filters, not about the
   positive path.
-- **Amounts are not summable across currencies, and the BRL figure is not
-  stored.** 57 of 258 rows carry `currency = USD` with `amount` in USD; Pluggy's
-  `amountInAccountCurrency` holds the BRL value and no column receives it. The
-  engine is unaffected — R1 compares like with like inside one merchant, which is
-  single-currency in practice — but **any total that sums `charge.amount` across
-  subscriptions is wrong today**, mixing USD and BRL. This blocks the hero totals
-  in the [subscriptions tab contract](#subscriptions-tab-contract) and needs a
-  column before those render. Found on the first real engine run, not reasoned
-  about in advance.
+- ~~**Amounts are not summable across currencies**~~ — **resolved in v26.** 57 of
+  258 rows carry `currency = USD`; `amount_in_account_currency` now stores the
+  account-currency figure and totals use
+  `coalesce(amount_in_account_currency, amount)`, which is always in the account
+  currency. The real subscription totals **R$68.84** where summing `amount` alone
+  gave a meaningless `12.90`.
 
 ---
 
@@ -1140,6 +1140,46 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v26** — BOTH AMOUNTS ARE STORED (2026-08-10), closing the totals blocker v24
+  recorded. Pluggy sends two amounts for an international transaction and **neither
+  reconstructs the other**: the implied FX rate moves per transaction
+  (34.51/6.45 = 5.349 on one row, 34.33/6.45 = 5.323 on the next). Only `amount`
+  was stored, so 57 of 258 rows were unusable for any total.
+  **Both are kept because each is load-bearing for a different rule**, and dropping
+  either breaks something specific. `amount` is what **R1** needs — it is the
+  *stable* number, 6.45 every month for a USD-priced subscription; keyed on the
+  account-currency value instead, R1 would see 34.51 vs 34.33, call them different
+  and never anchor, degrading a real subscription to a suggest-only R3. That is not
+  hypothetical — it is how the one genuine subscription in this ledger was found.
+  `amount_in_account_currency` is what **totals** need, because summing 6.45 USD
+  with 39.90 BRL is meaningless. Storing both is also what the raw-chain doctrine
+  already demanded: dropping one of two fields the aggregator sends is choosing
+  which number matters, and that is interpretation.
+  **An invariant was verified before the migration was written**, not assumed:
+  `amountInAccountCurrency` is populated exactly when the transaction currency
+  differs from the account currency — 201 same-currency rows null, 57 foreign rows
+  populated, **zero violations across all 258 rows**, re-checked in SQL after the
+  sync. So `coalesce(amount_in_account_currency, amount)` is always in the account
+  currency, which is what makes a total a plain sum.
+  **Three columns, not one.** TRANSACTION and CHARGE both get it — CHARGE because
+  it is deliberately self-describing so it survives `transaction_id` going NULL,
+  and a frozen charge with no account-currency figure could never be totalled.
+  **BANK_ACCOUNT gains `currency`**, which it never had: without it
+  `amount_in_account_currency` has no declared unit and "account currency" is an
+  assumption rather than a stored fact.
+  **Deliberately not added**: an `fx_rate` column (derivable, and a derived value
+  in the raw chain is what the doctrine refuses) and a third always-populated
+  "resolved" amount on TRANSACTION (same reason — the coalesce is one call and
+  cannot drift from its inputs).
+  **Migration disposition: Migration #5, additive** — three nullable columns, no
+  defaults, no constraint or RLS changes. It also **restates `apply_detection` via
+  `create or replace`**, because Migration #4 is already applied to the remote and
+  must not be edited in place (v17); the only difference from #4 is one extra
+  column on the charge insert, copied through with no arithmetic so the applier
+  stays dumb. Verified end-to-end: 5 migrations apply, both accounts carry
+  `currency = BRL`, 57 rows populated matching 57 USD rows exactly, and the
+  subscription totals **R$68.84**.
 
 - **v25** — MONEY CARRIES ITS CURRENCY (2026-08-10). v23 fixed *how precisely*
   amounts are compared; this fixes *what* is compared. The engine compared cents
