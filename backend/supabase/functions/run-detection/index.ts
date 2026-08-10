@@ -34,7 +34,7 @@ async function loadUser(db: SupabaseClient, userId: string): Promise<EngineInput
     .from('transaction')
     .select(
       'id, provider_tx_id, account_id, status, type, date, amount, currency, ' +
-        'raw_description, normalized_merchant, withdrawn_at, installment_number, ' +
+        'amount_in_account_currency, raw_description, normalized_merchant, withdrawn_at, installment_number, ' +
         'total_installments, fee_type_additional_info, provider_merchant_name, ' +
         'provider_merchant_cnpj, bank_account!inner(connection!inner(user_id))',
     )
@@ -108,7 +108,7 @@ Deno.serve(async (req: Request) => {
       if (runIds.length) {
         const { data: ch, error: cErr } = await db
           .from('charge')
-          .select('id, run_id, transaction_id, date, amount, currency, card_label')
+          .select('id, run_id, transaction_id, date, amount, currency, amount_in_account_currency, card_label')
           .in('run_id', runIds)
         if (cErr) throw new Error(`select charge: ${cErr.message}`)
         charges = ch ?? []

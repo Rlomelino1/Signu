@@ -35,6 +35,7 @@ function row(over: Partial<TxRow> = {}): TxRow {
     date: '2026-01-10',
     amount: 39.9,
     currency: 'BRL',
+    amount_in_account_currency: null,
     raw_description: 'ACME STREAMING',
     normalized_merchant: 'ACME STREAMING',
     withdrawn_at: null,
@@ -297,6 +298,7 @@ Deno.test('idempotency: a second run over the same inputs changes nothing', () =
     date: c.date,
     amount: c.amount,
     currency: c.currency,
+    amount_in_account_currency: c.amount_in_account_currency,
     card_label: null,
   }))
 
@@ -325,7 +327,7 @@ Deno.test('a run holding frozen charges is never deleted', () => {
     rows: [],
     subscriptions: [{ id: 'sub-1', dedupe_key: 'k', merchant_key: 'k', service_name: 'X', identification: 'auto', ignored: false }],
     runs: [{ id: 'run-frozen', subscription_id: 'sub-1', start_date: '2025-01-01', end_date: null, billing_interval: 'monthly', status: 'active', detected_by: 'R1', cancelled_date: null, next_expected_date: null }],
-    charges: [{ id: 'ch-frozen', run_id: 'run-frozen', transaction_id: null, date: '2025-01-01', amount: 10, currency: 'BRL', card_label: null }],
+    charges: [{ id: 'ch-frozen', run_id: 'run-frozen', transaction_id: null, date: '2025-01-01', amount: 10, currency: 'BRL', amount_in_account_currency: null, card_label: null }],
   })
   assertEquals(d.delete_run_ids, [], 'frozen charges ARE the run basis')
 })
@@ -336,7 +338,7 @@ Deno.test('a stored run whose live charges all vanished is deleted', () => {
     rows: [],
     subscriptions: [{ id: 'sub-1', dedupe_key: 'k', merchant_key: 'k', service_name: 'X', identification: 'auto', ignored: false }],
     runs: [{ id: 'run-gone', subscription_id: 'sub-1', start_date: '2025-01-01', end_date: null, billing_interval: 'monthly', status: 'active', detected_by: 'R1', cancelled_date: null, next_expected_date: null }],
-    charges: [{ id: 'ch-live', run_id: 'run-gone', transaction_id: 'tx-missing', date: '2025-01-01', amount: 10, currency: 'BRL', card_label: null }],
+    charges: [{ id: 'ch-live', run_id: 'run-gone', transaction_id: 'tx-missing', date: '2025-01-01', amount: 10, currency: 'BRL', amount_in_account_currency: null, card_label: null }],
   })
   assertEquals(d.delete_run_ids, ['run-gone'])
 })
@@ -354,8 +356,8 @@ Deno.test('a cancellation is preserved across recompute', () => {
     subscriptions: [{ id: 'sub-1', dedupe_key: 'ACME STREAMING', merchant_key: 'ACME STREAMING', service_name: 'Acme', identification: 'user_confirmed', ignored: false }],
     runs: [{ id: 'run-1', subscription_id: 'sub-1', start_date: '2026-01-10', end_date: '2026-03-09', billing_interval: 'monthly', status: 'cancelled', detected_by: 'R1', cancelled_date: '2026-02-15', next_expected_date: null }],
     charges: [
-      { id: 'c1', run_id: 'run-1', transaction_id: 'x1', date: '2026-01-10', amount: 39.9, currency: 'BRL', card_label: null },
-      { id: 'c2', run_id: 'run-1', transaction_id: 'x2', date: '2026-02-09', amount: 39.9, currency: 'BRL', card_label: null },
+      { id: 'c1', run_id: 'run-1', transaction_id: 'x1', date: '2026-01-10', amount: 39.9, currency: 'BRL', amount_in_account_currency: null, card_label: null },
+      { id: 'c2', run_id: 'run-1', transaction_id: 'x2', date: '2026-02-09', amount: 39.9, currency: 'BRL', amount_in_account_currency: null, card_label: null },
     ],
   })
   const run = d.subscriptions[0].runs[0]
