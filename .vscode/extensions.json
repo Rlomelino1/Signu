@@ -1,0 +1,6 @@
+{
+  // Required for backend/supabase/functions to be analyzed correctly. Without
+  // it, settings.json's deno.enablePaths has no language server to point at and
+  // the false "Cannot find name 'Deno'" errors persist.
+  "recommendations": ["denoland.vscode-deno"]
+}
