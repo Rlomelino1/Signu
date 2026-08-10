@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-10** (v26) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-10** (v27) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -491,12 +491,23 @@ against the real item: 1 connection, 2 accounts, 258 transactions.*
 
 ### Deliberate gaps
 
-- **No schedule yet.** Chosen sequencing: build and verify the function against
-  the real item first, then automate. `pg_cron` + `net.http_post` would be
-  versioned with the migrations, but needs two extensions plus a secret that
-  cannot live in a public repo (Vault, provisioned by hand); the dashboard
-  alternative needs no secret but drifts invisibly. Deferred **because it is
-  purely additive**, not because it is hard.
+- **Scheduled at 15:30 UTC daily by `pg_cron` (locked v27, Migration #6).** In a
+  migration rather than dashboard config, for the same reason the applier is a
+  migration: it is versioned with everything else, survives a rebuild, and
+  `supabase db reset` reproduces it. A schedule living in a dashboard drifts
+  invisibly from the spec.
+  - **15:30, not a round hour**: the item's `nextAutoSyncAt` lands about 14:42Z,
+    so syncing earlier would read yesterday's data and be a day stale for no
+    reason. Sync chains into detection, so one cron entry drives the pipeline.
+  - **The URL and secret are not in the repo.** Both are read from Vault by name
+    (`signu_sync_url`, `signu_sync_secret`), so the migration is
+    environment-independent and commits no secret. Two manual `vault.create_secret`
+    calls per environment, documented in the migration header.
+  - **Unconfigured means loud, not silent.** `cron.schedule` calls
+    `public.trigger_pluggy_sync()`, which raises a named exception when either
+    secret is missing rather than POSTing to a null URL — a schedule that quietly
+    no-ops is indistinguishable from one that works.
+  - Idempotent: pg_cron upserts on jobname, so a reset yields exactly one entry.
 - **`connection` is seeded by hand** via `supabase/seed/seed-connection.sql`,
   with the itemId passed in rather than committed. The real path is Pluggy Connect
   in SwiftUI writing this row; that screen is not designed. Committed as a
@@ -567,6 +578,20 @@ invokable, which is what replay needs.*
   prevent. The function is a **dumb applier**: no rules, no arithmetic, no
   interpretation. Rule logic living in SQL is what this shape refuses; a
   transactional write boundary is not rule logic.
+- **Two implementations are compared, not just tested** (locked v27).
+  `backend/detection-parity.py` feeds the *same* database rows to the TypeScript
+  engine and to the Python harness and compares seven counts, failing nonzero on
+  any divergence. Thirty-two passing unit tests is weaker evidence than two
+  independent implementations agreeing: the epsilon bug (v23) passed every test it
+  had and surfaced only when a second implementation disagreed on a count they
+  should have shared. The naive version of this check — harness on the raw dump,
+  engine on the database — would prove less than it appears to, because sync moves
+  37 of 258 rows by a day (v22), so a mismatch could be date handling and a match
+  could be luck; feeding both the same rows makes a divergence a *rule*
+  divergence. It earned its keep immediately: the harness had never received the
+  v25 currency guard, so the two encoded different rules and agreed only because no
+  cross-currency amounts collide in this ledger. Local-only, like the dry run —
+  it needs a live stack and the gitignored dump.
 - **Every false positive the dry run found is a regression test.** Intent was to
   fixture the real 258 rows from v20's probe; that is **not possible in a public
   repo** — `pluggy-probe-raw.json` is gitignored real bank history. The committed
@@ -1140,6 +1165,51 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v27** — THE PIPELINE IS VERIFIED AND SCHEDULED (2026-08-10). Three gaps
+  closed, each one a correctness property that existed only in a file nothing
+  executed.
+  **CI now runs the detection tests.** Thirty-two tests encoding every historical
+  bug — the epsilon regression, the presence-based fee filter, the card-payment
+  R3, the dedupe ordinal, the cross-currency pairs — and nothing ran them on a PR.
+  Exactly the situation v18 closed for the schema. A new `Detection tests` job
+  runs `deno check`, `deno lint` and `deno test`. **The drafted job would have
+  failed on its first run**: it passed `--allow-none`, which is not a valid Deno
+  flag — 2.9.5 rejects it outright. Verified against a real Deno on a cold cache
+  before committing, which is how the flag was caught: the tests are pure
+  functions needing no permissions, and Deno 2 already trusts `deno.land` and
+  `esm.sh` imports, so **no flag is required at all**.
+  **The two implementations are now compared.** The Python harness reported 128
+  candidates / 12 internal transfers / 1 anchor / 0 R3 suggestions; the TypeScript
+  engine reproduces all four, and three intermediate exclusion counts besides. But
+  the obvious comparison would have been weaker than it looked, because the two
+  read different inputs — sync converts UTC to São Paulo and moves 37 of 258 rows
+  by a day, so a mismatch could have been date handling and the match could have
+  been luck. `detection-parity.py` therefore feeds **the same database rows** to
+  both. It immediately found that **the harness had never received the v25 currency
+  guard**: the two implementations encoded different rules and agreed only because
+  no cross-currency amounts collide in this ledger — accidental parity, which is
+  the precise failure mode the check exists to detect. Guard propagated; the four
+  numbers now agree for the right reason.
+  **The schedule exists** (Migration #6). Both functions were written for cron,
+  the contract discussed cron, and no cron existed — the schedule was the only
+  part of the pipeline living purely in prose. `pg_cron` at 15:30 UTC, in a
+  migration rather than dashboard config so it is versioned and survives a
+  rebuild. The URL and secret are read from **Vault by name**, so the migration
+  commits no secret and works unchanged in both environments; two manual
+  `vault.create_secret` calls per environment are the price, documented in the
+  migration header. `cron.schedule` calls `public.trigger_pluggy_sync()`, which
+  **raises when a secret is missing** rather than POSTing to a null URL, because a
+  schedule that quietly no-ops is indistinguishable from one that works.
+  **Verified rather than written**: pg_cron 1.6.4 is in `shared_preload_libraries`
+  so the scheduler genuinely fires; `create extension` emits no NOTICE, so the v18
+  gate stays green; re-scheduling is idempotent (pg_cron upserts on jobname); and
+  the full chain was fired by hand — `trigger_pluggy_sync()` → `net.http_post` →
+  **HTTP 200** → chained detection → 258 transactions, 1 subscription, 1 run, 2
+  charges.
+  **Migration disposition: Migration #6, additive** — two extensions, one
+  `security definer` function, one cron entry. No table, column, constraint, index
+  or RLS policy touched.
 
 - **v26** — BOTH AMOUNTS ARE STORED (2026-08-10), closing the totals blocker v24
   recorded. Pluggy sends two amounts for an international transaction and **neither
