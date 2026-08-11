@@ -15,6 +15,18 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      # Explicit, ahead of the builds. `xcodebuild build` resolves packages
+      # implicitly, but then a resolution failure surfaces buried in compiler
+      # output; as its own step it fails legibly. This is the project's first
+      # external dependency, so the failure mode is new: Package.resolved pins
+      # exact versions and is committed, so this step is a fetch, not a solve.
+      - name: Resolve package dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project frontend/Signu.xcodeproj \
+            -scheme Signu
+
       - name: Build Debug
         run: |
           xcodebuild build \
