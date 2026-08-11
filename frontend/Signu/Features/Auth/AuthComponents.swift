@@ -54,6 +54,62 @@ struct AuthField: View {
     }
 }
 
+
+/// What an auth screen renders when an attempt fails.
+///
+/// A plain value, so the screens stay session-agnostic exactly as `WelcomeFlow`
+/// promises: they never see `SessionAuthError`, and the mapping from error to copy
+/// lives where the session already does.
+struct AuthError {
+    let message: String
+    /// Present only when the failure has a remedy the user can tap. 17a's
+    /// unconfirmed-email variant offers a resend; a wrong password does not.
+    var actionTitle: String?
+    var action: (() -> Void)?
+}
+
+/// The failure message, pinned above the action stack.
+///
+/// Placed there rather than in the scrolling content on purpose: a submit failure
+/// has to sit next to the control that failed, and the content area can be
+/// scrolled away or covered by the keyboard — which is exactly when someone is
+/// most likely to have just mistyped a password.
+struct AuthErrorBanner: View {
+    let error: AuthError
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .foregroundStyle(SignuColor.red)
+                    .font(.signuBody)
+                Text(error.message)
+                    .font(.signuBody)
+                    .foregroundStyle(SignuColor.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let title = error.actionTitle, let action = error.action {
+                Button(title, action: action)
+                    .font(.signuSubtitleEmphasis)
+                    .foregroundStyle(SignuColor.textPrimary)
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(SignuColor.redTint)
+        )
+        // One element to VoiceOver, so the message and its remedy are not two
+        // unrelated stops.
+        .accessibilityElement(children: .combine)
+        .transition(reduceMotion ? .identity : .opacity)
+    }
+}
+
 /// Auth screen scaffold: optional back chevron, large title + subtitle,
 /// scrollable content, and a bottom-anchored action stack.
 struct AuthScaffold<Content: View, Bottom: View>: View {
@@ -61,6 +117,11 @@ struct AuthScaffold<Content: View, Bottom: View>: View {
     var onBack: () -> Void = {}
     let title: String
     var subtitle: Text?
+    /// Rendered above the action stack when an attempt fails. Deliberately NOT
+    /// offered to 17d: `requestPasswordReset` succeeds unconditionally by
+    /// contract (enumeration-safe), so a failure surface there would imply an
+    /// outcome the flow refuses to report.
+    var error: AuthError?
     @ViewBuilder var content: () -> Content
     @ViewBuilder var bottom: () -> Bottom
 
@@ -89,7 +150,11 @@ struct AuthScaffold<Content: View, Bottom: View>: View {
             }
             .scrollDismissesKeyboard(.interactively)
 
-            VStack(spacing: 14) { bottom() }
+            VStack(spacing: 14) {
+                if let error { AuthErrorBanner(error: error) }
+                bottom()
+            }
+            .animation(.easeInOut(duration: 0.2), value: error != nil)
                 .padding(.horizontal, SignuMetric.screenPadding)
                 .padding(.top, 12)
                 .padding(.bottom, 8)

@@ -10,6 +10,10 @@ struct SignInView: View {
     var onBack: () -> Void = {}
     var onForgot: () -> Void = {}
     var onSubmit: (String, String) -> Void = { _, _ in }   // email, password
+    /// Populated by `WelcomeFlow` from `SessionStore.lastError`. Until this
+    /// existed the store recorded every failure and nothing read it, so a wrong
+    /// password looked identical to a button that did nothing.
+    var error: AuthError?
 
     @State private var email = ""
     @State private var password = ""
@@ -18,7 +22,8 @@ struct SignInView: View {
         AuthScaffold(
             onBack: onBack,
             title: "Welcome back",
-            subtitle: Text("Sign in to pick up where you left off.")
+            subtitle: Text("Sign in to pick up where you left off."),
+            error: error
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 AuthField(label: "Email", placeholder: "you@email.com", text: $email, keyboard: .emailAddress)
@@ -44,6 +49,7 @@ struct CreateAccountView: View {
     /// ON), so the host always pushes 17c after this — there is no
     /// "maybe signed in" outcome to handle.
     var onSubmit: (String, String, String) -> Void = { _, _, _ in }
+    var error: AuthError?
 
     @State private var name = ""
     @State private var email = ""
@@ -53,7 +59,8 @@ struct CreateAccountView: View {
         AuthScaffold(
             onBack: onBack,
             title: "Create your account",
-            subtitle: Text("A few seconds now, no forgotten renewals later.")
+            subtitle: Text("A few seconds now, no forgotten renewals later."),
+            error: error
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 AuthField(label: "Name", placeholder: "Your name", text: $name)
@@ -72,6 +79,11 @@ struct CreateAccountView: View {
 // MARK: - Confirm email (17c)
 
 struct ConfirmEmailView: View {
+    // No error slot, deliberately. 17c does not use AuthScaffold, and its only
+    // failure -- a resend inside the rate limit -- is already prevented by the
+    // 120s cooldown rendered below, which is why the contract calls that error
+    // "normally unreachable". A second, differently-placed error surface here
+    // would be inconsistent without being useful.
     let email: String
     /// The manual check (`getUser()` behind the store) for the wrong-device
     /// case — the link was opened on a laptop, so the deep link fired
@@ -229,6 +241,7 @@ struct NewPasswordView: View {
     /// The new password. Success is what ends `.recovering` — until then the
     /// session is live but the password is still the old one.
     var onSubmit: (String) -> Void = { _ in }
+    var error: AuthError?
 
     @State private var password = ""
     @State private var confirm = ""
@@ -237,7 +250,8 @@ struct NewPasswordView: View {
         AuthScaffold(
             showBack: false,
             title: "Choose a new password",
-            subtitle: Text("You're signed in as ") + Text(email).fontWeight(.semibold).foregroundColor(SignuColor.textPrimary) + Text(".")
+            subtitle: Text("You're signed in as ") + Text(email).fontWeight(.semibold).foregroundColor(SignuColor.textPrimary) + Text("."),
+            error: error
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 AuthField(label: "New password", placeholder: "Password", text: $password, secure: true)
@@ -257,3 +271,27 @@ struct NewPasswordView: View {
 #Preview("Forgot password (17d)") { ForgotPasswordView() }
 #Preview("Forgot password · expired link (17d)") { ForgotPasswordView(showExpiredLinkNotice: true) }
 #Preview("New password (17e)") { NewPasswordView(email: "marina.duarte@example.com") }
+
+// Failure states. The store has always recorded these; until the scaffold gained
+// an error slot nothing could render them, so there was nothing to review. Copy
+// comes from SessionAuthError.signInMessage so a preview cannot drift from what
+// the app shows.
+#Preview("Sign in · wrong password (17a)") {
+    SignInView(error: AuthError(message: SessionAuthError.invalidCredentials.signInMessage))
+}
+#Preview("Sign in · email not confirmed (17a)") {
+    SignInView(error: AuthError(
+        message: SessionAuthError.emailNotConfirmed.signInMessage,
+        actionTitle: "Resend confirmation email",
+        action: {}
+    ))
+}
+#Preview("Create account · failed (17b)") {
+    CreateAccountView(error: AuthError(message: SessionAuthError.invalidCredentials.signInMessage))
+}
+#Preview("New password · failed (17e)") {
+    NewPasswordView(
+        email: "marina.duarte@example.com",
+        error: AuthError(message: "Couldn't set your new password. Try again.")
+    )
+}
