@@ -38,13 +38,18 @@ private let dateOnlyFormatter: DateFormatter = {
 // Apple, which is why it stays: they vouched for that one and not for this one,
 // and `nonisolated(unsafe)` would be claiming a guarantee nobody gave.
 //
-// ONE style, where the formatter needed two. `ISO8601DateFormatter` was strict —
-// `.withFractionalSeconds` refused a timestamp without them and vice versa, which
-// is the only reason a fallback existed. The format style is lenient in both
-// directions: verified against all four wire shapes (six fractional digits and
-// none, `+00:00` and `Z`), each of which parses either way, while a bare
-// `2026-06-19` parses as neither. The tests pin all of it.
+// TWO styles, and the fallback is mandatory. `includingFractionalSeconds: true`
+// is STRICT on the Foundation shipped with iOS 17 and 18 — it refuses a timestamp
+// that has none — and lenient on iOS 26. The deployment target is 17.0, so the
+// strict behaviour is what most installed devices do: with one style, every
+// `2026-08-10T18:37:13+00:00` would fail to parse in production while passing on
+// a current simulator.
+//
+// Found by CI, whose simulator runs iOS 18.5. A local probe on iOS 26 said
+// "lenient in both directions" and that conclusion did not survive the older
+// runtime. The tests for both shapes are what caught it.
 private let timestampStyle = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+private let timestampNoFractionStyle = Date.ISO8601FormatStyle()
 
 extension String {
     /// A `date` column. Noon São Paulo, matching how the mock builds dates, so
@@ -55,7 +60,17 @@ extension String {
     }
 
     /// A `timestamptz` column, with or without fractional seconds.
-    var asPostgresTimestamp: Date? { try? Date(self, strategy: timestampStyle) }
+    ///
+    /// Written as two statements, not `try? a ?? b`: in that form `??` binds inside
+    /// the `try?` and its left side is non-optional, so the fallback is unreachable.
+    /// It compiled, and the test for the no-fraction shape still passed — on a
+    /// runtime where the first style accepted both.
+    var asPostgresTimestamp: Date? {
+        if let withFraction = try? Date(self, strategy: timestampStyle) {
+            return withFraction
+        }
+        return try? Date(self, strategy: timestampNoFractionStyle)
+    }
 }
 
 extension Double {
