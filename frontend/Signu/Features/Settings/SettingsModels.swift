@@ -6,6 +6,10 @@ struct SettingsPayload {
     var email: String
     var initial: String
     var providers: [String]              // "Google" / "Password"
+    /// Drives the v19 password row off the same identities the chips render:
+    /// present ⇒ "Change password", Google-only ⇒ "Set a password". Data, so it
+    /// lives here; the two copy strings are static and live in the view.
+    var hasPassword: Bool
     var banks: [BankRow]
     var dismissed: [DismissedRow]
     var deleteScopeLine: String          // "Everything, permanently — banks, history, profile"

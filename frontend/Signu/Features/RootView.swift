@@ -106,7 +106,15 @@ struct RootView: View {
                 if let provider {
                     AppShellView(
                         provider: provider,
-                        onSignOut: { Task { await session.signOut() } }
+                        onSignOut: { Task { await session.signOut() } },
+                        // The address comes from the session, which is why v19
+                        // renders no form here. Guarded rather than defaulted to
+                        // "": an empty address would be a send that always fails,
+                        // behind copy claiming a link is on its way.
+                        onSetPassword: {
+                            guard let address = session.email else { return }
+                            Task { await session.requestPasswordReset(email: address) }
+                        }
                     )
                     .transition(.opacity)
                 }

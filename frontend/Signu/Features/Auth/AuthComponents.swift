@@ -1,5 +1,34 @@
 import SwiftUI
 
+/// The one resend/reset cooldown in the app.
+///
+/// Supabase rate-limits the resend and reset endpoints at roughly 60s, so a
+/// second tap inside that window fails *silently* — the API returns an error the
+/// enumeration-safe surfaces deliberately swallow. The countdown is what makes
+/// the limit visible, which is why the auth flow contract calls that error
+/// "normally unreachable".
+///
+/// One constant because v19 put the same send behind a third surface (Settings →
+/// Profile → password row). Three literal `120`s would drift, and the surface
+/// that drifted low would be the one that fails quietly.
+enum AuthCooldown {
+    static let seconds = 120
+
+    /// Seconds left on a cooldown that started at `sentAt`.
+    ///
+    /// Derived from a timestamp rather than counted down, because the surface that
+    /// needs it most (v19's Settings row) is destroyed and rebuilt whenever the
+    /// user changes tab — a counter would only tick while some view was alive to
+    /// tick it, so two minutes on another tab would leave 100s still showing.
+    ///
+    /// Clamped at both ends. A clock that jumped backwards must not read as a
+    /// longer cooldown than the one we set.
+    static func remaining(since sentAt: Date?, now: Date) -> Int {
+        guard let sentAt else { return 0 }
+        return min(max(seconds - Int(now.timeIntervalSince(sentAt)), 0), seconds)
+    }
+}
+
 /// Labeled input field for the auth screens (17a–17e). Ink border on focus,
 /// hairline otherwise; optional reveal toggle for passwords.
 struct AuthField: View {

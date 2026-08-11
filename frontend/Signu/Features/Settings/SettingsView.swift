@@ -23,6 +23,33 @@ struct SettingsActions {
     var onConnectBank: () -> Void = {}
     var onRestore: (UUID) -> Void = { _ in }
     var onDeleteAccount: () -> Void = {}
+    /// v19's password row. Sends 17d's reset link to the session's address — no
+    /// screen is pushed, so this returns nothing and cannot fail visibly: the
+    /// send is enumeration-safe by contract and swallows its errors.
+    var onSetPassword: () -> Void = {}
+    /// v19's sign-out row. No confirmation by contract; the gate turns this into
+    /// a root swap back to 16a.
+    var onSignOut: () -> Void = {}
+}
+
+/// The v19 password row's sent state, held above the screen.
+///
+/// `AppShellView`'s `switch selectedTab` destroys the branch it isn't rendering,
+/// so state held inside `SettingsView` resets the moment the user visits Home and
+/// comes back — and the countdown's only job is to stop a second tap inside
+/// Supabase's ~60s window, which fails *silently* because the send is
+/// enumeration-safe and swallows its errors. A cooldown that forgets is the bug
+/// it was added to prevent.
+///
+/// A timestamp rather than a decrementing counter, for the same reason: a counter
+/// only ticks while some view is alive to tick it, so two minutes spent on
+/// another tab would leave 100s still on the clock.
+///
+/// Handed down through the environment like `TabBarState`, and read as an
+/// optional there so a standalone `SettingsScreen` preview still works.
+@Observable
+final class PasswordLinkState {
+    var sentAt: Date?
 }
 
 /// Settings (12a; empty-banks state = 12d).
@@ -32,6 +59,25 @@ struct SettingsView: View {
     var scrollAnchor: UnitPoint = .top
 
     @State private var restored: Set<UUID> = []
+    /// The password row owns its own sent state (v19) — 17d is never rendered
+    /// from here, so there is no screen to hold it. It lives in the environment so
+    /// it outlives a tab switch; `localSentAt` is the fallback for the previews
+    /// and screenshot runs that render this screen with no shell above it.
+    @Environment(PasswordLinkState.self) private var passwordLink: PasswordLinkState?
+    @State private var localSentAt: Date?
+    @State private var clock = Date()
+    private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var sentAt: Date? { passwordLink?.sentAt ?? localSentAt }
+
+    private var cooldown: Int { AuthCooldown.remaining(since: sentAt, now: clock) }
+
+    private func sendPasswordLink() {
+        let stamp = Date()
+        passwordLink?.sentAt = stamp
+        localSentAt = stamp
+        actions.onSetPassword()
+    }
 
     private var dismissed: [SettingsPayload.DismissedRow] {
         payload.dismissed.filter { !restored.contains($0.id) }
@@ -54,6 +100,16 @@ struct SettingsView: View {
             .padding(.bottom, SignuMetric.scrollBottomInset)
         }
         .background(SignuColor.paper)
+        .onReceive(tick) { _ in clock = Date() }
+        #if DEBUG
+        // The sent state is otherwise reachable only by tapping, which no
+        // screenshot run can do.
+        .onAppear {
+            if CommandLine.arguments.contains("--settings-password-sent"), sentAt == nil {
+                localSentAt = Date()
+            }
+        }
+        #endif
     }
 
     // MARK: - Profile
@@ -103,9 +159,93 @@ struct SettingsView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 9)
                     }
+
+                    rowDivider
+                    passwordRow
+                    rowDivider
+                    signOutRow
                 }
             }
         }
+    }
+
+    /// v19. Reuses 17d's send rather than rendering a form, because that is the
+    /// only mechanism serving both identity states: a Google-only account has no
+    /// current password to type, so an inline form would need two variants, one
+    /// of them unverified. The email round-trip *is* the identity proof.
+    @ViewBuilder
+    private var passwordRow: some View {
+        // Sent state replaces the row rather than sitting beside it: the action
+        // is unavailable during the cooldown, and a live-looking row that
+        // silently no-ops is the failure the countdown exists to prevent.
+        if sentAt != nil {
+            VStack(alignment: .leading, spacing: 2) {
+                // No hedge, unlike 17d's "If an account exists for …". That
+                // screen cannot confirm the address exists; here the session
+                // proves it. The enumeration-safe doctrine tracks what the API
+                // yields per surface, not one globally cautious phrasing.
+                Text("Check \(payload.email) for a link to set your password.")
+                    .font(.signuBody)
+                    .foregroundStyle(SignuColor.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if cooldown > 0 {
+                    Text("Resend available in \(cooldown)s")
+                        .font(SignuFont.font(14))
+                        .foregroundStyle(SignuColor.textSecondary)
+                } else {
+                    Button("Send another link", action: sendPasswordLink)
+                    .font(SignuFont.font(14, .semibold))
+                    .foregroundStyle(SignuColor.textPrimary)
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+        } else {
+            Button(action: sendPasswordLink) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        // "Set" not "Change" for a Google-first account, the same
+                        // distinction v11 made when naming 17d: there is no old
+                        // password to change.
+                        Text(payload.hasPassword ? "Change password" : "Set a password")
+                            .font(.signuBody)
+                            .foregroundStyle(SignuColor.textPrimary)
+                        if !payload.hasPassword {
+                            Text("You sign in with Google. A password gives you a second way in.")
+                                .font(SignuFont.font(14))
+                                .foregroundStyle(SignuColor.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    chevron
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// v19. Last row of Profile, and no confirmation: nothing is lost, the data
+    /// is server-side, and signing back in is one tap. Sitting here rather than
+    /// under Data keeps the whole scroll between it and Delete account — a
+    /// benign, frequently-tapped row must not neighbour the most irreversible
+    /// action in the app.
+    private var signOutRow: some View {
+        Button(action: actions.onSignOut) {
+            HStack(spacing: 12) {
+                Text("Sign out")
+                    .font(.signuBody)
+                    .foregroundStyle(SignuColor.textPrimary)
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Connected banks (12a rows; 12d empty)
