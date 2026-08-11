@@ -158,13 +158,20 @@ jobs:
         run: |
           deno check \
             backend/supabase/functions/_shared/detection.ts \
+            backend/supabase/functions/_shared/reminders.ts \
             backend/supabase/functions/run-detection/index.ts \
-            backend/supabase/functions/pluggy-sync/index.ts
+            backend/supabase/functions/pluggy-sync/index.ts \
+            backend/supabase/functions/send-reminders/index.ts
 
       - name: Lint
         run: deno lint backend/supabase/functions
 
-      # Thirty-two tests encoding every historical bug: the v23 epsilon
+      # Forty-nine tests: thirty-two encoding every historical bug in detection,
+      # seventeen pinning the reminder rules (v28). `deno test _shared/` picks up
+      # a new suite in that directory with no edit here, unlike `deno check`
+      # above, which names files and does need one.
+      #
+      # The detection thirty-two encode: the v23 epsilon
       # regression, the presence-based fee filter, the card-payment R3, the
       # dedupe ordinal, the v25 cross-currency pairs. Before this job they lived
       # in a file nothing executed on a PR -- the same shape as the correctness

@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-10** (v27) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-11** (v28) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -855,9 +855,9 @@ The user can assert "I cancelled this" from the detail screen.
 
 ---
 
-## Reminder delivery skeleton
+## Reminder delivery
 
-*Push skeleton locked 2026-07-14; channel preference + email commitment locked 2026-07-15. Schema only, nothing runs yet.*
+*Push skeleton locked 2026-07-14; channel preference + email commitment locked 2026-07-15; **email delivery built and scheduled v28, 2026-08-11**. Push remains a maybe and remains unbuilt.*
 
 - New table **DEVICE_TOKEN** (`user_id` FK → profiles, CASCADE; `token` UNIQUE; `platform`; `created_at`; `last_seen_at`). RLS: user SELECTs own rows; writes via Edge Function, consistent with posture.
 - New column **`subscription.remind_before_days`** (nullable int; null = off; the detail-screen toggle maps to it, e.g. 2 = remind 2 days before) — **added to the user-owned column list** in the RLS column-scoped UPDATE grant, alongside nickname/category/ignored.
@@ -866,7 +866,68 @@ The user can assert "I cancelled this" from the detail screen.
 - **Delivery commitment split (2026-07-15)**:
   - **Email is committed** — will be implemented at a later development stage. Shape: a scheduled Edge Function (Supabase cron) reads `next_expected_date` against `remind_before_days` and sends via a free transactional email provider (e.g. Resend free tier). Free-tier providers restrict recipients to the account owner's address until a custom domain is verified — a non-issue for the single-user deployment, where the owner is the only recipient by construction.
   - **Push is a maybe, no longer planned-for-sure** — APNs requires the paid Apple Developer account, and with the app now personal-only (never going live), that purchase is uncertain. `DEVICE_TOKEN` and the `push`/`both` CHECK values stay in the schema so a future yes lands without redesign; a permanent no costs nothing (an unused table and two unused enum-ish values).
-- Schema additions here travel as a versioned migration when reminder implementation begins (or fold into `initial_schema.sql` if it hasn't been applied yet).
+- Schema additions here travel as a versioned migration when reminder implementation begins (or fold into `initial_schema.sql` if it hasn't been applied yet). *Resolved: `remind_before_days` and `reminder_channels` shipped inside `initial_schema.sql` (Migration #1); the sent-marker below shipped as **Migration #7**.*
+
+### Email delivery, as built (locked v28, 2026-08-11)
+
+- **`send-reminders` Edge Function**, a thin shell over a pure core in
+  `_shared/reminders.ts` — the same split as detection (v24): every rule takes
+  `today` as an input, reads no clock and touches no database, so all of it is
+  tested without either (17 tests). Authenticated with the same `SYNC_SECRET` as
+  the other two functions; a second secret would be a second thing to rotate for
+  no boundary gained.
+- **Schema: one nullable column, `subscription_run.last_reminded_for_date`
+  (Migration #7)** — the `next_expected_date` a reminder was last sent for.
+  - It lives on the **run**, not the subscription, because the date being
+    reminded about is `next_expected_date`. Safe there by inspection, not
+    assumption: `apply_detection`'s UPDATE names columns explicitly and matches a
+    surviving run by `stored_run_id`, so a column it never names cannot be
+    clobbered, and its DELETE only removes runs the engine dropped.
+  - **A date, not a boolean or a timestamp.** A boolean would let last month's
+    reminder silence this month's; a timestamp would need extra arithmetic to
+    decide whether a *moved* renewal still counts as reminded. Storing the date
+    gets both right, and gets them right **because** detection rewrites
+    `next_expected_date` every pass — a shifted renewal stops matching the marker
+    and re-arms itself with no extra bookkeeping.
+  - **Engine-owned**: the column-scoped UPDATE grants deliberately exclude it, so
+    "sync-owned vs user-owned never overlap" is a permission boundary here rather
+    than a convention. Table-level `select` already covers reading it.
+  - **Written only after the provider accepts the send.** The failure that
+    matters is a silent non-delivery that marks itself done and skips the renewal;
+    a send recorded late at worst repeats.
+- **Five exclusions, each stating a way a reminder would otherwise be wrong**:
+  `remind_before_days` null (the nullable column *is* the switch, so nothing can
+  disagree with it — but **0 is not null** and still fires same-day); `ignored`
+  (reminding contradicts a user assertion, which the engine may never do);
+  no `next_expected_date` (which covers cancelled runs without naming them);
+  status not `active`/`overdue` (`possible` would pre-empt the review screen and
+  present a guess as a fact); and already reminded for **this** date. A due date
+  in the past is excluded too — an overdue run keeps its `next_expected_date`, and
+  "renews in −3 days" is not a reminder.
+- **Lead time is `<=`, not `==`**: a job that missed a day still sends rather than
+  skipping a renewal in silence. The sent-marker is what keeps that to one send.
+- **`reminder_channels = 'push'` sends nothing**, and that is the correct reading:
+  push does not exist (v9 downgraded it to a maybe), so treating `push` as email
+  would deliver something the user never asked for, while treating `both` as
+  push-only would deliver nothing at all. `email` and `both` are email-eligible.
+- **Amount shown is the latest charge of the run, in the account's currency**
+  (v26) — the same figure the app renders, so an email and a screen cannot
+  disagree about a price.
+- **Schedule: 16:30 UTC daily (13:30 São Paulo), one hour after the sync**
+  (Migration #7). Deliberately **not** chained off the sync the way detection is:
+  a reminder must go out on a day the bank link is broken and the sync fails,
+  because `next_expected_date` is already stored and a renewal does not stop
+  coming because syncing stopped. The hour is margin for sync → detection to
+  finish, so reminders read fresh dates.
+- **`dryRun`** sends nothing and records nothing, so the selection can be
+  inspected against real data before any mail goes out.
+- **Free-tier reality**: with no verified domain, Resend sends only *to the
+  address that owns the Resend account*, from its shared sender. The v9 note that
+  this is "a non-issue for the single-user deployment" holds **only while that
+  address is the same as `auth.users.email`** — otherwise nothing is delivered and
+  the provider's own error says so, which is why that error is surfaced verbatim
+  rather than summarised. Overridable via a `REMINDER_FROM` secret, so verifying a
+  domain later needs no deploy.
 
 ---
 
@@ -1166,6 +1227,31 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v28** — RENEWAL REMINDERS BUILT (2026-08-11), closing the one commitment the
+  v9 split left outstanding: email was "committed, later stage" and nothing ran.
+  Now a `send-reminders` Edge Function over a pure, database-free core (17 tests),
+  scheduled at 16:30 UTC — deliberately not chained off the sync, because a
+  renewal does not stop coming because syncing stopped. **Migration #7**: one
+  nullable column, `subscription_run.last_reminded_for_date`, holding the
+  `next_expected_date` that was reminded about. A date rather than a boolean or a
+  timestamp, so last month's reminder cannot silence this month's and a renewal
+  that MOVES re-arms itself — the latter works *because* detection rewrites
+  `next_expected_date` every pass. Placed on the run after reading
+  `apply_detection` to confirm a column it never names cannot be clobbered.
+  Engine-owned: excluded from the column-scoped UPDATE grants on purpose, and
+  written only after the provider accepts the send, because a send marked done
+  before it succeeded skips the renewal entirely. Rules state the failure each
+  prevents: `remind_before_days` null is off but **0 is not null** and fires
+  same-day; `ignored` is never reminded about (the engine may not contradict a
+  user assertion); `possible` is excluded so a guess is not presented as a fact;
+  a past due date is excluded because an overdue run keeps its
+  `next_expected_date` and "renews in −3 days" is a bug report, not a reminder.
+  Lead time compares `<=` so a missed day still sends. `reminder_channels =
+  'push'` sends nothing, which is correct — push does not exist. Also corrects a
+  v9 assumption: the free-tier "non-issue for a single-user deployment" holds only
+  while the Resend account's address IS `auth.users.email`, so the provider's
+  error is surfaced verbatim rather than summarised, and `REMINDER_FROM` makes
+  verifying a domain a secret change rather than a deploy.
 - **v27** — THE PIPELINE IS VERIFIED AND SCHEDULED (2026-08-10). Three gaps
   closed, each one a correctness property that existed only in a file nothing
   executed.
