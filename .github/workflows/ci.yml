@@ -55,6 +55,16 @@ jobs:
           version: 2.109.1
       - name: Apply migrations from scratch
         working-directory: backend
+        env:
+          # config.toml references this for the Google provider, and an unset
+          # env() reference makes the CLI emit
+          #   WARN: environment variable is unset: …
+          # which the gate below correctly treats as a failure. A placeholder is
+          # the honest fix rather than exempting the warning: this job starts a
+          # LOCAL stack and never performs an OAuth exchange, so the CLI needs a
+          # value to interpolate and nothing more. Weakening the gate would have
+          # hidden the next genuinely-unset secret.
+          SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET: ci-placeholder-never-used
         run: |
           # pipefail is NOT set by the default `bash -e {0}` shell, and both
           # commands below are piped into tee. Without it, a failing supabase
