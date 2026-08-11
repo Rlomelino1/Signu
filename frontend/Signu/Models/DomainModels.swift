@@ -119,7 +119,26 @@ struct Charge: Identifiable, Hashable {
     var runId: UUID
     var transactionId: UUID?         // nil once raw data is deleted
     var date: Date
+    /// **Always in the account's currency**, so totals sum and `SignuFormat.brl`
+    /// is right. Postgres stores two amounts — the transaction amount in
+    /// `charge.amount` and the account-currency value in
+    /// `charge.amount_in_account_currency`, populated only when the transaction
+    /// was foreign (v26). The provider coalesces them here, at the boundary,
+    /// rather than at the dozen sites that read this.
+    ///
+    /// Without that, a USD Steam charge renders as R$6.45 instead of R$34.51 —
+    /// wrong by 5.3x — because the formatter hardcodes BRL.
     var amount: Decimal
+    /// The **account's** currency, not necessarily the transaction's.
     var currency: String
+    /// What the merchant actually charged, when that differs from `amount`. nil
+    /// for a domestic charge. Nothing renders it yet; carried so the detail screen
+    /// can show "$6.45 USD" later without a migration or a provider change.
+    var originalAmount: Decimal? = nil
+    var originalCurrency: String? = nil
     var cardLabel: String            // snapshot at billing time, e.g. "Visa 4821"
+
+    /// True when the merchant billed in another currency, so the displayed BRL
+    /// figure is a conversion that moves between cycles.
+    var isForeignCurrency: Bool { originalAmount != nil }
 }

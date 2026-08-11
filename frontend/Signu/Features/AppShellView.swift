@@ -214,6 +214,7 @@ struct AppShellView: View {
 /// `.authenticated` and dropped on exit: the real provider will need a
 /// `user_id`, and stale rows must not survive a sign-out.
 enum SignuDataProviderFactory {
+    @MainActor
     static func make() -> SignuDataProviding {
         #if DEBUG
         // Shell with the short empty-state content, for auto-hide review.
@@ -223,8 +224,19 @@ enum SignuDataProviderFactory {
         if CommandLine.arguments.contains("--shell-fresh") {
             return MockDataProvider(scenario: .freshConnection)
         }
-        #endif
+        // Opt IN to live data in Debug, rather than opting out. Every existing
+        // screenshot harness and preview keeps its deterministic mock dataset
+        // without being touched, and a developer sees real rows only by asking:
+        //   simctl launch … pro.sinatra.signu --live-data
+        if CommandLine.arguments.contains("--live-data") {
+            return SupabaseDataProvider()
+        }
         return MockDataProvider()
+        #else
+        // Release reads the real thing. Mirrors how `SignuApp.sessionProvider()`
+        // splits, so the two never disagree about which world a build is in.
+        return SupabaseDataProvider()
+        #endif
     }
 }
 
