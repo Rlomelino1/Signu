@@ -35,6 +35,38 @@ jobs:
             -configuration Debug \
             -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO
+
+      # The tests exist now, so CI runs them. Until this step there was no Swift
+      # test target at all -- the same shape as the gap v27 closed for the Deno
+      # tests, where 32 tests encoding historical bugs sat in a file nothing
+      # executed on a PR.
+      #
+      # A simulator destination, not `generic/platform=iOS`: a unit-test bundle is
+      # loaded by a host app, and the generic destination cannot run one.
+      #
+      # The device is resolved at runtime rather than named. A literal
+      # 'name=iPhone 17 Pro' is really an assertion about which Xcode the runner
+      # image ships, and it fails as an unhelpful "Unable to find a destination"
+      # the week that image rolls forward. `-destination id=<udid>` asks the
+      # installed Xcode what it actually has.
+      - name: Test
+        run: |
+          UDID=$(xcrun simctl list devices available \
+            | awk '/^-- iOS/ {ios = 1; next}
+                   /^-- / {ios = 0}
+                   ios && /iPhone/ {
+                     match($0, /[0-9A-F-]{36}/)
+                     print substr($0, RSTART, RLENGTH); exit
+                   }')
+          test -n "$UDID" || { echo "no available iPhone simulator"; exit 1; }
+          echo "Testing on $UDID"
+          xcodebuild test \
+            -project frontend/Signu.xcodeproj \
+            -scheme Signu \
+            -configuration Debug \
+            -destination "id=$UDID" \
+            CODE_SIGNING_ALLOWED=NO
+
       - name: Build Release
         run: |
           xcodebuild build \
