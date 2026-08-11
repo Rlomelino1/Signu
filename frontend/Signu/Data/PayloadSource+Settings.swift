@@ -1,13 +1,17 @@
 import Foundation
 
-// Settings payloads (endpoint stand-ins). Attribution follows the doctrine:
-// a subscription is "via this bank" iff its latest charge (of its latest
-// run) resolves through transaction_id to an account under the connection.
-extension MockDataProvider {
+// Settings payloads. Attribution follows the doctrine: a subscription is
+// "via this bank" iff its latest charge (of its latest run) resolves through
+// transaction_id to an account under the connection.
+//
+// Moved verbatim out of MockDataProvider+Settings.swift so the live provider
+// shares it. See PayloadSource.swift for why.
+
+extension SignuPayloadSource {
 
     // MARK: - Settings (12a/12d)
 
-    func settingsPayload() async throws -> SettingsPayload {
+    func makeSettingsPayload() -> SettingsPayload {
         let banks = connectionList.map { connection -> SettingsPayload.BankRow in
             let (chipText, chipTone, subtitle) = bankStatus(connection)
             return SettingsPayload.BankRow(
@@ -62,7 +66,7 @@ extension MockDataProvider {
 
     // MARK: - Connection detail (12b)
 
-    func connectionDetailPayload(connectionId: UUID) async throws -> ConnectionDetailPayload? {
+    func makeConnectionDetailPayload(connectionId: UUID) -> ConnectionDetailPayload? {
         guard let connection = connectionList.first(where: { $0.id == connectionId }) else { return nil }
         let (chipText, chipTone, _) = bankStatus(connection)
         let cards = accountList.filter { $0.connectionId == connectionId }
@@ -110,7 +114,7 @@ extension MockDataProvider {
 
     // MARK: - Attributed subscriptions (13a)
 
-    func attributedSubsPayload(connectionId: UUID) async throws -> AttributedSubsPayload? {
+    func makeAttributedSubsPayload(connectionId: UUID) -> AttributedSubsPayload? {
         guard let connection = connectionList.first(where: { $0.id == connectionId }) else { return nil }
         let attributed = attributedSubscriptions(connectionId: connectionId)
         let cards = accountList.filter { $0.connectionId == connectionId }
@@ -171,7 +175,7 @@ extension MockDataProvider {
 
     // MARK: - Delete-account
 
-    func deleteAccountScope() async throws -> DeleteAccountScope {
+    func makeDeleteAccountScope() -> DeleteAccountScope {
         let since = chargeList.map(\.date).min()
         return DeleteAccountScope(
             bankCount: connectionList.count,
