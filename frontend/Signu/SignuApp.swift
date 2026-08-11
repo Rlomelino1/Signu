@@ -18,11 +18,16 @@ struct SignuApp: App {
 
     private static func sessionProvider() -> SessionProviding {
         #if DEBUG
+        // Opt IN to live auth, matching how SignuDataProviderFactory splits, so the
+        // two never disagree about which world a build is in. Every existing launch
+        // scenario keeps working untouched:
+        //   simctl launch … pro.sinatra.signu --live-auth --live-data
+        if CommandLine.arguments.contains("--live-auth") {
+            return SupabaseSessionProvider()
+        }
         return MockSessionProvider(scenario: MockSessionProvider.launchScenario)
         #else
-        // No SDK yet: a release build has no way to restore a session, so the
-        // honest starting state is signed out.
-        return MockSessionProvider(scenario: .signedOut)
+        return SupabaseSessionProvider()
         #endif
     }
 }

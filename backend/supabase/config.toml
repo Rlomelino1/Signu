@@ -147,7 +147,12 @@ max_catalogs = 2
 
 # Store vector embeddings in S3 for large and durable datasets
 [storage.vector]
-enabled = true
+# false, matching the plan. This is a CLI default that `supabase config push`
+# asserts like any other: on a Free project the API rejects it with
+# 402 "Please upgrade the project to a paid tier to enable vector buckets", which
+# aborts the push midway -- after auth had already been written. Nothing in this
+# app uses vector buckets.
+enabled = false
 max_buckets = 10
 max_indexes = 5
 
@@ -158,11 +163,19 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+# The app is mobile-only, so the canonical post-auth target is its deep link, not
+# a website. This is also what Supabase interpolates into confirmation and reset
+# emails — the auth flow contract requires those to land on signu://auth-callback,
+# and Info.plist already registers the scheme ("the dashboard whitelist is the
+# other half"). Left at the CLI's 127.0.0.1:3000 default, `supabase config push`
+# would point production's auth emails at localhost and break both flows.
+site_url = "signu://auth-callback"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# Supabase refuses any redirect not EXACTLY on this list, so the deep link has to
+# appear here even though site_url already names it.
+additional_redirect_urls = ["signu://auth-callback"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -225,7 +238,17 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = false
+# ON, and non-negotiable. The whole auth gate rests on it: with confirmation on, a
+# session existing IMPLIES a verified email, which is why RootView has no
+# "signed in but unverified" branch and why 17b -> 17c is navigation rather than a
+# gate transition (auth flow contract).
+#
+# This was the CLI default `false` and `supabase config push` has no dry-run, so
+# pushing it would have silently DISABLED confirmation in production: signup would
+# start returning live sessions for unverified addresses and the gate would admit
+# them, with no error anywhere. Production already has it on
+# (mailer_autoconfirm = false); this makes config.toml agree instead of overwrite.
+enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
@@ -321,6 +344,19 @@ max_frequency = "5s"
 # Use an external OAuth provider. The full list of providers are: `apple`, `azure`, `bitbucket`,
 # `discord`, `facebook`, `github`, `gitlab`, `google`, `keycloak`, `linkedin_oidc`, `notion`, `twitch`,
 # `twitter`, `x`, `slack`, `spotify`, `workos`, `zoom`.
+[auth.external.google]
+enabled = true
+# Web-application client, not iOS: the OAuth code exchange happens on Supabase's
+# server, so Google must see a web client. Its authorized redirect URI is
+# https://<ref>.supabase.co/auth/v1/callback — verified live, it answers 303.
+client_id = "338686057720-q2na644ohp866sc7qe7v6cs2hp5lrba1.apps.googleusercontent.com"
+# By reference, never inline: this file is committed to a public repo. The value
+# lives in supabase/.env.production, which .gitignore covers via `.env.*`.
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+# Google verified the address, so a Google sign-in needs no confirmation
+# interstitial — the gate takes it straight to .authenticated (auth flow contract).
+skip_nonce_check = false
+
 [auth.external.apple]
 enabled = false
 client_id = ""

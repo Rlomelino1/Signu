@@ -13,7 +13,19 @@ import Supabase
 enum SupabaseClientProvider {
     static let shared: SupabaseClient = SupabaseClient(
         supabaseURL: URL(string: SupabaseConfig.url)!,
-        supabaseKey: SupabaseConfig.anonKey
+        supabaseKey: SupabaseConfig.anonKey,
+        options: SupabaseClientOptions(
+            auth: SupabaseClientOptions.AuthOptions(
+                // Configured here rather than passed per call, because
+                // `signInWithOAuth` does not merely default it — it calls
+                // `preconditionFailure` when neither this nor its `redirectTo`
+                // argument yields a scheme, so a missing value is a crash, not a
+                // fallback. Setting it once also keeps the OAuth, confirmation and
+                // recovery flows on one redirect, which is the single value the
+                // Supabase allow-list has to contain.
+                redirectToURL: URL(string: SupabaseConfig.redirectURL)!
+            )
+        )
     )
 }
 
@@ -31,6 +43,14 @@ enum SupabaseClientProvider {
 /// Vault, and a client that held either would make every user's data reachable.
 enum SupabaseConfig {
     static let url = "https://yrdihsizftdmlbytwxtg.supabase.co"
+
+    /// Where every auth flow lands: OAuth, email confirmation, password recovery.
+    ///
+    /// Must match THREE places or the flow breaks silently — the CFBundleURLSchemes
+    /// entry in Info.plist, `site_url` in supabase/config.toml, and the project's
+    /// redirect allow-list (Supabase refuses any redirect not exactly on it, and
+    /// that list was empty until config was pushed).
+    static let redirectURL = "signu://auth-callback"
 
     static let anonKey =
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" +
