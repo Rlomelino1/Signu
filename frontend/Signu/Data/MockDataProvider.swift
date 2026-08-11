@@ -22,7 +22,8 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     private(set) var profileValue: Profile!
     private(set) var connectionList: [Connection] = []
     private(set) var accountList: [BankAccount] = []
-    private(set) var subscriptionList: [Subscription] = []
+    // Not `private(set)`: the write methods below mutate it.
+    var subscriptionList: [Subscription] = []
     private(set) var runList: [SubscriptionRun] = []
     private(set) var chargeList: [Charge] = []
     /// charge.transactionId → bank_account.id. Stands in for the raw
@@ -57,6 +58,23 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         makeDetailPayload(subscriptionId: subscriptionId)
     }
     func settingsPayload() async throws -> SettingsPayload { makeSettingsPayload() }
+
+    // MARK: - Writes
+    //
+    // Mutates the in-memory fixtures rather than no-opping, so a preview or a
+    // screenshot run behaves like the real thing: dismiss a suggestion and it
+    // leaves review, restore it and it comes back. A mock that accepted writes and
+    // discarded them would make every UI test of a write vacuously pass.
+
+    func setReminder(subscriptionId: UUID, remindBeforeDays: Int?) async throws {
+        guard let i = subscriptionList.firstIndex(where: { $0.id == subscriptionId }) else { return }
+        subscriptionList[i].remindBeforeDays = remindBeforeDays
+    }
+
+    func setIgnored(subscriptionId: UUID, ignored: Bool) async throws {
+        guard let i = subscriptionList.firstIndex(where: { $0.id == subscriptionId }) else { return }
+        subscriptionList[i].ignored = ignored
+    }
     func connectionDetailPayload(connectionId: UUID) async throws -> ConnectionDetailPayload? {
         makeConnectionDetailPayload(connectionId: connectionId)
     }

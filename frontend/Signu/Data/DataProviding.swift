@@ -41,4 +41,32 @@ protocol SignuDataProviding {
     func subscriptions() async throws -> [Subscription]
     func runs(subscriptionId: UUID) async throws -> [SubscriptionRun]
     func charges(runId: UUID) async throws -> [Charge]
+
+    // MARK: - Writes
+    //
+    // The app's first write path. Until it existed every state-changing control in
+    // the UI called a closure nobody supplied, so the whole interface was a shell:
+    // the reminder toggle flipped its own local state, Restore hid a row until the
+    // next launch, and Dismiss did nothing at all.
+    //
+    // ONLY user-owned columns appear here, and that is a permission boundary rather
+    // than a style choice. Migration #1 grants `authenticated` a column-scoped
+    // UPDATE on exactly seven columns; a write to anything else fails at the
+    // database no matter what this protocol claims. So the shape of this section is
+    // dictated by the grants, and cannot drift from them without failing loudly.
+    //
+    // What is therefore NOT here, and needs an Edge Function rather than a method:
+    // confirming a suggestion (`subscription_run.status` + `identification`) and
+    // marking a run cancelled (`cancelled_date`). Runs are engine-owned and
+    // `authenticated` holds no UPDATE grant on that table at all.
+
+    /// The detail screen's reminder toggle. `nil` turns reminders off — the
+    /// nullable column *is* the switch (v5), so there is no separate flag.
+    /// On maps to 2 days, per the detail contract.
+    func setReminder(subscriptionId: UUID, remindBeforeDays: Int?) async throws
+
+    /// Review's Dismiss (`true`) and Settings' Restore (`false`).
+    /// Restore is exactly `ignored = false` and nothing more: the run returns to
+    /// `possible` and resurfaces in review, because it never left that state.
+    func setIgnored(subscriptionId: UUID, ignored: Bool) async throws
 }

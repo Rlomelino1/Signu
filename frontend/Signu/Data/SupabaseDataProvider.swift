@@ -74,6 +74,60 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
 
     func settingsPayload() async throws -> SettingsPayload { try await ensureLoaded(); return makeSettingsPayload() }
 
+    // MARK: - Writes
+    //
+    // No `.eq("user_id", …)` here either, for the same reason the reads have none:
+    // RLS scopes the UPDATE, and a client-side predicate would be a second, weaker
+    // copy of a rule the database already enforces. A write aimed at someone else's
+    // row does not fail — it matches nothing, which is the correct outcome and one
+    // this code does not have to arrange.
+    //
+    // Both write only columns inside Migration #1's column-scoped UPDATE grant. A
+    // write outside it is rejected by Postgres regardless of what is asked for
+    // here, so the grant is the real boundary and this is merely aligned with it.
+
+    func setReminder(subscriptionId: UUID, remindBeforeDays: Int?) async throws {
+        // `.null`, not an omitted key: turning reminders off means writing NULL,
+        // because the nullable column IS the switch (v5).
+        let value: AnyJSON = remindBeforeDays.map { AnyJSON.integer($0) } ?? .null
+        try await update(subscriptionId: subscriptionId, values: ["remind_before_days": value])
+    }
+
+    func setIgnored(subscriptionId: UUID, ignored: Bool) async throws {
+        try await update(subscriptionId: subscriptionId, values: ["ignored": .bool(ignored)])
+    }
+
+    /// `[String: AnyJSON]` rather than a single concrete Swift type, because the
+    /// columns genuinely differ: `remind_before_days` is a nullable int and
+    /// `ignored` a boolean. An earlier draft typed the dictionary `[String: Int?]`
+    /// so one type could carry both, which sends `{"ignored": 1}` for a boolean
+    /// column. Checked against a real Postgres rather than assumed: that IS
+    /// accepted and coerces to true, so this is fidelity rather than a bug fix —
+    /// but the value sent should be the value meant, and the next column added
+    /// this way may not coerce so kindly.
+    ///
+    /// `nonisolated`, like the fetches: `PostgrestResponse` is not Sendable, so
+    /// awaiting `execute()` from a main-actor method sends it across an isolation
+    /// boundary — an error under the Swift 6.1 compiler CI builds with, even though
+    /// newer compilers' region analysis allows it.
+    private nonisolated func execute(subscriptionId: UUID, values: [String: AnyJSON]) async throws {
+        try await client
+            .from("subscription")
+            .update(values)
+            .eq("id", value: subscriptionId.uuidString)
+            .execute()
+    }
+
+    /// Invalidates the cache after a successful write, so the next screen reads the
+    /// row rather than the copy loaded before the change. Deliberately NOT an
+    /// optimistic local edit: two representations of one row is how a UI comes to
+    /// disagree with the database, and the re-read costs one round trip on a screen
+    /// the user has just navigated away from.
+    private func update(subscriptionId: UUID, values: [String: AnyJSON]) async throws {
+        try await execute(subscriptionId: subscriptionId, values: values)
+        loaded = false
+    }
+
     func connectionDetailPayload(connectionId: UUID) async throws -> ConnectionDetailPayload? {
         try await ensureLoaded()
         return makeConnectionDetailPayload(connectionId: connectionId)
