@@ -121,7 +121,10 @@ private struct ScrollViewObserver: UIViewRepresentable {
             guard let scroll = candidate as? UIScrollView, scroll !== observedScrollView else { return }
             observedScrollView = scroll
 
-            let report = { [weak self, weak scroll] in
+            // Typed `@MainActor`, which makes it Sendable and so legal to capture
+            // in KVO's `@Sendable` handler — a plain closure over `self` and
+            // `scroll` is not, and warns under Swift 6.
+            let report: @MainActor () -> Void = { [weak self, weak scroll] in
                 guard let self, let scroll else { return }
                 let insets = scroll.adjustedContentInset
                 self.onChange(
@@ -130,9 +133,17 @@ private struct ScrollViewObserver: UIViewRepresentable {
                     scroll.bounds.height
                 )
             }
+            // `assumeIsolated`, not a hop: `contentOffset` and `contentSize` are
+            // main-thread-only UIKit properties, so the handler already runs there.
+            // A `Task { @MainActor }` would defer the report by a turn and make the
+            // tab bar lag the scroll it is supposed to track.
             observations = [
-                scroll.observe(\.contentOffset, options: [.initial]) { _, _ in report() },
-                scroll.observe(\.contentSize) { _, _ in report() },
+                scroll.observe(\.contentOffset, options: [.initial]) { _, _ in
+                    MainActor.assumeIsolated { report() }
+                },
+                scroll.observe(\.contentSize) { _, _ in
+                    MainActor.assumeIsolated { report() }
+                },
             ]
         }
     }

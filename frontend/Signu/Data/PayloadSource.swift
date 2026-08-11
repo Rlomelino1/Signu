@@ -14,6 +14,12 @@ import Foundation
 /// exactly these names, so becoming protocol requirements changed no line of
 /// logic. Only the eight async entry points were renamed to `make…` so the
 /// concrete providers can wrap them to satisfy `SignuDataProviding`.
+///
+/// `@MainActor` for the same reason as `SignuDataProviding`, and it has to match:
+/// the payload methods below are what the async entry points on that protocol
+/// call, so a non-isolated source behind an isolated provider would just move the
+/// hop one layer down.
+@MainActor
 protocol SignuPayloadSource {
     var today: Date { get }
     /// Wall-clock "now", for relative copy. Distinct from `today` so previews can

@@ -32,9 +32,19 @@ struct SupabaseRowsTests {
 
     @Test("a timestamptz with no fractional digits also parses")
     func plainTimestamp() {
-        // Covered by the second formatter. One strategy cannot read both shapes,
-        // which is why the fallback exists.
+        // Both shapes, one strategy. `ISO8601DateFormatter` was strict here and
+        // needed a second formatter as a fallback; `Date.ISO8601FormatStyle` is
+        // lenient in both directions, so this is what proves the fallback could be
+        // deleted rather than left as a branch nothing reached.
         #expect("2026-08-10T18:37:13+00:00".asPostgresTimestamp != nil)
+    }
+
+    @Test("the Z form of both shapes parses too")
+    func zuluTimestamps() {
+        // PostgREST returns +00:00, but nothing in the contract promises that, and
+        // the leniency being relied on covers this as well. Cheap to pin.
+        #expect("2026-08-10T18:37:13.499Z".asPostgresTimestamp != nil)
+        #expect("2026-08-10T18:37:13Z".asPostgresTimestamp != nil)
     }
 
     @Test("the two date shapes do not decode with each other's parser")

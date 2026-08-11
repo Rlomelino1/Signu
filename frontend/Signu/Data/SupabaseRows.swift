@@ -31,17 +31,20 @@ private let dateOnlyFormatter: DateFormatter = {
     return f
 }()
 
-private let timestampFormatter: ISO8601DateFormatter = {
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return f
-}()
-
-private let timestampNoFractionFormatter: ISO8601DateFormatter = {
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withInternetDateTime]
-    return f
-}()
+// `Date.ISO8601FormatStyle`, not `ISO8601DateFormatter`. The format style is a
+// Sendable struct; the formatter is a reference type with mutable options that
+// Foundation declines to mark Sendable, so a shared global of one is a Swift 6
+// error — correctly so. Notably `DateFormatter` above IS annotated Sendable by
+// Apple, which is why it stays: they vouched for that one and not for this one,
+// and `nonisolated(unsafe)` would be claiming a guarantee nobody gave.
+//
+// ONE style, where the formatter needed two. `ISO8601DateFormatter` was strict —
+// `.withFractionalSeconds` refused a timestamp without them and vice versa, which
+// is the only reason a fallback existed. The format style is lenient in both
+// directions: verified against all four wire shapes (six fractional digits and
+// none, `+00:00` and `Z`), each of which parses either way, while a bare
+// `2026-06-19` parses as neither. The tests pin all of it.
+private let timestampStyle = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
 
 extension String {
     /// A `date` column. Noon São Paulo, matching how the mock builds dates, so
@@ -52,9 +55,7 @@ extension String {
     }
 
     /// A `timestamptz` column, with or without fractional seconds.
-    var asPostgresTimestamp: Date? {
-        timestampFormatter.date(from: self) ?? timestampNoFractionFormatter.date(from: self)
-    }
+    var asPostgresTimestamp: Date? { try? Date(self, strategy: timestampStyle) }
 }
 
 extension Double {

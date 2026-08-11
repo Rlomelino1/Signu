@@ -14,6 +14,7 @@ import Auth
 /// `client.from(…)` attaches whatever is current. Two clients would mean two
 /// sessions, and the data provider would read as signed-out moments after the gate
 /// said otherwise.
+@MainActor
 final class SupabaseSessionProvider: SessionProviding {
 
     private let client: SupabaseClient

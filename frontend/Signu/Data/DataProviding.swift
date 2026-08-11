@@ -5,6 +5,15 @@ import Foundation
 /// payload, detail timeline…) will be added here as each screen lands,
 /// mirroring the endpoints the backend will eventually serve. A Supabase
 /// provider then slots in behind this protocol without touching views.
+///
+/// `@MainActor` because every consumer is a SwiftUI view and the live provider
+/// caches rows in mutable state that only the main actor may touch. Stating it on
+/// the protocol rather than the conformer is what makes that safe: an @MainActor
+/// class conforming to a non-isolated protocol warns today and is an **error in
+/// the Swift 6 language mode**, because a caller holding the existential could
+/// invoke it from anywhere. Isolating the boundary itself removes the hole rather
+/// than silencing the diagnostic.
+@MainActor
 protocol SignuDataProviding {
     /// "Today" as the provider sees it. The mock provider pins this so
     /// previews are deterministic; the live provider returns the real date.

@@ -75,7 +75,11 @@ enum SignuFormat {
     /// Timeline row date: "Wed, Jun 18" in the current year, "Sat, Nov 18,
     /// 2023" in earlier years (21k vs 21l).
     static func timelineDate(_ date: Date, referenceYear: Int) -> String {
-        let year = MockDataProvider.calendar.component(.year, from: date)
+        // SignuCalendar, not MockDataProvider.calendar. Both resolve to the same
+        // São Paulo calendar, but routing production date formatting through the
+        // fixture provider was backwards — and it is what made this line
+        // main-actor-isolated once the provider protocols were.
+        let year = SignuCalendar.saoPaulo.component(.year, from: date)
         return year == referenceYear ? weekdayMonthDay(date) : weekdayMonthDayYear(date)
     }
 
