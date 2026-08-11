@@ -66,7 +66,20 @@ jobs:
           # The help text lists storage/analytics; the runtime rejects both and
           # accepts storage-api/logflare. An invalid name is only a WARNING, so a
           # wrong list silently stops excluding and the job still goes green.
-          supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector 2>&1 | tee cli.log
+          #
+          # `mailpit` is a second instance of the same trap, and the help text is
+          # wrong in a new way: it lists `inbucket`, the runtime REJECTS that, and
+          # the container is still named supabase_inbucket_backend. Only `mailpit`
+          # is accepted. Verified by running both -- `inbucket` warns and leaves
+          # the container up; `mailpit` is silent and port 54324 goes unbound.
+          #
+          # It is excluded because it caused a real red build: `db reset` restarts
+          # containers, mailpit raced itself for 54324, and the run died AFTER all
+          # six migrations had applied but BEFORE the gate below could run. A
+          # migrations job has no use for a mail catcher, so this removes a
+          # container and a port from the equation rather than papering over a
+          # flake with a retry.
+          supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector,mailpit 2>&1 | tee cli.log
           supabase db reset 2>&1 | tee -a cli.log
 
           # Warning gate. The CLI reports some real problems as warnings, not
