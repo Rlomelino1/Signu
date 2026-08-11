@@ -203,7 +203,7 @@ struct SettingsView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
         } else {
-            Button(action: sendPasswordLink) {
+            Button { sendPasswordLink() } label: {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
                         // "Set" not "Change" for a Google-first account, the same
@@ -224,6 +224,12 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 9)
+                // Without this the row's MIDDLE is dead to taps: a Spacer draws
+                // nothing, so `.buttonStyle(.plain)` hit-tests only the text and the
+                // chevron and the gap between them does nothing. Found by the UI
+                // test, whose tap lands on the frame's centre — which is exactly
+                // where a thumb aiming at a full-width row lands too.
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
@@ -244,6 +250,11 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
+            // Same reason as the password row above. This one happened to pass its
+            // UI test anyway, because the label is short enough that the tapped
+            // centre still landed on the text — the defect was there regardless, for
+            // every tap to the right of the word.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
