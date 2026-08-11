@@ -81,7 +81,7 @@ struct CreateAccountView: View {
 struct ConfirmEmailView: View {
     // No error slot, deliberately. 17c does not use AuthScaffold, and its only
     // failure -- a resend inside the rate limit -- is already prevented by the
-    // 120s cooldown rendered below, which is why the contract calls that error
+    // cooldown rendered below, which is why the contract calls that error
     // "normally unreachable". A second, differently-placed error surface here
     // would be inconsistent without being useful.
     let email: String
@@ -94,7 +94,7 @@ struct ConfirmEmailView: View {
     var onResend: () -> Void = {}
     var onGoBack: () -> Void = {}
 
-    // 120s resend cooldown (clears Supabase's ~60s rate limit).
+    // Resend cooldown, clearing Supabase's ~60s rate limit. See AuthCooldown.
     @State private var cooldown = 0
     @State private var notConfirmed = false
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -141,14 +141,14 @@ struct ConfirmEmailView: View {
                     }
                 }
                 .buttonStyle(.signuPrimary)
-                // Resend shows a 120s countdown once tapped, then reactivates.
+                // Resend shows the countdown once tapped, then reactivates.
                 if cooldown > 0 {
                     Text("Resend available in \(cooldown)s")
                         .font(.signuSubtitle)
                         .foregroundStyle(SignuColor.textSecondary)
                 } else {
                     Button {
-                        cooldown = 120
+                        cooldown = AuthCooldown.seconds
                         onResend()
                     } label: {
                         (
@@ -224,7 +224,7 @@ struct ForgotPasswordView: View {
             } else {
                 Button("Send reset link") {
                     sent = true
-                    cooldown = 120
+                    cooldown = AuthCooldown.seconds
                     onSend(email)
                 }
                 .buttonStyle(.signuPrimary)

@@ -19,13 +19,19 @@ struct AppShellView: View {
     /// Same, for the Subs tab.
     var subsScrollAnchor: UnitPoint = .top
     var initialSubsFilter: SubsFilter = .all
-    /// Both exits (Settings sign-out — see the PR note — and 14a's delete
-    /// confirmation) call this; the gate turns it into a root swap back to
-    /// `WelcomeFlow`.
+    /// Both exits (Settings' v19 sign-out row and 14a's delete confirmation)
+    /// call this; the gate turns it into a root swap back to `WelcomeFlow`.
     var onSignOut: () -> Void = {}
+    /// v19's password row sends 17d's reset link. Supplied from above rather than
+    /// reached from here, exactly as `onSignOut` is: the shell holds a data
+    /// provider, and the session deliberately never crosses that boundary.
+    var onSetPassword: () -> Void = {}
 
     @State private var selectedTab = SignuTab.home
     @State private var tabBarState = TabBarState()
+    /// Lives here, not in Settings: the `switch` below destroys the branch it is
+    /// not rendering, and v19's resend cooldown must survive a trip to Home.
+    @State private var passwordLinkState = PasswordLinkState()
     @State private var showReview = false
     @State private var detailSubscriptionId: UUID?
     @State private var detailFixture: DetailPayload?
@@ -39,12 +45,14 @@ struct AppShellView: View {
          initialTab: SignuTab = .home,
          initialSubsFilter: SubsFilter = .all,
          subsScrollAnchor: UnitPoint = .top,
-         onSignOut: @escaping () -> Void = {}) {
+         onSignOut: @escaping () -> Void = {},
+         onSetPassword: @escaping () -> Void = {}) {
         self.provider = provider
         self.homeScrollAnchor = homeScrollAnchor
         self.initialSubsFilter = initialSubsFilter
         self.subsScrollAnchor = subsScrollAnchor
         self.onSignOut = onSignOut
+        self.onSetPassword = onSetPassword
         var tab = initialTab
         #if DEBUG
         if CommandLine.arguments.contains("--shell-subs") { tab = .subs }
@@ -103,7 +111,9 @@ struct AppShellView: View {
                             deleteScope = try? await provider.deleteAccountScope()
                             showDelete = true
                         }
-                    }
+                    },
+                    onSetPassword: onSetPassword,
+                    onSignOut: onSignOut
                 ))
             }
 
@@ -117,6 +127,7 @@ struct AppShellView: View {
                 .animation(.easeOut(duration: 0.25), value: tabBarState.hidden)
         }
         .environment(tabBarState)
+        .environment(passwordLinkState)
         .onChange(of: selectedTab) {
             tabBarState.reset()
         }

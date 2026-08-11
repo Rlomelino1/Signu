@@ -92,12 +92,23 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         }
     }
 
+    private static var googleOnly: Bool {
+        #if DEBUG
+        CommandLine.arguments.contains("--settings-google-only")
+        #else
+        false
+        #endif
+    }
+
     init() {
         profileValue = Profile(
             id: UUID(),
             displayName: "Rafael Souza",
             email: "rafael.souza@example.com",
-            providers: ["google", "email"],
+            // Google-only is the interesting half of v19's password row ("Set a
+            // password" plus its explanatory subtitle) and no scenario reaches it,
+            // so a flag does — same harness pattern as --subs-inactive.
+            providers: Self.googleOnly ? ["google"] : ["google", "email"],
             createdAt: Self.date(2025, 10, 4)
         )
 

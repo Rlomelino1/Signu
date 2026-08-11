@@ -33,6 +33,10 @@ extension SignuPayloadSource {
             email: profileValue.email,
             initial: String(profileValue.displayName.prefix(1)).uppercased(),
             providers: profileValue.providers.map(providerLabel),
+            // The raw identity, not the label: `providerLabel` renders "email" as
+            // "Password" for the chip, and matching on display copy would break
+            // the moment that copy changed.
+            hasPassword: profileValue.providers.contains("email"),
             banks: banks,
             dismissed: dismissed,
             deleteScopeLine: "Everything, permanently — banks, history, profile"
