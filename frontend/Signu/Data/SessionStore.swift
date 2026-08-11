@@ -17,6 +17,11 @@ final class SessionStore {
     /// Last auth failure, for the screens that render one.
     private(set) var lastError: SessionAuthError?
 
+    /// Drop a stale failure. `lastError` is global to the store, so without this
+    /// a failed sign-in would still be on screen after tapping "Forgot password?"
+    /// — the error belongs to the attempt, not to the session.
+    func clearError() { lastError = nil }
+
     /// A recovery deep link that had expired. 17d consumes this to render the
     /// "request a new one" notice instead of dead-ending (auth flow contract).
     private(set) var expiredRecoveryLink = false

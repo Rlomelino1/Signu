@@ -83,7 +83,20 @@ struct RootView: View {
                     email: session.email ?? "",
                     onSubmit: { password in
                         Task { await session.updatePassword(password) }
-                    }
+                    },
+                    // NOT signInMessage: that copy is 17a's ("Couldn't sign in.
+                    // Check your password…") and would be actively wrong here.
+                    // SessionAuthError has no case describing a failed password
+                    // update, and `authError()` funnels unknowns to
+                    // .invalidCredentials, so rendering it raw would mislead.
+                    //
+                    // PLACEHOLDER COPY, flagged like signInMessage's own
+                    // emailNotConfirmed string: the auth flow contract never
+                    // specified 17e failure copy, and inventing locked wording is
+                    // worse than surfacing something honest and saying so.
+                    error: session.lastError == nil ? nil : AuthError(
+                        message: "Couldn't set your new password. Try again."
+                    )
                 )
                 .transition(.opacity)
 

@@ -16,11 +16,17 @@ struct WelcomeFlow: View {
     var body: some View {
         NavigationStack(path: $path) {
             WelcomeView(
-                onCreateAccount: { path.append(.createAccount) },
+                onCreateAccount: {
+                    session.clearError()
+                    path.append(.createAccount)
+                },
                 // Google verified the address, so no confirmation
                 // interstitial: this lands straight in the shell.
                 onGoogle: { Task { await session.signInWithGoogle() } },
-                onSignIn: { path.append(.signIn) }
+                onSignIn: {
+                    session.clearError()
+                    path.append(.signIn)
+                }
             )
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: AuthRoute.self) { route in
@@ -43,10 +49,14 @@ struct WelcomeFlow: View {
         case .signIn:
             SignInView(
                 onBack: pop,
-                onForgot: { path.append(.forgotPassword(expired: false)) },
+                onForgot: {
+                    session.clearError()
+                    path.append(.forgotPassword(expired: false))
+                },
                 onSubmit: { email, password in
                     Task { await session.signIn(email: email, password: password) }
-                }
+                },
+                error: signInError
             )
         case .createAccount:
             CreateAccountView(
@@ -59,7 +69,8 @@ struct WelcomeFlow: View {
                             path.append(.confirmEmail(email))
                         }
                     }
-                }
+                },
+                error: session.lastError.map { AuthError(message: $0.signInMessage) }
             )
         case .confirmEmail(let email):
             ConfirmEmailView(
@@ -79,7 +90,33 @@ struct WelcomeFlow: View {
         }
     }
 
+    /// `SessionAuthError` -> what 17a renders. The mapping lives here because
+    /// `WelcomeFlow` already owns the session; the screens take a plain value and
+    /// stay session-agnostic.
+    ///
+    /// `emailNotConfirmed` is the one failure with a remedy, so it gets the resend
+    /// action the auth flow contract asks for. Its copy is still the placeholder
+    /// that shipped with `signInMessage` -- the contract specifies
+    /// "verify-specific copy with a resend action" without writing the string, and
+    /// inventing locked copy here would be worse than surfacing the placeholder.
+    private var signInError: AuthError? {
+        guard let error = session.lastError else { return nil }
+        switch error {
+        case .emailNotConfirmed:
+            return AuthError(
+                message: error.signInMessage,
+                actionTitle: "Resend confirmation email",
+                action: { Task { await session.resendConfirmation(email: session.email ?? "") } }
+            )
+        case .invalidCredentials, .rateLimited:
+            return AuthError(message: error.signInMessage)
+        }
+    }
+
     private func pop() {
+        // The error belongs to the attempt, not the session: leaving it set would
+        // show a failed sign-in on 17d after tapping "Forgot password?".
+        session.clearError()
         if !path.isEmpty { path.removeLast() }
     }
 }
