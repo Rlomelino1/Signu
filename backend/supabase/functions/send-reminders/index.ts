@@ -236,8 +236,15 @@ Deno.serve(async (req: Request) => {
         continue
       }
 
-      const due = dueReminders(await loadCandidates(db, p.id), today)
-      if (!due.length) {
+      const candidates = await loadCandidates(db, p.id)
+      const due = dueReminders(candidates, today)
+
+      // Resolved before the empty check on a dry run, so `dryRun` can answer "who
+      // would this reach?" even on a day nothing is due. That is the question the
+      // free-tier restriction turns on -- delivery works only while this address is
+      // the one that owns the Resend account -- and it should be answerable without
+      // waiting for a renewal to come round.
+      if (!due.length && !dryRun) {
         results.push({ userId: p.id, due: 0 })
         continue
       }
@@ -251,8 +258,14 @@ Deno.serve(async (req: Request) => {
         results.push({
           userId: p.id,
           to,
+          // How many runs were even looked at, so "due: 0" distinguishes "no
+          // subscriptions" from "subscriptions exist and none is due" without
+          // needing a second query to find out.
+          candidates: candidates.length,
           due: due.length,
-          subject: subject(due),
+          // Only when there is something to title. `subject([])` reads
+          // "0 subscriptions renewing soon", which is not wrong so much as absurd.
+          subject: due.length ? subject(due) : null,
           reminders: due,
           note: 'dry run — nothing sent, nothing recorded',
         })
