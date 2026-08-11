@@ -149,12 +149,7 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
         if referenced.isEmpty {
             transactionAccountMap = [:]
         } else {
-            let txRows: [TransactionRow] = try await client
-                .from("transaction")
-                .select("id, account_id, currency, amount, amount_in_account_currency")
-                .in("id", values: referenced.map(\.uuidString))
-                .execute()
-                .value
+            let txRows = try await fetchTransactions(ids: referenced)
             transactionAccountMap = Dictionary(
                 uniqueKeysWithValues: txRows.map { ($0.id, $0.accountId) }
             )
@@ -171,8 +166,31 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
         loaded = true
     }
 
-    private func fetch<T: Decodable>(_ table: String) async throws -> [T] {
+    // Both fetches are `nonisolated`, and that is load-bearing rather than tidy.
+    //
+    // `PostgrestResponse` is not Sendable, so awaiting `execute()` from a
+    // main-actor method sends it across an isolation boundary. Swift 6.1 — CI's
+    // Xcode 16.4 — rejects that outright; newer compilers' region analysis happens
+    // to allow it, which is exactly how this passed locally and failed on CI.
+    // Running the call off the actor means only the decoded rows cross back, and
+    // row structs are implicitly Sendable: every field is a UUID, String, Double,
+    // Bool or Date.
+    //
+    // `client` is readable from here because `SupabaseClient` is itself Sendable
+    // and the property is a `let`.
+
+    nonisolated private func fetch<T: Decodable & Sendable>(_ table: String) async throws -> [T] {
         try await client.from(table).select().execute().value
+    }
+
+    /// Only the transactions actually referenced by a charge — see the call site.
+    nonisolated private func fetchTransactions(ids: [UUID]) async throws -> [TransactionRow] {
+        try await client
+            .from("transaction")
+            .select("id, account_id, currency, amount, amount_in_account_currency")
+            .in("id", values: ids.map(\.uuidString))
+            .execute()
+            .value
     }
 
     enum ProviderError: LocalizedError {

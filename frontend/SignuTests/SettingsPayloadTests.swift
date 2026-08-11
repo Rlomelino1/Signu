@@ -33,7 +33,12 @@ private struct StubSource: SignuPayloadSource {
     var transactionAccountMap: [UUID: UUID] = [:]
 }
 
+/// `@MainActor` because `SignuPayloadSource` is: the payload boundary is
+/// main-actor isolated, so the tests that exercise it run there too. This is the
+/// isolation being *checked* rather than assumed — the reason the protocols were
+/// annotated in the first place.
 @Suite("Settings profile rows (v19)")
+@MainActor
 struct SettingsPayloadTests {
 
     @Test("a password identity means the row offers to change one")

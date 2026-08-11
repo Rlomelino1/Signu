@@ -3,6 +3,7 @@ import Foundation
 /// In-memory auth backend, mirroring `MockDataProvider`'s scenario switch.
 /// No SDK, no tokens, no networking — only the state transitions the gate
 /// reacts to, so the whole navigation edge is reviewable and scriptable.
+@MainActor
 final class MockSessionProvider: SessionProviding {
     /// Launch scenarios: the same provider drives every gate state.
     enum Scenario {

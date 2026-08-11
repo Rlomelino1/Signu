@@ -24,6 +24,13 @@ enum AuthGateState: Equatable {
 /// affordance the locked screens (16a, 17a–17e) actually offer, nothing
 /// speculative. A Supabase-backed provider slots in behind this protocol
 /// without touching views — the gate above it never learns what a token is.
+///
+/// `@MainActor`, mirroring `SignuDataProviding` for the same reason. `SessionStore`
+/// is main-actor and holds one of these; awaiting a *nonisolated* method on it
+/// sends the instance across an actor boundary, which Swift 6 rejects. The
+/// underlying SDK calls suspend and do their work wherever they like — the
+/// isolation is on who may call them, not on where the network happens.
+@MainActor
 protocol SessionProviding {
     /// Cold-launch restore: the gate state the app should open in. Called
     /// once, while `SplashView` is on screen.

@@ -258,6 +258,10 @@ private struct VLineShape: Shape {
 // MARK: - Previews
 
 /// Detail payload for the real subscription with the given service name.
+///
+/// `@MainActor` because the providers are: this builds one, and a nonisolated
+/// async helper could otherwise touch it from any executor.
+@MainActor
 private func detailByName(_ name: String) async -> DetailPayload? {
     let provider = MockDataProvider()
     guard let sub = (try? await provider.subscriptions())?.first(where: { $0.serviceName == name })

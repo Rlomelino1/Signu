@@ -6,6 +6,7 @@ import Foundation
 /// Dataset: 10 subscriptions (8 active — 6 monthly incl. 1 overdue, 2 annual;
 /// 2 inactive — 1 ended, 1 cancelled), 2 possible-run suggestions, 2 dismissed,
 /// 3 connections (active / needs action / expiring consent).
+@MainActor
 final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     /// Preview scenarios: the same provider drives every home-screen state.
     enum Scenario {

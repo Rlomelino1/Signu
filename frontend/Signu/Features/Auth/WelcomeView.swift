@@ -85,6 +85,9 @@ struct WelcomeView: View {
 struct WelcomeSlide {
     let view: AnyView
 
+    /// `@MainActor` because it holds `AnyView`s: constructing SwiftUI views is
+    /// main-actor work, and this is only ever read from the carousel above.
+    @MainActor
     static let all: [WelcomeSlide] = [
         WelcomeSlide(view: AnyView(SlideList())),
         WelcomeSlide(view: AnyView(SlidePriceHike())),

@@ -32,9 +32,20 @@ struct SupabaseRowsTests {
 
     @Test("a timestamptz with no fractional digits also parses")
     func plainTimestamp() {
-        // Covered by the second formatter. One strategy cannot read both shapes,
-        // which is why the fallback exists.
+        // This is the case that requires a second strategy, and it is
+        // OS-dependent: `includingFractionalSeconds: true` accepts this string on
+        // iOS 26 and REFUSES it on iOS 17/18. The deployment target is 17.0, so a
+        // single-style implementation ships broken to most devices while passing on
+        // a current simulator. CI's iOS 18.5 simulator is what caught that.
         #expect("2026-08-10T18:37:13+00:00".asPostgresTimestamp != nil)
+    }
+
+    @Test("the Z form of both shapes parses too")
+    func zuluTimestamps() {
+        // PostgREST returns +00:00, but nothing in the contract promises that.
+        // Same OS-dependent split as above for the no-fraction form.
+        #expect("2026-08-10T18:37:13.499Z".asPostgresTimestamp != nil)
+        #expect("2026-08-10T18:37:13Z".asPostgresTimestamp != nil)
     }
 
     @Test("the two date shapes do not decode with each other's parser")

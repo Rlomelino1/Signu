@@ -95,7 +95,7 @@ struct HomeView: View {
     }
 
     private var greeting: String {
-        let hour = MockDataProvider.calendar.component(.hour, from: payload.now)
+        let hour = SignuCalendar.saoPaulo.component(.hour, from: payload.now)
         switch hour {
         case 5..<12: return "Good morning"
         case 12..<18: return "Good afternoon"
