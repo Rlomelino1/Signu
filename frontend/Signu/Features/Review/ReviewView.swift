@@ -26,7 +26,10 @@ struct ReviewActions {
     var onBack: () -> Void = {}
     /// run id, chosen interval (nil = R3, already measured).
     var onTrack: (UUID, BillingInterval?) -> Void = { _, _ in }
-    /// run id → subscription.ignored = true.
+    /// SUBSCRIPTION id → subscription.ignored = true. Was the run id, which named
+    /// the row the button sits on rather than the row the write targets — dismissing
+    /// is a statement about the subscription ("not a subscription"), not about one
+    /// run of it, and a suggestion carries both ids anyway.
     var onDismiss: (UUID) -> Void = { _ in }
 }
 
@@ -214,7 +217,7 @@ struct ReviewView: View {
     }
 
     private func dismiss(_ suggestion: ReviewPayload.Suggestion) {
-        actions.onDismiss(suggestion.id)
+        actions.onDismiss(suggestion.subscriptionId)
         withAnimation(.easeOut(duration: 0.25)) { _ = resolved.insert(suggestion.id) }
     }
 }

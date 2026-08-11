@@ -20,6 +20,13 @@ struct DetailPayload: Identifiable {
 
     /// Bottom action bar / footer, by state.
     var showRemindMe: Bool
+    /// Whether a reminder is already set — `subscription.remind_before_days != nil`.
+    /// Distinct from `showRemindMe`, which only says whether the button appears at
+    /// all. Without this the toggle always rendered "Remind me" regardless of the
+    /// stored value, so the first tap on an already-on reminder turned it OFF while
+    /// the label claimed it had turned on. Harmless while nothing persisted; a
+    /// defect the moment it did.
+    var reminderOn: Bool
     var showMarkCancelled: Bool
     var footer: String?               // overdue / cancelled / ended honesty copy
 }

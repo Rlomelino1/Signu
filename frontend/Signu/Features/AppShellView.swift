@@ -106,6 +106,13 @@ struct AppShellView: View {
             case .settings:
                 SettingsScreen(provider: provider, actions: SettingsActions(
                     onSelectBank: { settingsConnectionId = $0 },
+                    // Restore is `ignored = false` and nothing more: the run returns
+                    // to `possible` and resurfaces in review, because it never left
+                    // that state. SettingsView also hides the row locally, so the
+                    // list reacts without waiting for the round trip.
+                    onRestore: { id in
+                        Task { try? await provider.setIgnored(subscriptionId: id, ignored: false) }
+                    },
                     onDeleteAccount: {
                         Task {
                             deleteScope = try? await provider.deleteAccountScope()
@@ -136,7 +143,17 @@ struct AppShellView: View {
         .fullScreenCover(isPresented: $showReview) {
             ReviewScreen(
                 provider: provider,
-                actions: ReviewActions(onBack: { showReview = false }),
+                actions: ReviewActions(
+                    onBack: { showReview = false },
+                    // onTrack is deliberately still unwired — see the note on
+                    // SignuDataProviding's write section. Confirming a suggestion
+                    // writes subscription_run.status and subscription.identification,
+                    // and `authenticated` holds no UPDATE grant on either. It needs
+                    // an Edge Function, not a method here.
+                    onDismiss: { id in
+                        Task { try? await provider.setIgnored(subscriptionId: id, ignored: true) }
+                    }
+                ),
                 autoPresentIntervalForR4: reviewAutoR4
             )
         }
@@ -144,7 +161,21 @@ struct AppShellView: View {
         .fullScreenCover(item: $detailSubscriptionId) { id in
             DetailScreen(
                 loader: { try? await provider.detailPayload(subscriptionId: id) },
-                actions: DetailActions(onBack: { detailSubscriptionId = nil })
+                actions: DetailActions(
+                    onBack: { detailSubscriptionId = nil },
+                    // On = 2 days, per the detail contract; off writes NULL, because
+                    // the nullable column is the switch. `try?` because the toggle
+                    // has already shown the new state: a thrown error here would
+                    // have nowhere to render, and the next read shows the truth.
+                    onToggleReminder: { on in
+                        Task {
+                            try? await provider.setReminder(
+                                subscriptionId: id,
+                                remindBeforeDays: on ? 2 : nil
+                            )
+                        }
+                    }
+                )
             )
         }
         .fullScreenCover(item: $detailFixture) { fixture in

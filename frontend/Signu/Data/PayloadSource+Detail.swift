@@ -30,7 +30,7 @@ extension SignuPayloadSource {
                 statusTone: .neutral, amountText: SignuFormat.dash, unit: "/mo",
                 dateSlot: .paidThrough(SignuFormat.dash), thisYearText: SignuFormat.dash,
                 sinceLabel: "", sinceTotalText: SignuFormat.dash, events: [],
-                showRemindMe: false, showMarkCancelled: false, footer: nil
+                showRemindMe: false, reminderOn: false, showMarkCancelled: false, footer: nil
             )
         }
 
@@ -165,6 +165,9 @@ extension SignuPayloadSource {
 
         // MARK: Actions + footer
         let showRemindMe = latest.status == .active
+        // The stored setting, not a guess. `remind_before_days` nullable IS the
+        // switch (v5), so its presence is the whole answer.
+        let reminderOn = sub.remindBeforeDays != nil
         let showMarkCancelled = latest.status == .active || latest.status == .overdue
         let footer = detailFooter(latest, lastCharge: lastCharge, calendar: cal)
 
@@ -174,7 +177,8 @@ extension SignuPayloadSource {
             amountText: amountText, unit: unit, dateSlot: dateSlot,
             thisYearText: SignuFormat.brl(thisYear), sinceLabel: sinceLabel,
             sinceTotalText: SignuFormat.brl(sinceTotal), events: events,
-            showRemindMe: showRemindMe, showMarkCancelled: showMarkCancelled, footer: footer
+            showRemindMe: showRemindMe, reminderOn: reminderOn,
+            showMarkCancelled: showMarkCancelled, footer: footer
         )
     }
 

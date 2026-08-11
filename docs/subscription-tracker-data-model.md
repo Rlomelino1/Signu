@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-11** (v28) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-11** (v29) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -855,6 +855,57 @@ The user can assert "I cancelled this" from the detail screen.
 
 ---
 
+## Write boundary (locked v29, 2026-08-11)
+
+*No migration. The grants this relies on shipped in `initial_schema.sql`
+(Migration #1) and are unchanged — this section documents a boundary that already
+existed in the database and had no client.*
+
+Until v29 the app was **read-only, and silently so**: every state-changing control
+called a closure no caller supplied. The reminder toggle flipped its own local
+state, Restore hid a row until the next launch, Dismiss did nothing at all. The
+interface looked complete and changed nothing.
+
+- **The write surface is dictated by the grants, not chosen.** Migration #1 gives
+  `authenticated` a column-scoped UPDATE on exactly seven columns, so a write to
+  anything else is refused by Postgres regardless of what the client asks. Verified
+  against a real Postgres rather than reasoned about: a PATCH of `service_name`
+  returns **42501 permission denied** with the value unchanged.
+- **RLS scopes the UPDATE, so the client sends no `user_id` predicate** — the same
+  posture as the reads, for the same reason: a client-side filter would be a second,
+  weaker copy of a rule the database already enforces. Verified: another user's PATCH
+  of the same row returns **HTTP 200 with an empty body** — it matched nothing — and
+  that user cannot even select the row.
+- **Two methods, both on `SignuDataProviding`**: `setReminder(subscriptionId:
+  remindBeforeDays:)` and `setIgnored(subscriptionId:ignored:)`. Reminder on = 2 days
+  per the detail contract; **off writes NULL**, because the nullable column *is* the
+  switch (v5).
+- **What is deliberately NOT here, and needs an Edge Function**: confirming a
+  suggestion (`subscription_run.status` + `subscription.identification`) and marking a
+  run cancelled (`cancelled_date`). Runs are engine-owned and `authenticated` holds
+  **no UPDATE grant on `subscription_run` at all**. Review's *Track it* therefore
+  remains unwired on purpose — wiring it would need either an Edge Function or a
+  widened grant, and the grant is the boundary the doctrine rests on.
+- **A successful write invalidates the cache rather than editing the local copy.**
+  Two representations of one row is how a UI comes to disagree with the database; the
+  re-read costs one round trip on a screen the user has just left.
+- **`DetailPayload.reminderOn`** is new and distinct from `showRemindMe`, which only
+  says whether the button appears. Without it the toggle always rendered "Remind me"
+  regardless of the stored value, so the first tap on an already-on reminder turned it
+  **off** while the label claimed it had turned on — harmless while nothing persisted,
+  a defect the moment it did.
+- **Dismiss targets the subscription, not the run.** `onDismiss` previously passed the
+  run id, naming the row the button sits on rather than the row the write touches;
+  dismissing is a statement about the subscription, and a suggestion carries both ids.
+- **The wiring itself is tested, not just the provider.** A provider test passes while
+  `AppShellView` leaves a closure at its default — which is exactly how the whole
+  interface came to be inert. The UI test asserts the dismissed **count rises by one**
+  in Settings, and deliberately not that the review row vanished (it animates away
+  locally regardless) nor that a dismissed row exists (the fixtures ship with some).
+  Confirmed falsifiable by unwiring the closure and watching it fail 2 ≠ 3.
+
+---
+
 ## Reminder delivery
 
 *Push skeleton locked 2026-07-14; channel preference + email commitment locked 2026-07-15; **email delivery built and scheduled v28, 2026-08-11**. Push remains a maybe and remains unbuilt.*
@@ -1227,6 +1278,27 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v29** — WRITE BOUNDARY (2026-08-11). **No migration**: the grants relied on
+  shipped in Migration #1 and are unchanged. The app was read-only and silently so —
+  every state-changing control called a closure no caller supplied, so the reminder
+  toggle flipped local state, Restore hid a row until relaunch, and Dismiss did
+  nothing. Two methods on `SignuDataProviding` (`setReminder`, `setIgnored`) wired to
+  the detail toggle, Review's Dismiss and Settings' Restore. The write surface is
+  **dictated by the column-scoped UPDATE grants rather than chosen**, checked against
+  a real Postgres: `service_name` is refused 42501 with the value unchanged, and
+  another user's PATCH returns 200 with an empty body because RLS scopes the UPDATE —
+  which is why the client sends no `user_id` predicate here either. Confirming a
+  suggestion and marking a run cancelled are **excluded on purpose**: runs are
+  engine-owned and `authenticated` has no UPDATE grant on `subscription_run`, so
+  *Track it* stays unwired until an Edge Function exists. Adds
+  `DetailPayload.reminderOn`, distinct from `showRemindMe`, closing a real defect —
+  the toggle always started "off", so the first tap on an already-on reminder turned
+  it off while the label said on. `onDismiss` now passes the subscription id rather
+  than the run id, naming the row the write targets. Also corrects a claim made while
+  building: `{"ignored": 1}` for a boolean column is **accepted** and coerces to
+  true, so typing the payload with `AnyJSON` is fidelity, not a bug fix. The wiring
+  is UI-tested because a provider test cannot see an unsupplied closure, and the test
+  was confirmed falsifiable by unwiring it.
 - **v28** — RENEWAL REMINDERS BUILT (2026-08-11), closing the one commitment the
   v9 split left outstanding: email was "committed, later stage" and nothing ran.
   Now a `send-reminders` Edge Function over a pure, database-free core (17 tests),

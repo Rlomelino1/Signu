@@ -35,8 +35,19 @@ struct DetailView: View {
     let payload: DetailPayload
     var actions = DetailActions()
 
-    @State private var reminderOn = false
+    /// Seeded from the payload, so the label matches what is stored. `@State`
+    /// rather than reading the payload directly because the tap must show
+    /// immediately — the write is fire-and-forget and the row is only re-read on
+    /// the next visit.
+    @State private var reminderOn: Bool
     var scrollAnchor: UnitPoint = .top
+
+    init(payload: DetailPayload, actions: DetailActions = DetailActions(), scrollAnchor: UnitPoint = .top) {
+        self.payload = payload
+        self.actions = actions
+        self.scrollAnchor = scrollAnchor
+        self._reminderOn = State(initialValue: payload.reminderOn)
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
