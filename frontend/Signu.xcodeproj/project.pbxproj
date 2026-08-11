@@ -78,6 +78,7 @@
 			);
 			name = Signu;
 			packageProductDependencies = (
+				5106A1010001 /* Supabase */,
 			);
 			productName = Signu;
 			productReference = 5106A0040001 /* Signu.app */;
@@ -107,6 +108,9 @@
 			);
 			mainGroup = 5106A0020001;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5106A1000001 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5106A0030001 /* Products */;
 			projectDirPath = "";
@@ -136,6 +140,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		5106A1000001 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.54.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5106A1010001 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5106A1000001 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		5106A00C0001 /* Debug */ = {
