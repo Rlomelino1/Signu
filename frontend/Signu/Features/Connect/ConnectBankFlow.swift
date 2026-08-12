@@ -262,25 +262,35 @@ struct PluggyConnectWebView: UIViewRepresentable {
             self.onClose = onClose
         }
 
+        /// `nonisolated`, because the protocol requirement is — and therefore the
+        /// message cannot be read here. `WKScriptMessage.body` is main-actor
+        /// isolated in the iOS 18.5 SDK that CI compiles against, where reading it
+        /// from this context is an error; the iOS 26 SDK is laxer, so the local
+        /// build said nothing. Third instance of that gap.
+        ///
+        /// `assumeIsolated` rather than a `Task`: WebKit delivers script messages
+        /// on the main thread already, so this is stating a fact rather than
+        /// scheduling a hop — and it traps loudly if the fact ever stops holding,
+        /// which is better than a silent reordering of success and close.
         nonisolated func userContentController(
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
-            let body = message.body as? [String: Any]
-            let event = body?["event"] as? String
-            let itemId = body?["itemId"] as? String
-            let text = body?["message"] as? String
-            Task { @MainActor in
-                switch event {
-                case "success":
-                    if let itemId { onSuccess(itemId) } else { onFailure("Pluggy returned no item id") }
-                case "error":
-                    onFailure(text ?? "Pluggy Connect failed")
-                case "close":
-                    onClose()
-                default:
-                    break
-                }
+            MainActor.assumeIsolated { handle(message.body) }
+        }
+
+        private func handle(_ body: Any) {
+            let fields = body as? [String: Any]
+            switch fields?["event"] as? String {
+            case "success":
+                if let itemId = fields?["itemId"] as? String { onSuccess(itemId) }
+                else { onFailure("Pluggy returned no item id") }
+            case "error":
+                onFailure(fields?["message"] as? String ?? "Pluggy Connect failed")
+            case "close":
+                onClose()
+            default:
+                break
             }
         }
 
