@@ -73,26 +73,39 @@ Deno.serve(async (req: Request) => {
     .single()
   if (error) return json({ error: `upsert connection: ${error.message}` }, 500)
 
-  // Chained, not scheduled. A row that appears with nothing behind it until the
-  // next cron reads as a broken connect flow, and the sync is the thing that
-  // turns the item into the screens the user just agreed to see. It chains into
-  // detection itself, so subscriptions land in the same pass.
+  // Chained, but NOT awaited. A row that appears with nothing behind it until
+  // the next cron reads as a broken connect flow, so the sync still starts here
+  // and still chains into detection — the user comes back to cards, transactions
+  // and suggestions rather than an empty row.
   //
-  // A sync failure does NOT fail the registration: the link is real either way,
-  // it is recorded on the row as `last_sync_error`, and the daily job retries.
-  let sync: unknown = 'not attempted'
+  // What changed (v35): this used to be awaited, so the whole scan sat inside
+  // one HTTP request. A 365-day window across several accounts can outrun the
+  // Supabase SDK's 150-second client timeout, and the client then renders
+  // "Couldn't connect" over a bank link that exists and a sync still running —
+  // the worst sentence available at the least confident moment in the app.
+  //
+  // `EdgeRuntime.waitUntil` is what keeps the work alive after the response goes
+  // out; without it the runtime is free to kill the isolate the moment we
+  // return, which would leave the connection permanently empty. Where it is
+  // unavailable the promise is awaited instead, which is exactly the old
+  // behaviour — slower, never wrong.
+  //
+  // A sync failure does NOT fail the registration either way: the link is real,
+  // the reason lands on the row as `last_sync_error`, and the daily job retries.
   const secret = Deno.env.get('SYNC_SECRET')
+  let sync: unknown = 'started'
   if (secret) {
-    try {
-      const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/pluggy-sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-sync-secret': secret },
-        body: JSON.stringify({ connectionId: data.id }),
-      })
-      sync = { status: res.status }
-    } catch (e) {
-      sync = { error: e instanceof Error ? e.message : String(e) }
-    }
+    const running = fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/pluggy-sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-sync-secret': secret },
+      body: JSON.stringify({ connectionId: data.id }),
+    }).catch(() => {
+      // Swallowed on purpose: nothing is listening by the time this settles, and
+      // an unhandled rejection would take the isolate down with it.
+    })
+    const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime
+    if (typeof runtime?.waitUntil === 'function') runtime.waitUntil(running)
+    else await running
   } else {
     sync = 'SYNC_SECRET not configured — connection saved, nothing synced'
   }
@@ -102,6 +115,9 @@ Deno.serve(async (req: Request) => {
     connectionId: data.id,
     institutionName: data.institution_name,
     itemStatus: `${item.status}/${item.executionStatus}`,
+    // "started", not "finished". The client polls its own reads to find out when
+    // rows appear; claiming completion here would be a promise this function is
+    // no longer in a position to keep.
     sync,
   })
 })

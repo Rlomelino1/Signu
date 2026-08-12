@@ -170,6 +170,25 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
         try await reload()
     }
 
+    @discardableResult
+    func refresh() async throws -> Bool {
+        let before = graphSignature
+        try await reload()
+        return graphSignature != before
+    }
+
+    /// Extracted so it can be tested: the verdict decides whether a foreground
+    /// refresh rebuilds the visible tab, and both wrong answers are invisible.
+    private var graphSignature: Int {
+        GraphSignature.of(
+            connections: connectionList,
+            accounts: accountList,
+            subscriptions: subscriptionList,
+            runs: runList,
+            charges: chargeList
+        )
+    }
+
     /// Re-fetch everything. Public so a pull-to-refresh, or a sign-in, can discard
     /// a previous user's graph rather than merging into it.
     func reload() async throws {

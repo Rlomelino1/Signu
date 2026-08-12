@@ -66,6 +66,7 @@ struct AppShellView: View {
     /// rebuild of the tab.
     @State private var suggestionCount = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     init(provider: SignuDataProviding,
          homeScrollAnchor: UnitPoint = .top,
@@ -180,6 +181,23 @@ struct AppShellView: View {
         .environment(tabBarState)
         .environment(passwordLinkState)
         .task(id: dataVersion) { await refreshSuggestionCount() }
+        // Coming back to the app is the other moment the graph can have moved
+        // without the app moving it: the sync runs at 15:30 UTC daily, and a
+        // session left open across it renders yesterday's state indefinitely.
+        //
+        // The tab is rebuilt ONLY when the re-read actually found something.
+        // Rebuilding unconditionally would cost the user their scroll position
+        // every time they switched apps, to show them exactly what they were
+        // already looking at.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task {
+                if (try? await provider.refresh()) == true {
+                    dataVersion += 1
+                }
+                await refreshSuggestionCount()
+            }
+        }
         .onChange(of: showReview) { _, isShowing in
             // On the way OUT of review, where confirming and dismissing both
             // change the count. Cheap: the provider already holds the graph, so

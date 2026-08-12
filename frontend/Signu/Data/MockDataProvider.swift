@@ -221,6 +221,13 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         makeCalendarPayload(monthContaining: date)
     }
 
+    /// Always false: the fixtures are the source of truth and nothing writes to
+    /// them from outside the app, so a refresh here genuinely finds nothing new.
+    /// Saying so is what lets a preview exercise pull-to-refresh without the
+    /// screen flickering through a rebuild it did not need.
+    @discardableResult
+    func refresh() async throws -> Bool { false }
+
     // MARK: - Dataset
 
     convenience init(scenario: Scenario) {

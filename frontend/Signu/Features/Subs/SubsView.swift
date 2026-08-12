@@ -24,6 +24,10 @@ struct SubsScreen: View {
         .task {
             payload = try? await provider.subsPayload()
         }
+        .refreshable {
+            try? await provider.refresh()
+            payload = try? await provider.subsPayload()
+        }
     }
 }
 

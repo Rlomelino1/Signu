@@ -86,18 +86,45 @@ struct ConnectBankFlow: View {
         }
     }
 
-    private func register(_ itemId: String) {
+    /// How long to hold the screen while the first sync runs, and how often to
+    /// look. The server returns as soon as the link exists and keeps scanning
+    /// behind the response, so this is a courtesy wait rather than a dependency:
+    /// most syncs land inside it, and the ones that do not stop blocking the user
+    /// on a spinner. Home's watching state takes it from there — it was designed
+    /// for exactly this ("Updated just now · Nubank connected").
+    private static let syncGrace: Duration = .seconds(20)
+    private static let pollInterval: Duration = .seconds(3)
+
+    private func register(_ itemId: String, simulated: Bool = false) {
         phase = .registering
         Task {
             do {
                 try await provider.registerConnection(itemId: itemId)
-                onFinished(true)
             } catch {
                 // The link exists at Pluggy either way — what failed is our record
                 // of it. Saying "couldn't connect" would send the user round the
                 // widget again to create a second item.
                 phase = .failed(error.localizedDescription)
+                return
             }
+            // Nothing is syncing behind a simulated link, so waiting for rows
+            // would be waiting for a sync that was never started.
+            if !simulated { await waitForFirstRows() }
+            onFinished(true)
+        }
+    }
+
+    /// Polls our own reads until the sync's rows show up, or the grace runs out.
+    ///
+    /// Polling rather than waiting on the server: the sync now outlives its own
+    /// response, so there is nothing left to await. `refresh()` answers whether
+    /// the re-read found anything, which is the only signal available and the
+    /// honest one — it reports what the app can actually see.
+    private func waitForFirstRows() async {
+        let deadline = ContinuousClock.now + Self.syncGrace
+        while ContinuousClock.now < deadline {
+            if (try? await provider.refresh()) == true { return }
+            try? await Task.sleep(for: Self.pollInterval)
         }
     }
 
@@ -140,7 +167,7 @@ struct ConnectBankFlow: View {
                 .font(.signuBody)
                 .foregroundStyle(SignuColor.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Simulate success") { register("mock-item") }
+            Button("Simulate success") { register("mock-item", simulated: true) }
                 .buttonStyle(.signuPrimary)
         }
         .padding(24)

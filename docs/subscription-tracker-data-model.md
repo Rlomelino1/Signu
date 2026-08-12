@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-12** (v34) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-12** (v35) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1029,6 +1029,54 @@ Neither moved, which is the whole claim — the boundary held and the buttons wo
 
 ---
 
+## Noticing data the app did not write (locked v35, 2026-08-12)
+
+*No migration. Closes a staleness bug that had been true since the first live
+read, and was only invisible because every change so far originated from a write
+the app itself made.*
+
+- **The app could not see data it had not written.** The provider loads the whole
+  graph once and invalidates only on its own writes, so rows arriving
+  server-side were invisible for the life of the session: the **15:30 UTC sync**,
+  the detection pass behind a fresh bank link, anything done on another device.
+  Switching tabs did not help — the screen rebuilds, its `.task` runs again, and
+  `ensureLoaded()` hands back the same cached rows. `reload()` existed, with a
+  comment describing the pull-to-refresh that would call it, and had no caller.
+- **`refresh()` joins the protocol** and answers **whether anything changed**.
+  Pull-to-refresh on Home and Subs ignores the verdict — the user asked, so the
+  payload is re-read either way and the gesture never appears to do nothing. The
+  foreground refresh uses it: rebuilding unconditionally would throw away the
+  user's scroll position on every app switch to show them what they were already
+  looking at.
+- **The verdict is a fingerprint, not a row count** (`GraphSignature`). The
+  changes a background sync produces most often move no row in or out — a run
+  flipping to `overdue`, a renewal date sliding a week, a charge landing on an
+  existing run — so statuses and dates are folded in with the ids. It still
+  misses a change to a field nothing renders, which is the correct thing to miss.
+
+### The first sync no longer blocks the screen
+
+- **`register-connection` returns as soon as the connection row exists**, and the
+  sync runs on behind the response under `EdgeRuntime.waitUntil` — without which
+  the runtime is free to kill the isolate the moment the response goes out,
+  leaving the link permanently empty. Where that primitive is unavailable the
+  promise is awaited, which is exactly the old behaviour: slower, never wrong.
+- **Why it changed**: the scan is a 365-day window, up to 40 pages of 500
+  transactions per account, accounts in sequence, and it sat inside one HTTP
+  request against the Supabase SDK's **150-second** client timeout. Tripping it
+  rendered *"Couldn't connect"* over a bank link that existed and a sync that was
+  still running — the worst sentence available at the least confident moment in
+  the app.
+- **The client waits a bounded 20 seconds**, polling its own reads every 3, and
+  stops early the moment a refresh reports rows. Most syncs land inside it; the
+  ones that do not stop holding the user on a spinner. Home's watching state
+  takes over, which is what it was drawn for — *"Updated just now · Nubank
+  connected"* — and 22a makes it competent when what lands is suggestions.
+- **The response says `sync: "started"`, never "finished".** Claiming completion
+  would be a promise the function is no longer in a position to keep.
+
+---
+
 ## Connecting a bank (locked v31, 2026-08-12)
 
 *No migration. Two Edge Functions around Pluggy's Connect widget, replacing
@@ -1517,6 +1565,27 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v35** — THE APP CAN NOTICE DATA IT DID NOT WRITE (2026-08-12). **No
+  migration.** Two halves of one gap, found while discussing onboarding. First:
+  there was **no refresh path at all**. The provider loads the graph once and
+  invalidates only on its own writes, so the daily 15:30 UTC sync could rewrite
+  everything and an open session would render yesterday indefinitely — switching
+  tabs included, since `ensureLoaded()` hands back the cache. `reload()` had a
+  comment describing the pull-to-refresh that would call it and no caller. Now
+  `refresh()` is on the protocol, wired to pull-to-refresh on Home and Subs and to
+  a foreground re-read, and it **answers whether anything changed** so the
+  foreground path only rebuilds the tab when there is something new — rebuilding
+  regardless would cost the user their scroll position on every app switch. The
+  verdict is a **fingerprint rather than a row count**, because the changes a sync
+  produces most often move no row: a run going `overdue`, a date sliding, a charge
+  landing on an existing run. Second: **the first sync no longer blocks the
+  screen.** `register-connection` returns once the connection row exists and
+  continues under `EdgeRuntime.waitUntil`; the client waits a bounded 20 seconds,
+  polling every 3 and stopping early when rows appear, then hands off to Home's
+  watching state. The old shape put a 365-day, 40-page-per-account scan inside one
+  request against a 150-second client timeout, and tripping it told the user
+  "Couldn't connect" about a link that existed. The response now says
+  `sync: "started"`, never "finished".
 - **v34** — SUGGESTIONS ON HOME (2026-08-12, design 22a). **No migration, no new
   query.** A variant of 21h drawn to close a defect: Home's watching state is
   chosen precisely when every run is `possible`, and a `possible` run *is* a
