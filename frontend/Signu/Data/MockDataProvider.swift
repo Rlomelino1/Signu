@@ -12,6 +12,7 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     enum Scenario {
         case standard        // full dataset (21i-class)
         case freshConnection // bank connected, nothing detected yet (21h)
+        case suggestionsOnly // connected, suggestions but nothing confirmed (22a)
         case noBank          // nothing connected (21g)
     }
 
@@ -238,6 +239,25 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
             runList = []
             chargeList = []
             transactionAccountMap = [:]
+        case .suggestionsOnly:
+            // The first-sync shape 22a is for: the engine found candidates and
+            // auto-confirmed none of them, so every run is `possible`. The
+            // fixtures already carry two such subscriptions; this drops
+            // everything else, including the dismissed ones, so the count on
+            // screen is the count under test.
+            connectionList = connectionList.filter { $0.institutionName == "Nubank" }
+            accountList = accountList.filter { account in connectionList.contains { $0.id == account.connectionId } }
+            let suggested = Set(
+                subscriptionList
+                    .filter { sub in
+                        !sub.ignored && runList.filter { $0.subscriptionId == sub.id }.allSatisfy { $0.status == .possible }
+                    }
+                    .map(\.id)
+            )
+            subscriptionList = subscriptionList.filter { suggested.contains($0.id) }
+            runList = runList.filter { suggested.contains($0.subscriptionId) }
+            let keptRuns = Set(runList.map(\.id))
+            chargeList = chargeList.filter { keptRuns.contains($0.runId) }
         case .noBank:
             connectionList = []
             accountList = []

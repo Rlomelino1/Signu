@@ -119,6 +119,20 @@ extension View {
     }
 }
 
+/// The notch on 22a's suggestions card, pointing up at the watching card it
+/// belongs to. A shape rather than a rotated square so the two lower corners sit
+/// exactly on the card's edge at any width.
+struct UpTriangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 /// Warning banner — the home connection-problem slot ("plumbing problems"
 /// severity channel; overdue never renders here). Colors sampled from 21i.
 struct WarningBanner: View {

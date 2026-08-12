@@ -93,6 +93,65 @@ final class InertControlsUITests: XCTestCase {
                       "a calendar row must open the subscription")
     }
 
+    // MARK: - Suggestions on Home (22a)
+
+    func testHomeOffersReviewWhenOnlySuggestionsExist() {
+        // The state the defect lived in: connected, nothing confirmed, two
+        // suggestions waiting. Home used to say "No subscriptions detected yet"
+        // and offer no way in.
+        let app = XCUIApplication()
+        app.launchArguments = ["--shell-suggestions"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["No confirmed subscriptions yet"].waitForExistence(timeout: 15),
+                      "the headline must distinguish found from confirmed")
+        XCTAssertTrue(app.staticTexts["Possible subscriptions found"].exists,
+                      "Home must say what was found")
+        // The dot rides the Subs tab. The count is its accessibility VALUE, so
+        // the button keeps its name — see SignuTabBar.
+        let subsTab = app.buttons["Subs"]
+        XCTAssertTrue(subsTab.exists)
+        XCTAssertEqual(subsTab.value as? String, "2 to review",
+                       "the Subs tab must carry the count")
+
+        let card = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Possible subscriptions found")
+        ).firstMatch
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["Track it"].firstMatch.waitForExistence(timeout: 10),
+                      "the card must open the review screen")
+    }
+
+    func testDecidingOnEverySuggestionClearsTheDot() {
+        // The locked rule: the dot clears at zero, so acting clears it and
+        // looking does not. Dismissing counts as acting.
+        let app = XCUIApplication()
+        app.launchArguments = ["--shell-suggestions"]
+        app.launch()
+
+        let card = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Possible subscriptions found")
+        ).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 15))
+        card.tap()
+
+        // Both of them, so the count reaches zero rather than merely dropping.
+        for _ in 0..<2 {
+            let dismiss = app.buttons["Not a subscription"].firstMatch
+            XCTAssertTrue(dismiss.waitForExistence(timeout: 10))
+            dismiss.tap()
+        }
+        app.buttons["Back"].firstMatch.tap()
+
+        XCTAssertTrue(app.staticTexts["No subscriptions detected yet"].waitForExistence(timeout: 10),
+                      "with nothing left to review the headline goes back to the plain one")
+        XCTAssertFalse(app.staticTexts["Possible subscriptions found"].exists,
+                       "the card must go with the suggestions")
+        let subsValue = app.buttons["Subs"].value as? String
+        XCTAssertTrue(subsValue == nil || subsValue?.isEmpty == true,
+                      "the dot must clear at zero, and its count with it")
+    }
+
     // MARK: - Rename and category
 
     func testRenamingASubscriptionShowsTheNewNameEverywhere() {

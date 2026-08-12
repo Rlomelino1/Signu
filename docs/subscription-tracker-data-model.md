@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-12** (v33) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-12** (v34) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -750,6 +750,50 @@ The user can assert "I cancelled this" from the detail screen.
 - **Overdue surfacing**: overdue runs render as standalone tinted rows above "Coming up" (subtitle "Overdue · N days" = days past expected date, i.e. depth into the +10 retry window). Multiple simultaneous overdue subs **stack** as separate rows — no "+1 more" collapse; rare but must stay visible (payment failures are never summarized away).
 - **Connection problems and overdue runs are separate severity channels**: connection issues get the top banner (data is stale — structural), overdue never does (payment may have failed — transactional; lives in subtitle count + tinted rows only). The banner slot always means "plumbing problem".
 
+### Suggestions on Home (22a, locked v34, 2026-08-12)
+
+*Design 22a — a variant of 21h, drawn to close a defect rather than to add a
+feature. No migration, no new query.*
+
+**The defect.** Home picks its watching state (21h) exactly when no run has a
+status other than `possible` — and a `possible` run **is** a suggestion. So the
+one screen guaranteed to be holding suggestions was the screen announcing that
+nothing had been detected, and the review pill that reaches 9a lives only in the
+active state (21i). A user whose first sync auto-confirmed nothing was told there
+was nothing, while the engine held candidates it could not show them. It is
+aimed squarely at first run: R1 auto-confirms on a second charge, so an
+established card lands in 21i and a thin or new card lands here.
+
+- **The headline distinguishes what the engine found from what the user
+  decided.** "No subscriptions detected yet" is retained for a genuinely empty
+  sync; with suggestions it becomes **"No confirmed subscriptions yet"**. One line
+  cannot be true of both cases, and the old line was false in the second.
+- **The card is a second component, not a reuse of 21i's review pill, and the two
+  coexist.** The pill announces a count to a user already looking at confirmed
+  subscriptions; this card is the first thing this user has ever seen the app
+  find, so it says what was found and what confirming does. Both route to 9a,
+  which remains the only surface where a suggestion may be confirmed.
+- **Naming rule**: first two, then a count — *"iFood Clube"*, *"iFood Clube and
+  MUBI"*, *"iFood Clube, MUBI and 3 more"*. Two is the cutoff because a third name
+  pushes the sentence past the card's two lines at accessibility sizes. The
+  remainder is **counted, never truncated silently**, so the number in the
+  sentence always agrees with the badge beside it. The verb agrees with the count
+  (*looks* / *look*), and the names are **display names**, so a nickname shows.
+- **Names are sorted**, so two reads of one state name the same two services.
+- **A dot on the Subs tab**, which is the app's only badge. It **clears at zero**:
+  acting on suggestions clears it, looking at them does not, and dismissing counts
+  as acting — *"not a subscription"* is a decision. The count is an accessibility
+  **value**, not part of the label: folding it into the label renames the button
+  and breaks every lookup by name, which is exactly what it did to the auth test
+  that waits for the tab bar to prove the gate flipped.
+- **Home re-reads when the count changes.** A decision taken in review left the
+  screen underneath advertising suggestions that no longer existed. The tab is
+  rebuilt only when the number actually moved, so backing out of review without
+  deciding anything does not cost the user their scroll position.
+- **"Coming up" still says "Nothing to predict yet"**, and the hero still shows no
+  number. Nothing is confirmed, so there is no renewal date and no total to state
+  — the card reports a finding, and reporting one is not the same as tracking it.
+
 ---
 
 ## Subscriptions tab contract
@@ -1473,6 +1517,27 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v34** — SUGGESTIONS ON HOME (2026-08-12, design 22a). **No migration, no new
+  query.** A variant of 21h drawn to close a defect: Home's watching state is
+  chosen precisely when every run is `possible`, and a `possible` run *is* a
+  suggestion — so the one screen guaranteed to hold suggestions was the one saying
+  nothing had been detected, with 9a reachable only from the active state's pill.
+  It lands on first run specifically, since R1 auto-confirms on a second charge and
+  a thin card has none. The headline now separates the engine's claim from the
+  user's ("No subscriptions detected yet" survives for an empty sync; "No confirmed
+  subscriptions yet" when suggestions exist); a card names the first two and counts
+  the rest (**"iFood Clube, MUBI and 3 more"**, remainder counted rather than
+  silently truncated, verb agreeing, display names so a nickname shows); and a dot
+  rides the Subs tab, **clearing at zero** so acting clears it and looking does not.
+  The card and 21i's pill **coexist** by decision — different audiences, same
+  destination. Two defects surfaced while building it, both caught by tests rather
+  than by reading: Home did not re-read after a decision in review, so it advertised
+  suggestions that no longer existed (now rebuilt only when the count actually
+  moves), and putting the count in the tab's accessibility **label** renamed the
+  button and broke the auth test that waits for the tab bar — the count is a
+  **value**, so VoiceOver still reads "Subs, 2 to review" while the name stays
+  stable. New mock scenario `.suggestionsOnly` and `--shell-suggestions` drive the
+  state in previews, screenshots and tests. 27 UI tests, 6 unit suites.
 - **v33** — `Schema applies` BECOMES A REQUIRED CHECK (2026-08-12). **No
   migration, no code.** v18 left it advisory on a stated criterion — "a check earns
   required status by having gone green reliably rather than by existing" — so the

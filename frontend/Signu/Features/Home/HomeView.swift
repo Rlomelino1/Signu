@@ -58,8 +58,8 @@ struct HomeView: View {
                     switch payload.content {
                     case .noBank:
                         noBankContent
-                    case .watching(let syncText):
-                        watchingContent(syncText: syncText)
+                    case .watching(let watching):
+                        watchingContent(watching)
                     case .active(let active):
                         activeContent(active)
                     }
@@ -150,13 +150,13 @@ struct HomeView: View {
 
     // MARK: - Watching (21h)
 
-    private func watchingContent(syncText: String) -> some View {
+    private func watchingContent(_ watching: HomePayload.Watching) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("No subscriptions detected yet")
+                Text(watching.headline)
                     .font(SignuFont.font(20))
                     .foregroundStyle(SignuColor.textSecondary)
-                syncRow(syncText)
+                syncRow(watching.syncText)
             }
 
             SignuCard(background: SignuColor.greenTint) {
@@ -181,6 +181,11 @@ struct HomeView: View {
                 .padding(18)
             }
 
+            if let line = watching.suggestionLine {
+                suggestionsCard(count: watching.suggestionCount, line: line)
+                    .padding(.top, -12)
+            }
+
             comingUpHeader(showCalendar: false)
                 .padding(.top, 8)
             EmptyDashCard(
@@ -188,6 +193,69 @@ struct HomeView: View {
                 subtitle: "renewal dates appear once a subscription is confirmed"
             )
         }
+    }
+
+    /// 22a's card: what the engine found, and the only way in to deciding on it.
+    ///
+    /// Deliberately a second component rather than a reuse of 21i's review pill.
+    /// The pill announces a count on a screen already full of confirmed
+    /// subscriptions; this one has to say what was found and what confirming
+    /// does, because it is the first thing this user has ever seen the app find.
+    private func suggestionsCard(count: Int, line: String) -> some View {
+        Button(action: actions.onReview) {
+            HStack(alignment: .top, spacing: 14) {
+                Text("\(count)")
+                    .font(SignuFont.font(15, .semibold, tabular: true))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(SignuColor.green, in: Circle())
+                // The Review affordance sits in the TITLE row, not beside the
+                // whole block. In the same HStack as both lines it steals width
+                // from each of them, which wrapped the title in two and the
+                // sentence into four — measured on the simulator against 22a,
+                // where the title is one line and the sentence is two.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("Possible subscriptions found")
+                            .font(SignuFont.font(16, .semibold))
+                            .foregroundStyle(SignuColor.textPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                        Spacer(minLength: 6)
+                        HStack(spacing: 4) {
+                            Text("Review")
+                                .font(.signuSubtitleEmphasis)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundStyle(SignuColor.green)
+                        .fixedSize()
+                    }
+                    Text(line)
+                        .font(.signuBody)
+                        .foregroundStyle(SignuColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            .padding(18)
+            .background(SignuColor.surfaceBright, in: RoundedRectangle(cornerRadius: SignuMetric.cardRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: SignuMetric.cardRadius, style: .continuous)
+                    .strokeBorder(SignuColor.hairline, lineWidth: 1)
+            }
+            // The notch that ties this card to the one above it: "we're watching"
+            // and "here is what we spotted" are one thought, and the tail is what
+            // says so without a connecting line or a shared container.
+            .overlay(alignment: .topLeading) {
+                UpTriangle()
+                    .fill(SignuColor.surfaceBright)
+                    .frame(width: 22, height: 11)
+                    .offset(x: 24, y: -10)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Active (21i)
@@ -415,6 +483,10 @@ struct EmptyDashCard: View {
 
 #Preview("Home · watching (21h)") {
     HomeScreen(provider: MockDataProvider(scenario: .freshConnection))
+}
+
+#Preview("Home · suggestions to review (22a)") {
+    HomeScreen(provider: MockDataProvider(scenario: .suggestionsOnly))
 }
 
 #Preview("Home · no bank (21g)") {
