@@ -48,6 +48,7 @@ enum SignuFormat {
     private static let weekdayMonthDayYearFormatter = formatter("EEE, MMM dd, yyyy")
     private static let monthYearShortFormatter = formatter("MMM yy")
     private static let monthYearLongFormatter = formatter("MMM yyyy")
+    private static let monthYearFullFormatter = formatter("MMMM yyyy")
     private static let syncStampFormatter = formatter("MMM dd · HH:mm")
     private static let weekdayFullFormatter = formatter("EEEE, MMM d")
 
@@ -67,6 +68,8 @@ enum SignuFormat {
     static func monthYearShort(_ date: Date) -> String { monthYearShortFormatter.string(from: date) }
     /// "Oct 2025" — connection "connected since" line.
     static func monthYearLong(_ date: Date) -> String { monthYearLongFormatter.string(from: date) }
+    /// "July 2026" — the calendar's month header, which has the width for it.
+    static func monthYearFull(_ date: Date) -> String { monthYearFullFormatter.string(from: date) }
     /// "Jul 12 · 08:14" — connection LAST SYNCED stat.
     static func syncStamp(_ date: Date) -> String { syncStampFormatter.string(from: date) }
     /// "Sunday, Jul 13" — the home header overline (rendered uppercase).

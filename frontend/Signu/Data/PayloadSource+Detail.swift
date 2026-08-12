@@ -30,7 +30,8 @@ extension SignuPayloadSource {
                 statusTone: .neutral, amountText: SignuFormat.dash, unit: "/mo",
                 dateSlot: .paidThrough(SignuFormat.dash), thisYearText: SignuFormat.dash,
                 sinceLabel: "", sinceTotalText: SignuFormat.dash, events: [],
-                showRemindMe: false, reminderOn: false, showMarkCancelled: false, footer: nil
+                showRemindMe: false, reminderOn: false, showMarkCancelled: false, footer: nil,
+                nickname: nil, engineName: "", category: nil, knownCategories: []
             )
         }
 
@@ -178,7 +179,9 @@ extension SignuPayloadSource {
             thisYearText: SignuFormat.brl(thisYear), sinceLabel: sinceLabel,
             sinceTotalText: SignuFormat.brl(sinceTotal), events: events,
             showRemindMe: showRemindMe, reminderOn: reminderOn,
-            showMarkCancelled: showMarkCancelled, footer: footer
+            showMarkCancelled: showMarkCancelled, footer: footer,
+            nickname: sub.nickname, engineName: sub.serviceName, category: sub.category,
+            knownCategories: Set(subscriptionList.compactMap(\.category)).sorted()
         )
     }
 

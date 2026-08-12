@@ -303,6 +303,9 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
+        // As SignuRow: the row is the target. Bank rows are hand-built because
+        // the right rail is a status chip rather than an amount.
+        .contentShape(Rectangle())
     }
 
     private func subtitleColor(_ tone: StatusChip.Tone) -> Color {
@@ -425,6 +428,10 @@ struct SettingsView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                 }
+                // The card's fill does not make the row tappable — see
+                // `tintedSurface`. This row is the most consequential one in the
+                // app to have a dead middle.
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }

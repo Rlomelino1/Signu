@@ -186,6 +186,10 @@ struct SubsView: View {
             }
             .padding(.vertical, SignuMetric.rowPaddingV)
             .padding(.horizontal, SignuMetric.rowPaddingH)
+            // Same rule as SignuRow, which this row does not use because its
+            // evidence line carries its own type treatment: a plain button
+            // hit-tests only what it draws.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -332,6 +336,9 @@ struct SubsView: View {
             }
             .padding(.vertical, SignuMetric.rowPaddingV)
             .padding(.horizontal, SignuMetric.rowPaddingH)
+            // As SignuRow. Inactive rows are hand-built because the right rail is
+            // chip-over-date rather than value-over-date.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

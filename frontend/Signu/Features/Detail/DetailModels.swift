@@ -29,6 +29,21 @@ struct DetailPayload: Identifiable {
     var reminderOn: Bool
     var showMarkCancelled: Bool
     var footer: String?               // overdue / cancelled / ended honesty copy
+
+    /// The user's own name, when they have set one. Distinct from `serviceName`,
+    /// which is already `nickname ?? service_name` — the rename sheet needs to
+    /// know which of the two it is looking at, because clearing the nickname is a
+    /// real action and "no nickname" must not render as "delete my own name".
+    var nickname: String?
+    /// The engine's own name for the merchant, unaffected by a nickname. The
+    /// rename sheet needs it for its placeholder and its "use X again" action:
+    /// `serviceName` above is already the display name, so it would show the
+    /// nickname back to the user as though it were the original.
+    var engineName: String
+    var category: String?
+    /// Categories already present in this user's data. The engine seeds them, so
+    /// the client offers what exists rather than asserting a taxonomy of its own.
+    var knownCategories: [String]
 }
 
 /// A single self-narrating timeline row. Marker semantics (locked with
