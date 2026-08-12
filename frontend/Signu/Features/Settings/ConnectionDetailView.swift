@@ -4,10 +4,21 @@ struct ConnectionDetailScreen: View {
     let provider: SignuDataProviding
     let connectionId: UUID
     var onBack: () -> Void = {}
+    /// Reported after a successful re-authentication, so Settings stops
+    /// rendering the state this link was in before it.
+    var onReconnected: () -> Void = {}
 
     @State private var payload: ConnectionDetailPayload?
     @State private var showRemove = false
     @State private var attributedId: UUID?
+    /// The removal's failure has to render here rather than in the shell: this
+    /// screen is a full-screen cover, and an alert attached below it never
+    /// appears.
+    @State private var removeError: String?
+    /// 12b presents the connect flow itself. It cannot delegate that upwards: a
+    /// full-screen cover will not present another cover, so a request to the
+    /// shell arrives and does nothing.
+    @State private var connectTarget: ConnectTarget?
 
     var body: some View {
         Group {
@@ -16,7 +27,8 @@ struct ConnectionDetailScreen: View {
                     payload: payload,
                     onBack: onBack,
                     onOpenAttributed: { attributedId = connectionId },
-                    onRemove: { showRemove = true }
+                    onRemove: { showRemove = true },
+                    onReconnect: { connectTarget = ConnectTarget(connectionId: connectionId) }
                 )
             } else {
                 Color.clear
@@ -25,16 +37,48 @@ struct ConnectionDetailScreen: View {
         .task { payload = try? await provider.connectionDetailPayload(connectionId: connectionId) }
         .sheet(isPresented: $showRemove) {
             if let payload {
-                RemoveBankSheet(institutionName: payload.institutionName, count: payload.summaryCount) {
-                    showRemove = false
-                    onBack()   // link removed → back to Settings
+                // The sheet's radio choice travels with the tap. It has to: the
+                // Edge Function deletes attributed subscriptions BEFORE the
+                // connection, because attribution runs through
+                // `charge.transaction_id` and the connection's own deletion NULLs
+                // it. Asked afterwards, the question has no answer left.
+                RemoveBankSheet(institutionName: payload.institutionName, count: payload.summaryCount) { keepHistory in
+                    Task {
+                        do {
+                            try await provider.removeConnection(
+                                connectionId: connectionId,
+                                deleteHistory: !keepHistory
+                            )
+                            showRemove = false
+                            onBack()   // link removed → back to Settings
+                        } catch {
+                            showRemove = false
+                            removeError = error.localizedDescription
+                        }
+                    }
                 }
                 .presentationDetents([.height(560)])
                 .presentationDragIndicator(.visible)
             }
         }
+        .alert(
+            "That didn't go through",
+            isPresented: Binding(get: { removeError != nil }, set: { if !$0 { removeError = nil } })
+        ) {
+            Button("OK", role: .cancel) { removeError = nil }
+        } message: {
+            Text(removeError ?? "")
+        }
         .fullScreenCover(item: $attributedId) { id in
             AttributedSubsScreen(provider: provider, connectionId: id, onBack: { attributedId = nil })
+        }
+        .connectBankCover(provider: provider, target: $connectTarget) {
+            // Re-read before reporting: the item's status and consent date have
+            // just changed, and this screen renders both.
+            Task {
+                payload = try? await provider.connectionDetailPayload(connectionId: connectionId)
+                onReconnected()
+            }
         }
     }
 }
@@ -45,6 +89,7 @@ struct ConnectionDetailView: View {
     var onBack: () -> Void = {}
     var onOpenAttributed: () -> Void = {}
     var onRemove: () -> Void = {}
+    var onReconnect: () -> Void = {}
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -88,7 +133,7 @@ struct ConnectionDetailView: View {
             }
 
             if payload.needsReconnect {
-                Button("Reconnect \(payload.institutionName)") {}
+                Button("Reconnect \(payload.institutionName)", action: onReconnect)
                     .buttonStyle(.signuOnInk)
                     .padding(.top, 14)
             }
@@ -189,7 +234,9 @@ struct CardBadge: View {
 struct RemoveBankSheet: View {
     let institutionName: String
     let count: Int
-    var onRemove: () -> Void = {}
+    /// Carries the history choice, because the caller cannot ask for it later —
+    /// see the sequencing rule at the call site.
+    var onRemove: (Bool) -> Void = { _ in }
 
     @State private var keepHistory = true
 
@@ -217,7 +264,9 @@ struct RemoveBankSheet: View {
                 ) { keepHistory = false }
             }
 
-            Button(keepHistory ? "Remove link, keep history" : "Remove link and history", action: onRemove)
+            Button(keepHistory ? "Remove link, keep history" : "Remove link and history") {
+                onRemove(keepHistory)
+            }
                 .buttonStyle(.signuDestructiveFilled)
                 .padding(.top, 2)
         }

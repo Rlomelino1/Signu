@@ -326,6 +326,13 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
+        // A `.plain` button hit-tests only what it DRAWS, and this label ends in
+        // a Spacer — so without this the middle of the row is dead and the row
+        // reads as broken rather than as a narrow target. Safe here because
+        // nothing inside it is itself tappable; rows with a nested button (the
+        // dismissed row's Restore) must not get this without checking which of
+        // the two wins.
+        .contentShape(Rectangle())
     }
 
     private var emptyBanksCard: some View {

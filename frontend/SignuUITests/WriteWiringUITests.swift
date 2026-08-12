@@ -34,6 +34,46 @@ final class WriteWiringUITests: XCTestCase {
             .count
     }
 
+    /// Same shape, for the first of the four Edge Function actions (v30).
+    ///
+    /// The falsifiable assertion is again a re-read: `ReviewScreen` loads its
+    /// payload in `.task`, so leaving 9a and coming back asks the provider
+    /// afresh. Unwired, the suggestion is still there — `ReviewView` animates the
+    /// row away out of its own local `resolved` set either way, which is exactly
+    /// why "the row vanished" is not what this checks.
+    func testTrackingASuggestionReachesTheProvider() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--shell-review"]
+        app.launch()
+
+        let track = app.buttons["Track it"].firstMatch
+        XCTAssertTrue(track.waitForExistence(timeout: 15), "review must offer Track it")
+        let before = app.buttons.matching(identifier: "Track it").count
+        XCTAssertGreaterThan(before, 0, "the fixtures should ship with suggestions")
+
+        track.tap()
+
+        // R4 suggestions ask monthly/annual before confirming; R3 never does,
+        // because three date-aligned charges already measured the cadence. The
+        // fixtures' first suggestion is R3, so this is a guard rather than a step.
+        let monthly = app.buttons["Monthly"].firstMatch
+        if monthly.waitForExistence(timeout: 2) { monthly.tap() }
+
+        // Out of 9a and back in, so the list is read from the provider again.
+        app.buttons["Back"].firstMatch.tap()
+        let reviewPill = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Possible subscriptions detected")
+        ).firstMatch
+        XCTAssertTrue(reviewPill.waitForExistence(timeout: 10), "Home must still offer Review")
+        reviewPill.tap()
+        XCTAssertTrue(app.buttons["Track it"].firstMatch.waitForExistence(timeout: 10))
+
+        XCTAssertEqual(
+            app.buttons.matching(identifier: "Track it").count, before - 1,
+            "the confirmed suggestion did not reach the provider — the action is not wired"
+        )
+    }
+
     func testDismissingASuggestionReachesTheProvider() {
         let app = XCUIApplication()
         app.launchArguments = ["--shell-settings"]

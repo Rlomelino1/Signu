@@ -38,6 +38,19 @@ struct AppShellView: View {
     @State private var settingsConnectionId: UUID?
     @State private var showDelete = false
     @State private var deleteScope: DeleteAccountScope?
+    /// Set when one of the four Edge Function writes fails. See `act`.
+    @State private var actionError: String?
+    /// The connect flow, presented for both "add a bank" (nil id) and
+    /// "re-authenticate this one" (a connection id). `ConnectTarget` exists
+    /// because `.fullScreenCover(item:)` needs an Identifiable, and `UUID?`
+    /// cannot express "present, with nothing selected".
+    @State private var connectTarget: ConnectTarget?
+    /// Bumped after a bank is connected. Connecting changes every screen at
+    /// once — banks, cards, subscriptions, the hero number — so the tab is
+    /// rebuilt rather than left showing the graph as it was before the link
+    /// existed. Nothing else in the app invalidates this widely, because
+    /// nothing else changes this much.
+    @State private var dataVersion = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(provider: SignuDataProviding,
@@ -74,55 +87,66 @@ struct AppShellView: View {
         ZStack(alignment: .bottom) {
             SignuColor.paper.ignoresSafeArea()
 
-            switch selectedTab {
-            case .home:
-                HomeScreen(provider: provider, actions: HomeActions(
-                    onReview: { showReview = true },
-                    onSeeAll: { selectedTab = .subs },
-                    onSelectSubscription: { detailSubscriptionId = $0 }
-                ), scrollAnchor: effectiveHomeAnchor)
-            case .subs:
-                #if DEBUG
-                SubsScreen(
-                    provider: provider,
-                    actions: SubsActions(
+            Group {
+                switch selectedTab {
+                case .home:
+                    HomeScreen(provider: provider, actions: HomeActions(
+                        // The needs-action banner's Fix (12b's other entry point):
+                        // re-authenticating is the same widget opened on an existing
+                        // item, so it is the same flow with an id.
+                        onFixConnection: { connectTarget = ConnectTarget(connectionId: $0) },
+                        onReview: { showReview = true },
+                        onSeeAll: { selectedTab = .subs },
                         onSelectSubscription: { detailSubscriptionId = $0 },
-                        onReviewSuggestion: { _ in showReview = true }
-                    ),
-                    initialFilter: CommandLine.arguments.contains("--subs-inactive") ? .inactive : initialSubsFilter,
-                    initialSortByCost: CommandLine.arguments.contains("--subs-cost"),
-                    scrollAnchor: CommandLine.arguments.contains("--subs-bottom") ? .bottom : subsScrollAnchor
-                )
-                #else
-                SubsScreen(
-                    provider: provider,
-                    actions: SubsActions(
-                        onSelectSubscription: { detailSubscriptionId = $0 },
-                        onReviewSuggestion: { _ in showReview = true }
-                    ),
-                    initialFilter: initialSubsFilter
-                )
-                #endif
-            case .settings:
-                SettingsScreen(provider: provider, actions: SettingsActions(
-                    onSelectBank: { settingsConnectionId = $0 },
-                    // Restore is `ignored = false` and nothing more: the run returns
-                    // to `possible` and resurfaces in review, because it never left
-                    // that state. SettingsView also hides the row locally, so the
-                    // list reacts without waiting for the round trip.
-                    onRestore: { id in
-                        Task { try? await provider.setIgnored(subscriptionId: id, ignored: false) }
-                    },
-                    onDeleteAccount: {
-                        Task {
-                            deleteScope = try? await provider.deleteAccountScope()
-                            showDelete = true
-                        }
-                    },
-                    onSetPassword: onSetPassword,
-                    onSignOut: onSignOut
-                ))
+                        onConnectBank: { connectTarget = ConnectTarget(connectionId: nil) }
+                    ), scrollAnchor: effectiveHomeAnchor)
+                case .subs:
+                    #if DEBUG
+                    SubsScreen(
+                        provider: provider,
+                        actions: SubsActions(
+                            onSelectSubscription: { detailSubscriptionId = $0 },
+                            onReviewSuggestion: { _ in showReview = true }
+                        ),
+                        initialFilter: CommandLine.arguments.contains("--subs-inactive") ? .inactive : initialSubsFilter,
+                        initialSortByCost: CommandLine.arguments.contains("--subs-cost"),
+                        scrollAnchor: CommandLine.arguments.contains("--subs-bottom") ? .bottom : subsScrollAnchor
+                    )
+                    #else
+                    SubsScreen(
+                        provider: provider,
+                        actions: SubsActions(
+                            onSelectSubscription: { detailSubscriptionId = $0 },
+                            onReviewSuggestion: { _ in showReview = true }
+                        ),
+                        initialFilter: initialSubsFilter
+                    )
+                    #endif
+                case .settings:
+                    SettingsScreen(provider: provider, actions: SettingsActions(
+                        onSelectBank: { settingsConnectionId = $0 },
+                        onConnectBank: { connectTarget = ConnectTarget(connectionId: nil) },
+                        // Restore is `ignored = false` and nothing more: the run returns
+                        // to `possible` and resurfaces in review, because it never left
+                        // that state. SettingsView also hides the row locally, so the
+                        // list reacts without waiting for the round trip.
+                        onRestore: { id in
+                            Task { try? await provider.setIgnored(subscriptionId: id, ignored: false) }
+                        },
+                        onDeleteAccount: {
+                            Task {
+                                deleteScope = try? await provider.deleteAccountScope()
+                                showDelete = true
+                            }
+                        },
+                        onSetPassword: onSetPassword,
+                        onSignOut: onSignOut
+                    ))
+                }
             }
+            // Connecting a bank rewrites every screen at once, so the tab is
+            // rebuilt rather than left rendering the graph from before the link.
+            .id(dataVersion)
 
             // Safari-style auto-hide (tab bar behavior contract): slides out
             // on downward scroll, back on any upward scroll or at content
@@ -145,11 +169,13 @@ struct AppShellView: View {
                 provider: provider,
                 actions: ReviewActions(
                     onBack: { showReview = false },
-                    // onTrack is deliberately still unwired — see the note on
-                    // SignuDataProviding's write section. Confirming a suggestion
-                    // writes subscription_run.status and subscription.identification,
-                    // and `authenticated` holds no UPDATE grant on either. It needs
-                    // an Edge Function, not a method here.
+                    // The run id, not the subscription's: a suggestion IS a run
+                    // sitting at `possible`, and confirming is lifting it out of
+                    // that state. The interval is the R4 sheet's answer and nil
+                    // for R3, whose cadence the engine measured.
+                    onTrack: { runId, interval in
+                        act { try await provider.confirmSuggestion(runId: runId, billingInterval: interval) }
+                    },
                     onDismiss: { id in
                         Task { try? await provider.setIgnored(subscriptionId: id, ignored: true) }
                     }
@@ -174,6 +200,16 @@ struct AppShellView: View {
                                 remindBeforeDays: on ? 2 : nil
                             )
                         }
+                    },
+                    // Closes the detail on success, deliberately. The screen was
+                    // built from a payload that now says the wrong thing —
+                    // "renews in 3 days" above a run the user just cancelled —
+                    // and the list it returns to re-reads. Leaving it open with
+                    // stale state is the disagreement the invalidate-don't-edit
+                    // rule exists to prevent (v29).
+                    onMarkCancelled: {
+                        act({ try await provider.markCancelled(subscriptionId: id) },
+                            onSuccess: { detailSubscriptionId = nil })
                     }
                 )
             )
@@ -183,21 +219,51 @@ struct AppShellView: View {
         }
         // Connection detail (12b) — covers the tab bar; from a Settings bank row.
         .fullScreenCover(item: $settingsConnectionId) { id in
-            ConnectionDetailScreen(provider: provider, connectionId: id, onBack: { settingsConnectionId = nil })
+            ConnectionDetailScreen(
+                provider: provider,
+                connectionId: id,
+                onBack: { settingsConnectionId = nil },
+                // 12b runs the reconnect itself; this is what it reports back, so
+                // Settings does not keep rendering the pre-reconnect chip.
+                onReconnected: {
+                    settingsConnectionId = nil
+                    dataVersion += 1
+                }
+            )
         }
+        // Connect a bank (12d's CTA, Settings' row, Home's empty state) and
+        // re-authenticate one (Home's banner). 12b's Reconnect presents the same
+        // flow from there, because a cover cannot present a cover.
+        .connectBankCover(provider: provider, target: $connectTarget) { dataVersion += 1 }
         .sheet(isPresented: $showDelete) {
             if let deleteScope {
-                // Real deletion is an Edge Function that doesn't exist yet
-                // (tier (a): one auth.admin.deleteUser() call). Until it does,
-                // confirming ends the session — the honest local half of the
-                // action, and never a no-op that looks like success.
+                // Tier (a): one auth.admin.deleteUser() call behind the
+                // `delete-account` function, and the cascade takes the rest.
+                // The sign-out happens only after it returns — ending the
+                // session first would look identical to the user and leave the
+                // account standing.
                 DeleteAccountSheet(scope: deleteScope, onDelete: {
-                    showDelete = false
-                    onSignOut()
+                    act({ try await provider.deleteAccount() },
+                        onSuccess: {
+                            showDelete = false
+                            onSignOut()
+                        })
                 })
                 .presentationDetents([.height(560)])
                 .presentationDragIndicator(.visible)
             }
+        }
+        // The four Edge Function writes change state no screen is showing, so a
+        // failure has nowhere to be noticed. The message is the server's own
+        // ("R4 confirmation must state monthly or annual"), not a generic
+        // apology, because it is the only thing that says what to do next.
+        .alert(
+            "That didn't go through",
+            isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
+        ) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "")
         }
         #if DEBUG
         .onAppear {
@@ -206,6 +272,32 @@ struct AppShellView: View {
                 || CommandLine.arguments.contains("--review-r4-sheet") { showReview = true }
         }
         #endif
+    }
+
+    /// Runs one of the four writes the client is not granted, and surfaces what
+    /// happens if it fails.
+    ///
+    /// Deliberately not `try?`, which is right for the two column writes beside
+    /// it: a reminder toggle has already moved on screen and the next read
+    /// corrects it either way. These four confirm a suggestion, end a run, or
+    /// delete data — the screen cannot show whether they landed, so swallowing
+    /// the error would leave the user believing something that did not happen.
+    ///
+    /// `onSuccess` runs only after the await returns, which is the whole point
+    /// at the delete-account call site: signing out first would look identical
+    /// and leave the account alive.
+    private func act(
+        _ work: @escaping () async throws -> Void,
+        onSuccess: @escaping () -> Void = {}
+    ) {
+        Task {
+            do {
+                try await work()
+                onSuccess()
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
     }
 
     private var reviewAutoR4: Bool {
