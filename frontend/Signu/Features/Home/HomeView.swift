@@ -19,6 +19,14 @@ struct HomeScreen: View {
         .task {
             payload = try? await provider.homePayload()
         }
+        // Pull-to-refresh, on the screen most likely to be open when the daily
+        // sync lands. The `refresh()` verdict is ignored on purpose: the user
+        // asked, so the payload is re-read either way and the gesture never
+        // appears to do nothing.
+        .refreshable {
+            try? await provider.refresh()
+            payload = try? await provider.homePayload()
+        }
     }
 }
 

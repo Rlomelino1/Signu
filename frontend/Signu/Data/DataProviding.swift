@@ -34,6 +34,24 @@ protocol SignuDataProviding {
     func connectionDetailPayload(connectionId: UUID) async throws -> ConnectionDetailPayload?
     /// Attributed-subscriptions list (13a). nil if not found.
     func attributedSubsPayload(connectionId: UUID) async throws -> AttributedSubsPayload?
+    /// Discards the cached graph and reads it again, answering whether anything
+    /// actually changed.
+    ///
+    /// Until this existed the app could not notice data it had not written
+    /// itself. The provider loads the whole graph once and invalidates only on
+    /// its own writes, so rows arriving server-side — the 15:30 UTC sync, the
+    /// detection pass behind a fresh bank link — stayed invisible for the life of
+    /// the session. Switching tabs did not help: the screen rebuilds, its `.task`
+    /// runs again, and `ensureLoaded()` hands back the same cached rows.
+    ///
+    /// The Bool exists so a caller can avoid rebuilding a screen for nothing. A
+    /// pull-to-refresh ignores it (the user asked, so the screen re-reads either
+    /// way); a foreground refresh uses it, because throwing away someone's scroll
+    /// position to show them what they were already looking at is worse than not
+    /// refreshing at all.
+    @discardableResult
+    func refresh() async throws -> Bool
+
     /// The renewal calendar, one month at a time. Takes any date in the month
     /// rather than a month index, so callers never assemble one.
     func calendarPayload(monthContaining date: Date) async throws -> CalendarPayload
