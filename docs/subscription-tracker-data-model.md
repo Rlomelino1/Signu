@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-12** (v32) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-12** (v33) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1473,6 +1473,21 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v33** — `Schema applies` BECOMES A REQUIRED CHECK (2026-08-12). **No
+  migration, no code.** v18 left it advisory on a stated criterion — "a check earns
+  required status by having gone green reliably rather than by existing" — so the
+  criterion was measured rather than re-argued: **59 of 60 runs green** across five
+  days, the single red being the warning gate correctly catching a genuinely unset
+  `SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET`, since fixed. No infrastructure flake in
+  that window, which was the specific worry. The Node 20 deprecation resolved as a
+  notice rather than a breakage (the runner forces Node 24). It costs 2m21s against
+  a 15m56s iOS job, so it never delays a merge. Required contexts on `main` are now
+  `iOS build`, `Detection tests`, `Schema applies`, with `strict` still on.
+  **Deliberately not paired with a `paths:` filter**: a job that does not run never
+  reports its context, and a strict required check then waits forever for a verdict
+  that will never arrive — the skip would have to be internal to a job that always
+  runs. Limit recorded rather than glossed: this proves migrations apply to an
+  EMPTY database, never against production-shaped data.
 - **v32** — TAP TARGETS AND THE LAST INERT CONTROLS (2026-08-12). **No
   migration.** Two long-known frontend defects closed, and one found while closing
   them. **Dead tap zones**: `.buttonStyle(.plain)` hit-tests only what a label
@@ -2094,6 +2109,24 @@ implementations back to the 21-series rendering.*
   existing: it has two passes on a single day and sits on a third-party action
   already carrying a Node 20 deprecation notice, so requiring it now would
   volunteer to be blocked by someone else's maintenance schedule.
+
+  **Amended v33 (2026-08-12): it earned it, and is now required.** The rule above
+  set a criterion rather than a verdict, so the criterion was measured: **59 of 60
+  runs green**, spanning 2026-08-07 to 2026-08-12. The single red was the warning
+  gate firing correctly on `WARN: environment variable is unset:
+  SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET` — a real unset reference, fixed by the
+  `ci-placeholder-never-used` value the job now passes. **Zero infrastructure
+  flakes**, which is the failure the original hesitation was about. The Node 20
+  concern also resolved itself in the least eventful direction: the runner now
+  forces those actions onto Node 24 and emits a notice, so the deprecation is
+  noise rather than a breakage. Cost of requiring it: 2m21s against the iOS job's
+  15m56s, so it is never the critical path.
+
+  **What requiring it does NOT buy, stated so it is not assumed away**: the job
+  proves the migrations apply to an **empty** database. A migration that is valid
+  from scratch can still fail against production — a `NOT NULL` column added to a
+  table with rows, a CHECK existing data violates, a unique index over duplicates.
+  Nothing in CI covers that, and the deploy is where it would surface.
 
   **Honest limit, stated so it is not assumed away**: CI catches build breaks
   only. It cannot catch spec-vs-schema drift — valid SQL applies green against a
