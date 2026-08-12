@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-11** (v29) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-12** (v31) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -508,12 +508,13 @@ against the real item: 1 connection, 2 accounts, 258 transactions.*
     secret is missing rather than POSTing to a null URL — a schedule that quietly
     no-ops is indistinguishable from one that works.
   - Idempotent: pg_cron upserts on jobname, so a reset yields exactly one entry.
-- **`connection` is seeded by hand** via `supabase/seed/seed-connection.sql`,
-  with the itemId passed in rather than committed. The real path is Pluggy Connect
-  in SwiftUI writing this row; that screen is not designed. Committed as a
-  parameterized script rather than an `INSERT` typed once, because a manual step
-  living only in shell history is invisible in the way this project keeps getting
-  bitten by. When the in-app flow lands the file is deleted, not adapted.
+- **`connection` was seeded by hand** via `supabase/seed/seed-connection.sql`,
+  with the itemId passed in rather than committed. Committed as a parameterized
+  script rather than an `INSERT` typed once, because a manual step living only in
+  shell history is invisible in the way this project keeps getting bitten by.
+  *Superseded v31: the in-app flow landed, so the file is deleted rather than
+  adapted, exactly as it said it should be — see
+  [connecting a bank](#connecting-a-bank-locked-v31-2026-08-12).*
 
 ### Timezone — dates are São Paulo, not UTC
 
@@ -886,6 +887,8 @@ interface looked complete and changed nothing.
   **no UPDATE grant on `subscription_run` at all**. Review's *Track it* therefore
   remains unwired on purpose — wiring it would need either an Edge Function or a
   widened grant, and the grant is the boundary the doctrine rests on.
+  *Amended v30: those functions now exist — see [engine-owned actions](#engine-owned-actions-locked-v30)
+  — and the grant is unchanged, which was the point.*
 - **A successful write invalidates the cache rather than editing the local copy.**
   Two representations of one row is how a UI comes to disagree with the database; the
   re-read costs one round trip on a screen the user has just left.
@@ -903,6 +906,125 @@ interface looked complete and changed nothing.
   in Settings, and deliberately not that the review row vanished (it animates away
   locally regardless) nor that a dismissed row exists (the fixtures ship with some).
   Confirmed falsifiable by unwiring the closure and watching it fail 2 ≠ 3.
+
+---
+
+## Engine-owned actions (locked v30, 2026-08-12)
+
+*No migration. Four Edge Functions, built on grants that already existed on both
+sides: Migration #1 refuses the client, Migration #3 permits `service_role`.
+Neither moved, which is the whole claim — the boundary held and the buttons work.*
+
+| Function | Surface | Writes |
+|---|---|---|
+| `confirm-suggestion` | Review's *Track it* (9a) | `subscription_run.status` → `active`; `identification` → `user_confirmed`; R4's `billing_interval` |
+| `cancel-subscription` | Detail's *Mark cancelled* (10a) | `status` → `cancelled`, `cancelled_date`, `end_date`, `next_expected_date` → NULL |
+| `remove-connection` | Remove bank link (12c) | DELETEs attributed subscriptions, then the connection |
+| `delete-account` | 14a | `auth.admin.deleteUser()` |
+
+- **The scoping rule inverts, and that is not a contradiction.** Reads and column
+  writes send **no** `user_id` predicate because RLS already scopes them; these send
+  one on **every** query, because `service_role` carries `rolbypassrls` and no policy
+  stands between a function and every user's rows. The enforcing layer changed, so
+  the rule that follows from it changed with it.
+- **Identity comes from the JWT, never from the body.** Resolved through
+  `auth.getUser()` against the auth server rather than a locally-decoded token — a
+  local decode is a signature we chose to trust, and it would also accept a token
+  belonging to an account one of these four functions has since deleted. A `userId`
+  parameter would be a request to act on whoever the client named.
+- **Decisions are values, not writes** (`_shared/actions.ts`, 26 tests): each returns
+  *write* / *noop* / *refuse*, which is what lets the interesting cases be tested as
+  data. `noop` is deliberately distinct from `refuse` — a second *Track it* after a
+  dropped response is a success from where the user sits, and 409 would make a retry
+  look like a failure.
+- **Confirmation is one write: lift the run out of `possible`.** `active` is a
+  starting state, not a permanent claim — `applyAssertions` preserves `detected_by`
+  and R4's interval but re-derives the status, so a confirmed run that never receives
+  another charge still goes overdue and then ended through the normal machinery.
+- **`user_renamed` outranks `user_confirmed`.** Confirming a renamed subscription
+  leaves `identification` alone; demoting it would unfreeze `service_name` and let
+  the next detection pass overwrite what the user typed.
+- **R4 without an interval is refused, not defaulted** (400). Writing the provisional
+  monthly as though the user had chosen it is exactly what the sheet exists to
+  prevent. Symmetrically, an interval sent for an **R3** run is refused: the cadence
+  was measured, and one arriving means the client's `asksIntervalOnTrack` and this
+  rule have drifted apart.
+- **Cancellation measures paid-through from the last charge**, never from the
+  cancellation date — the user keeps the service through the period already paid for.
+  Only `active` and `overdue` runs qualify, matching `showMarkCancelled`: overwriting
+  an `ended` run's engine-inferred death with an assertion the data does not support
+  would be a downgrade.
+- **12c's sequencing rule is executable now.** Attributed subscriptions are deleted
+  **before** the connection, because `charge.transaction_id` is ON DELETE SET NULL
+  and attribution is computed *through* it — the reverse order does not make the
+  answer harder to find, it destroys it. So the sheet's radio choice travels with the
+  destructive tap (`onRemove` carries `keepHistory`) rather than being read
+  afterwards.
+- **Attribution is narrowed query by query** — latest run per subscription, then
+  those runs' charges, then only the transactions a latest charge points at. Loading
+  every run and charge would eventually cross PostgREST's 1000-row `max_rows` and
+  return a **quietly** shorter answer, and a truncated attribution reads exactly like
+  a smaller bank. The helpers are exported from the pure core and re-run inside the
+  rule, so the narrowing cannot change the verdict.
+- **`delete-account` asks twice.** 14a's type-to-confirm is friction in the UI, and
+  the UI is not the only thing that can reach the endpoint; `{"confirm":"DELETE"}`
+  makes a stray or replayed POST inert. The sign-out happens **after** the call
+  returns — signing out first looks identical to the user and leaves the account
+  alive. The access token stays cryptographically valid until it expires, so the
+  sign-out is what makes the app agree with the database, not what enforces it.
+- **These four throw where the two column writes swallow.** `try?` is right for a
+  toggle the user can already see the result of; nothing on screen can show whether a
+  suggestion was confirmed or an account deleted, so failures surface in an alert
+  carrying the **server's own message** ("R4 confirmation must state monthly or
+  annual"), which is the only text that says what to do next. The removal alert lives
+  on 12b rather than the shell, because an alert attached below a full-screen cover
+  never appears.
+- **No CORS headers, deliberately.** The only caller is the iOS app; a permissive
+  `Access-Control-Allow-Origin` added "just in case" would hand these four writes to
+  any web page that learns a URL.
+
+---
+
+## Connecting a bank (locked v31, 2026-08-12)
+
+*No migration. Two Edge Functions around Pluggy's Connect widget, replacing
+`seed/seed-connection.sql`, which is deleted per its own instruction.*
+
+- **`connect-token`** mints the widget's credential. Connect runs client-side and
+  cannot hold `PLUGGY_CLIENT_SECRET`; a connect token is the credential designed
+  for that position, scoped to the one item the session produces.
+- **`register-connection`** turns the returned item id into a `connection` row and
+  **chains the first sync**, which chains detection. A row that appears with
+  nothing behind it until the next cron reads as a broken connect flow.
+- **`clientUserId` is the ownership proof, not telemetry.** An item id travels
+  through a client, so trusting it would let any signed-in user register any item
+  whose id they learned and read a stranger's transactions. `connect-token` stamps
+  the caller's user id onto the item; registration refuses anything else, and says
+  *not found* rather than *not yours*.
+- **The row is born `needs_action`.** `active` would be a claim about a link
+  nothing has fetched yet; the chained sync overwrites it from the live item
+  within the same request. Same rule the seed script observed, for the same
+  reason.
+- **Reconnect is this flow with an id.** Pluggy requires `itemId` **on the token**
+  to update an item — a create-mode token cannot — so 12b's Reconnect and Home's
+  needs-action banner mint an update-mode token. `avoidDuplicates` is set on
+  create only; on an update it would ask Pluggy to avoid duplicating the item
+  being re-authenticated.
+- **The widget runs in a `WKWebView`**, because it is JavaScript and there is no
+  native SDK. Three details are load-bearing: the script **version is pinned**
+  (`latest` would let a third party change what a shipped build runs); the page is
+  given a **real https origin** via `baseURL`, since HTML loaded with none gets an
+  opaque origin that cannot make the widget's cross-origin calls; and
+  `target="_blank"` popups are **loaded in place**, or the connectors that open
+  OAuth that way dead-end on a button that appears to do nothing.
+- **The visible screen presents the flow.** SwiftUI will not put a full-screen
+  cover over a full-screen cover, so 12b's Reconnect asking the shell to present
+  produced silence. A `connectBankCover` modifier is applied by whichever screen
+  is on top instead — found by a UI test, not by reading.
+- **The mock says it is simulated.** There is no bank to sign in to in a test
+  build, so the flow renders a labelled stand-in with *Simulate success* rather
+  than a web view that would fail to load. Both sides of the widget stay
+  exercisable, and nothing pretends an invented link is real.
 
 ---
 
@@ -1278,6 +1400,76 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v31** — CONNECTING A BANK, IN THE APP (2026-08-12). **No migration.** The
+  connect button has existed since the empty state was designed (v8) and did
+  nothing; the single live connection was made by hand through Pluggy's hosted
+  widget and transcribed by `seed/seed-connection.sql`, which said of itself
+  *"when the in-app connect flow lands, this file is deleted, not adapted."*
+  It is deleted. Two Edge Functions around one widget: **`connect-token`** mints
+  the short-lived, single-item token the client-side widget runs on (it cannot
+  hold `PLUGGY_CLIENT_SECRET`), and **`register-connection`** turns the item id
+  the widget returns into a `connection` row and **chains the first sync**, which
+  chains detection — so one tap produces cards, transactions and suggestions
+  rather than an empty row waiting for tomorrow's cron. **The item id is not
+  trusted on the way back**: `connect-token` stamps the caller's user id onto the
+  item as `clientUserId`, and registration refuses any item that does not carry
+  it — without that check an item id is a bearer token for a stranger's
+  transactions, since it travels through a client. Reported as 404, not 403, for
+  the same reason the ownership helpers are. Registration is idempotent on
+  `UNIQUE (user_id, provider_connection_id)`, and the row is born `needs_action`
+  because nothing has been fetched yet — the chained sync overwrites it from the
+  live item, the same honesty the seed script observed. **Reconnect is the same
+  flow with an id**: Pluggy requires `itemId` on the token itself to update an
+  item, so 12b's Reconnect and Home's needs-action banner mint an update-mode
+  token, closing `onFixConnection`, the last dangling navigation handler with a
+  designed destination. Client-side: the widget is JavaScript with no native SDK,
+  so it runs in a `WKWebView` — script version **pinned** (a `latest` URL lets a
+  third party change what a shipped build executes), page given a **real https
+  origin** (HTML with no base URL gets an opaque origin, which cannot make the
+  widget's cross-origin calls to `api.pluggy.ai`), and popups loaded in place
+  (some connectors open OAuth with `target="_blank"`, which a `WKWebView` with no
+  `uiDelegate` silently drops). **The presenter must be the visible screen**: the
+  flow was first attached to the shell, and Reconnect — itself inside a
+  full-screen cover — asked for a cover over a cover and got nothing, silently.
+  Caught by a UI test that tapped the button and waited for a screen that never
+  came; the fix is a `connectBankCover` modifier applied by whichever screen is
+  on top. The mock provider reports its session as **simulated** and the flow
+  renders a labelled stand-in, so previews and UI tests exercise both sides of
+  the widget without pretending an invented bank is a real one.
+- **v30** — THE FOUR ENGINE-OWNED ACTIONS (2026-08-12). **No migration**: every
+  grant this needs shipped in Migration #1 (`authenticated` refused) and Migration #3
+  (`service_role` permitted), and the point is that neither moved. v29 wired the two
+  writes the client is granted and named the four it is not; this builds them as Edge
+  Functions — `confirm-suggestion`, `cancel-subscription`, `remove-connection`,
+  `delete-account` — closing *Track it*, *Mark cancelled*, 12c and 14a, which had
+  been designed since v7/v8 and inert ever since. **The decisions are a pure core**
+  (`_shared/actions.ts`, 26 tests, no database), the functions are load-decide-write
+  shells, exactly as detection and reminders are. **Identity comes from the JWT and
+  never from the body**, and this inverts the v29 read/write rule rather than
+  contradicting it: `service_role` bypasses RLS, so the scoping the reads leave to
+  the database becomes the function's own job, and every row is proved to belong to
+  the caller before it is touched. Four decisions worth naming: a second *Track it*
+  after a dropped response is a **no-op, not a 409**, because above `possible` on an
+  R3/R4 run *is* the stored confirmation; confirming a **`user_renamed`** subscription
+  leaves `identification` alone, since demoting it to `user_confirmed` would unfreeze
+  `service_name`; **R4 without an interval is refused** rather than defaulted, because
+  writing the provisional monthly as though the user had chosen it is what the sheet
+  exists to prevent; and cancellation derives `end_date` from the **last charge**, not
+  from the day the user got round to saying so. 12c's **sequencing rule is now
+  executable**: attributed subscriptions are deleted before the connection, because
+  `charge.transaction_id` is ON DELETE SET NULL and the reverse order erases the
+  attribution it needs — so the sheet's radio choice travels with the tap.
+  Attribution is narrowed query-by-query rather than loading every run and charge,
+  since PostgREST's 1000-row ceiling would return a *quietly* shorter answer, which
+  reads exactly like a smaller bank. `delete-account` additionally requires
+  `{"confirm":"DELETE"}` — the same word 14a makes the user type, restated at the API
+  boundary so a replayed request is inert — and the sign-out happens **after** the
+  call returns, not before, where it would look identical and leave the account
+  standing. These four **throw where the two column writes swallow**: a toggle has
+  already moved on screen and the next read corrects it, but nothing on screen can
+  show whether a suggestion was confirmed or an account deleted, so failures surface
+  in an alert carrying the server's own message. Wiring is UI-tested and confirmed
+  falsifiable by unwiring *Track it* — 2 ≠ 1.
 - **v29** — WRITE BOUNDARY (2026-08-11). **No migration**: the grants relied on
   shipped in Migration #1 and are unchanged. The app was read-only and silently so —
   every state-changing control called a closure no caller supplied, so the reminder

@@ -247,12 +247,122 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
             .value
     }
 
+    // MARK: - Edge Function writes (v30)
+    //
+    // The four actions the client is not granted: confirming a suggestion,
+    // marking a run cancelled, removing a bank link, deleting an account. Each is
+    // one POST to a function that resolves the caller from the session JWT and
+    // then writes with the service role.
+    //
+    // No user id is ever sent. The SDK attaches the access token to every
+    // invocation, and the server reads identity from it — a `userId` in one of
+    // these bodies would be a request to act on whoever the client named.
+    //
+    // Each invalidates the cache on success, exactly as the column writes do:
+    // one representation of a row, re-read on the next screen.
+
+    func confirmSuggestion(runId: UUID, billingInterval: BillingInterval?) async throws {
+        struct Body: Encodable {
+            let runId: String
+            let billingInterval: String?
+        }
+        try await invoke("confirm-suggestion", body: Body(
+            runId: runId.uuidString,
+            billingInterval: billingInterval?.rawValue
+        ))
+    }
+
+    func markCancelled(subscriptionId: UUID) async throws {
+        struct Body: Encodable { let subscriptionId: String }
+        try await invoke("cancel-subscription", body: Body(subscriptionId: subscriptionId.uuidString))
+    }
+
+    func removeConnection(connectionId: UUID, deleteHistory: Bool) async throws {
+        struct Body: Encodable {
+            let connectionId: String
+            let deleteHistory: Bool
+        }
+        try await invoke("remove-connection", body: Body(
+            connectionId: connectionId.uuidString,
+            deleteHistory: deleteHistory
+        ))
+    }
+
+    func deleteAccount() async throws {
+        // The same word the sheet makes the user type, restated at the API
+        // boundary so a stray or replayed POST is inert.
+        struct Body: Encodable { let confirm: String }
+        try await invoke("delete-account", body: Body(confirm: "DELETE"))
+    }
+
+    // MARK: - Connecting a bank
+
+    func connectSession(connectionId: UUID?) async throws -> ConnectSession {
+        struct Body: Encodable { let connectionId: String? }
+        struct Reply: Decodable { let accessToken: String }
+        let reply: Reply = try await request(
+            "connect-token",
+            body: Body(connectionId: connectionId?.uuidString)
+        )
+        return ConnectSession(accessToken: reply.accessToken)
+    }
+
+    func registerConnection(itemId: String) async throws {
+        struct Body: Encodable { let itemId: String }
+        // The reply carries the connection id and the first sync's outcome; the
+        // app needs neither, because the screens re-read the graph the sync just
+        // wrote. Invalidating the cache is what that costs.
+        try await invoke("register-connection", body: Body(itemId: itemId))
+    }
+
+    private func invoke(_ name: String, body: some Encodable & Sendable) async throws {
+        try await send(name, body: body)
+        loaded = false
+    }
+
+    /// `nonisolated` for the same reason the fetches are: the response type is
+    /// not Sendable, so awaiting it from a main-actor method sends it across an
+    /// isolation boundary — accepted by newer compilers' region analysis and
+    /// rejected outright by the Swift 6.1 that CI builds with.
+    nonisolated private func send(_ name: String, body: some Encodable & Sendable) async throws {
+        do {
+            try await client.functions.invoke(name, options: .init(body: body))
+        } catch let FunctionsError.httpError(code, data) {
+            // The function answers `{"error": "…"}` and says something specific:
+            // "R4 confirmation must state monthly or annual", "a possible run
+            // cannot be cancelled". Surfacing the status code alone would throw
+            // that away and leave a screen with nothing true to render.
+            throw ProviderError.action(name: name, status: code, message: Self.serverMessage(data))
+        }
+    }
+
+    /// Same call, for the one function whose answer the app needs. Deliberately
+    /// does NOT invalidate the cache: minting a token changes nothing.
+    nonisolated private func request<T: Decodable>(
+        _ name: String,
+        body: some Encodable & Sendable
+    ) async throws -> T {
+        do {
+            return try await client.functions.invoke(name, options: .init(body: body))
+        } catch let FunctionsError.httpError(code, data) {
+            throw ProviderError.action(name: name, status: code, message: Self.serverMessage(data))
+        }
+    }
+
+    nonisolated private static func serverMessage(_ data: Data) -> String? {
+        struct Failure: Decodable { let error: String? }
+        return (try? JSONDecoder().decode(Failure.self, from: data))?.error
+    }
+
     enum ProviderError: LocalizedError {
         case noProfile
+        case action(name: String, status: Int, message: String?)
         var errorDescription: String? {
             switch self {
             case .noProfile:
                 return "Signed in, but no profile row for this account."
+            case let .action(name, status, message):
+                return message ?? "\(name) failed (HTTP \(status))."
             }
         }
     }

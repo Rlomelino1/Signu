@@ -159,17 +159,27 @@ jobs:
           deno check \
             backend/supabase/functions/_shared/detection.ts \
             backend/supabase/functions/_shared/reminders.ts \
+            backend/supabase/functions/_shared/actions.ts \
+            backend/supabase/functions/_shared/auth.ts \
+            backend/supabase/functions/_shared/pluggy.ts \
             backend/supabase/functions/run-detection/index.ts \
             backend/supabase/functions/pluggy-sync/index.ts \
-            backend/supabase/functions/send-reminders/index.ts
+            backend/supabase/functions/send-reminders/index.ts \
+            backend/supabase/functions/confirm-suggestion/index.ts \
+            backend/supabase/functions/cancel-subscription/index.ts \
+            backend/supabase/functions/remove-connection/index.ts \
+            backend/supabase/functions/delete-account/index.ts \
+            backend/supabase/functions/connect-token/index.ts \
+            backend/supabase/functions/register-connection/index.ts
 
       - name: Lint
         run: deno lint backend/supabase/functions
 
-      # Forty-nine tests: thirty-two encoding every historical bug in detection,
-      # seventeen pinning the reminder rules (v28). `deno test _shared/` picks up
-      # a new suite in that directory with no edit here, unlike `deno check`
-      # above, which names files and does need one.
+      # Seventy-five tests: thirty-two encoding every historical bug in
+      # detection, seventeen pinning the reminder rules (v28), twenty-six on the
+      # user-asserted writes (v30). `deno test _shared/` picks up a new suite in
+      # that directory with no edit here, unlike `deno check` above, which names
+      # files and does need one.
       #
       # The detection thirty-two encode: the v23 epsilon
       # regression, the presence-based fee filter, the card-payment R3, the

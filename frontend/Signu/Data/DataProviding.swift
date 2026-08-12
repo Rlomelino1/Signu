@@ -55,10 +55,13 @@ protocol SignuDataProviding {
     // database no matter what this protocol claims. So the shape of this section is
     // dictated by the grants, and cannot drift from them without failing loudly.
     //
-    // What is therefore NOT here, and needs an Edge Function rather than a method:
-    // confirming a suggestion (`subscription_run.status` + `identification`) and
-    // marking a run cancelled (`cancelled_date`). Runs are engine-owned and
-    // `authenticated` holds no UPDATE grant on that table at all.
+    // What is therefore NOT here as a column write, and goes through an Edge
+    // Function instead: confirming a suggestion (`subscription_run.status` +
+    // `identification`), marking a run cancelled (`cancelled_date`), removing a
+    // bank link and deleting an account. Runs are engine-owned, `authenticated`
+    // holds no UPDATE grant on that table at all, and no DELETE anywhere ever.
+    // Those four are the second group below (v30) — same protocol, different
+    // enforcement, and the difference is worth seeing in one file.
 
     /// The detail screen's reminder toggle. `nil` turns reminders off — the
     /// nullable column *is* the switch (v5), so there is no separate flag.
@@ -69,4 +72,67 @@ protocol SignuDataProviding {
     /// Restore is exactly `ignored = false` and nothing more: the run returns to
     /// `possible` and resurfaces in review, because it never left that state.
     func setIgnored(subscriptionId: UUID, ignored: Bool) async throws
+
+    // MARK: - Writes the client is not granted (Edge Functions, v30)
+    //
+    // These four throw where the two above swallow. A column write the user can
+    // see the result of can afford `try?` at the call site — the toggle already
+    // moved, the next read tells the truth. These change state the screen cannot
+    // show and, in two cases, delete data irreversibly, so an error that never
+    // surfaced would leave the user believing something that did not happen.
+
+    /// Review's *Track it* (9a). Takes the **run** id, because a suggestion IS a
+    /// run: `possible` is a run status, and lifting it out of that state is the
+    /// whole write. `billingInterval` is the R4 sheet's answer and must be nil
+    /// for R3, whose cadence the engine measured — the server refuses the
+    /// mismatch rather than guessing which one it is looking at.
+    func confirmSuggestion(runId: UUID, billingInterval: BillingInterval?) async throws
+
+    /// The detail screen's *Mark cancelled* (10a). Takes the subscription, not
+    /// the run: run identity is engine business and is re-derived on every
+    /// detection pass, so the server resolves the newest run itself.
+    func markCancelled(subscriptionId: UUID) async throws
+
+    /// Remove a bank link (12c). `deleteHistory` is the sheet's radio choice and
+    /// is captured before the destructive tap for a reason that is not
+    /// cosmetic: attribution runs through `charge.transaction_id`, which the
+    /// connection's own deletion NULLs, so the answer is unrecoverable
+    /// afterwards.
+    func removeConnection(connectionId: UUID, deleteHistory: Bool) async throws
+
+    /// Delete the account (14a). No id parameter, ever — the account deleted is
+    /// the one that owns the session. The caller still signs out afterwards.
+    func deleteAccount() async throws
+
+    // MARK: - Connecting a bank
+    //
+    // Two calls around one widget. Pluggy Connect runs client-side and cannot
+    // hold the API secret, so the server mints a short-lived token scoped to the
+    // one item the session produces; the widget hands back an item id; the server
+    // turns that into a connection and syncs it.
+    //
+    // The item id is NOT trusted on the way back. `connect-token` stamps the
+    // caller's user id onto the item as `clientUserId`, and `register-connection`
+    // refuses any item that does not carry it — otherwise an item id would be a
+    // bearer token for someone else's transactions.
+
+    /// A token for the Connect widget. `connectionId` re-opens an existing link
+    /// for re-authentication (12b's Reconnect, Home's needs-action banner);
+    /// nil opens the connector list to add a new one.
+    func connectSession(connectionId: UUID?) async throws -> ConnectSession
+
+    /// Registers the item the widget produced and runs the first sync, so one tap
+    /// produces cards, transactions and detected subscriptions rather than an
+    /// empty row waiting for tomorrow's cron.
+    func registerConnection(itemId: String) async throws
+}
+
+/// What the Connect widget needs to start.
+struct ConnectSession: Equatable {
+    let accessToken: String
+    /// True only for the mock provider, which has no real widget to run. The
+    /// flow renders a labelled stand-in rather than a web view that would fail
+    /// to load — previews and UI tests keep working, and nothing pretends a
+    /// simulated link is a real one.
+    var simulated = false
 }

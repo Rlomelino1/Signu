@@ -75,6 +75,130 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         guard let i = subscriptionList.firstIndex(where: { $0.id == subscriptionId }) else { return }
         subscriptionList[i].ignored = ignored
     }
+
+    // MARK: - Edge Function writes, simulated (v30)
+    //
+    // Each mirrors what the function on the other side actually does, including
+    // the parts that are easy to skip: confirmation leaves a `user_renamed`
+    // subscription's identification alone, cancellation derives paid-through from
+    // the last charge rather than from today, and removing a link with history
+    // kept NULLs the surviving charges' transaction ids instead of deleting them.
+    //
+    // A mock that accepted these and did nothing would make every UI test of them
+    // vacuously pass — the exact failure mode the write section above was written
+    // against.
+
+    func confirmSuggestion(runId: UUID, billingInterval: BillingInterval?) async throws {
+        guard let r = runList.firstIndex(where: { $0.id == runId }) else { return }
+        runList[r].status = .active
+        if let billingInterval { runList[r].billingInterval = billingInterval }
+
+        guard let s = subscriptionList.firstIndex(where: { $0.id == runList[r].subscriptionId }) else { return }
+        // `user_renamed` is the stronger assertion and freezes the name; only
+        // `auto` is promoted.
+        if subscriptionList[s].identification == .auto {
+            subscriptionList[s].identification = .userConfirmed
+        }
+    }
+
+    func markCancelled(subscriptionId: UUID) async throws {
+        let runs = runList.filter { $0.subscriptionId == subscriptionId }
+        guard let latest = runs.max(by: { $0.startDate < $1.startDate }),
+              let r = runList.firstIndex(where: { $0.id == latest.id }),
+              latest.status == .active || latest.status == .overdue
+        else { return }
+
+        let lastCharge = chargeList.filter { $0.runId == latest.id }.map(\.date).max()
+        let paidFrom = lastCharge ?? latest.startDate
+        let months = latest.billingInterval == .annual ? 12 : 1
+
+        runList[r].status = .cancelled
+        runList[r].cancelledDate = today
+        runList[r].endDate = Self.calendar.date(byAdding: .month, value: months, to: paidFrom)
+        runList[r].nextExpectedDate = nil
+    }
+
+    func removeConnection(connectionId: UUID, deleteHistory: Bool) async throws {
+        // Attribution comes from the payload the screens render, so the mock
+        // cannot disagree with the count the sheet just showed the user.
+        let payload = makeAttributedSubsPayload(connectionId: connectionId)
+        let attributed = Set(
+            (payload?.cardGroups.flatMap(\.rows).map(\.id) ?? []) + (payload?.dismissed.map(\.id) ?? [])
+        )
+        let accountIds = Set(accountList.filter { $0.connectionId == connectionId }.map(\.id))
+        let transactions = Set(transactionAccountMap.filter { accountIds.contains($0.value) }.keys)
+
+        if deleteHistory {
+            let runIds = Set(runList.filter { attributed.contains($0.subscriptionId) }.map(\.id))
+            chargeList.removeAll { runIds.contains($0.runId) }
+            runList.removeAll { attributed.contains($0.subscriptionId) }
+            subscriptionList.removeAll { attributed.contains($0.id) }
+        }
+
+        // ON DELETE SET NULL, by hand. Charges that outlive their transactions
+        // stay self-describing through the duplicated date, amount and card
+        // label — which is what makes "keep their history" mean anything.
+        for i in chargeList.indices where chargeList[i].transactionId.map(transactions.contains) == true {
+            chargeList[i].transactionId = nil
+        }
+        for tx in transactions { transactionAccountMap[tx] = nil }
+
+        accountList.removeAll { $0.connectionId == connectionId }
+        connectionList.removeAll { $0.id == connectionId }
+    }
+
+    // MARK: - Connecting a bank, simulated
+    //
+    // There is no widget to run here — Pluggy Connect needs a real token and a
+    // real bank. So the session is flagged `simulated` and the flow renders a
+    // labelled stand-in with a "Simulate success" button. That keeps the wiring
+    // exercisable in previews and UI tests, and keeps the mock honest: it never
+    // pretends a link it invented is a real one.
+
+    func connectSession(connectionId: UUID?) async throws -> ConnectSession {
+        ConnectSession(accessToken: "mock-connect-token", simulated: true)
+    }
+
+    func registerConnection(itemId: String) async throws {
+        // Idempotent on the item id, like the UNIQUE (user_id,
+        // provider_connection_id) the real path relies on.
+        guard !connectionList.contains(where: { $0.institutionName == "Simulated Bank" }) else { return }
+        let connection = Connection(
+            id: UUID(),
+            institutionId: "999",
+            institutionName: "Simulated Bank",
+            status: .active,
+            consentExpiresAt: Self.calendar.date(byAdding: .month, value: 6, to: today),
+            lastSyncedAt: now,
+            lastSyncError: nil,
+            createdAt: today
+        )
+        connectionList.append(connection)
+        accountList.append(
+            BankAccount(
+                id: UUID(),
+                connectionId: connection.id,
+                type: .creditCard,
+                brand: "Visa",
+                last4: "0000",
+                officialName: "Simulated card",
+                nickname: nil,
+                status: .active
+            )
+        )
+    }
+
+    func deleteAccount() async throws {
+        // The cascade, locally: everything the account owns. `profileValue` is
+        // deliberately left standing — the sheet's caller signs out immediately
+        // after, and a nil profile would crash the screens on the way out.
+        connectionList = []
+        accountList = []
+        subscriptionList = []
+        runList = []
+        chargeList = []
+        transactionAccountMap = [:]
+    }
     func connectionDetailPayload(connectionId: UUID) async throws -> ConnectionDetailPayload? {
         makeConnectionDetailPayload(connectionId: connectionId)
     }
