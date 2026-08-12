@@ -85,7 +85,23 @@ extension SignuPayloadSource {
         }
         guard visibleRuns.contains(where: { $0.status != .possible }) else {
             let bank = connectionList.first?.institutionName ?? ""
-            return .watching(syncText: "Updated \(SignuFormat.ago(lastSynced ?? now, now: now)) · \(bank) connected")
+            // Suggestions are exactly the runs this branch is reached BY, so the
+            // screen that reports "nothing yet" is the one screen guaranteed to
+            // have them. Sorted by name so two reads of the same state name the
+            // same two services.
+            let names = visibleRuns
+                .filter { $0.status == .possible }
+                .compactMap { subscription($0.subscriptionId)?.displayName }
+                .sorted()
+            return .watching(HomePayload.Watching(
+                // "detected" is a claim about the engine, "confirmed" about the
+                // user. Saying "none detected" while holding suggestions was the
+                // defect 22a exists to fix.
+                headline: names.isEmpty ? "No subscriptions detected yet" : "No confirmed subscriptions yet",
+                syncText: "Updated \(SignuFormat.ago(lastSynced ?? now, now: now)) · \(bank) connected",
+                suggestionCount: names.count,
+                suggestionLine: HomePayload.suggestionLine(names)
+            ))
         }
 
         // Hero: landed charges this calendar month, non-ignored subs,

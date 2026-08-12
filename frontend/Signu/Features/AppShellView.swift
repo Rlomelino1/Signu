@@ -61,6 +61,10 @@ struct AppShellView: View {
     /// their screens and both, until now, buttons that opened nothing.
     @State private var showSearch = false
     @State private var showCalendar = false
+    /// Drives the Subs tab dot (22a). Held here because the bar lives here, and
+    /// refreshed at the two moments it can change: a trip through review, and any
+    /// rebuild of the tab.
+    @State private var suggestionCount = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(provider: SignuDataProviding,
@@ -167,7 +171,7 @@ struct AppShellView: View {
             // Safari-style auto-hide (tab bar behavior contract): slides out
             // on downward scroll, back on any upward scroll or at content
             // end; crossfades instead when Reduce Motion is on.
-            SignuTabBar(selection: $selectedTab)
+            SignuTabBar(selection: $selectedTab, suggestionCount: suggestionCount)
                 .padding(.bottom, 8)
                 .offset(y: !reduceMotion && tabBarState.hidden ? 170 : 0)
                 .opacity(reduceMotion && tabBarState.hidden ? 0 : 1)
@@ -175,6 +179,24 @@ struct AppShellView: View {
         }
         .environment(tabBarState)
         .environment(passwordLinkState)
+        .task(id: dataVersion) { await refreshSuggestionCount() }
+        .onChange(of: showReview) { _, isShowing in
+            // On the way OUT of review, where confirming and dismissing both
+            // change the count. Cheap: the provider already holds the graph, so
+            // this is a re-read of cached rows rather than a round trip.
+            guard !isShowing else { return }
+            Task {
+                let before = suggestionCount
+                await refreshSuggestionCount()
+                // Home renders the count AND the headline that depends on it, so
+                // a decision taken in review leaves the screen underneath stale —
+                // "2 possible subscriptions" over a review screen with none left.
+                // Rebuilt only when the number actually moved, so backing out
+                // without deciding anything costs the user their scroll position
+                // for nothing.
+                if suggestionCount != before { dataVersion += 1 }
+            }
+        }
         .onChange(of: selectedTab) {
             tabBarState.reset()
         }
@@ -329,6 +351,10 @@ struct AppShellView: View {
         #endif
     }
 
+    private func refreshSuggestionCount() async {
+        suggestionCount = (try? await provider.reviewPayload().suggestions.count) ?? 0
+    }
+
     /// Runs one of the four writes the client is not granted, and surfaces what
     /// happens if it fails.
     ///
@@ -421,6 +447,9 @@ enum SignuDataProviderFactory {
         }
         if CommandLine.arguments.contains("--shell-fresh") {
             return MockDataProvider(scenario: .freshConnection)
+        }
+        if CommandLine.arguments.contains("--shell-suggestions") {
+            return MockDataProvider(scenario: .suggestionsOnly)
         }
         // Opt IN to live data in Debug, rather than opting out. Every existing
         // screenshot harness and preview keeps its deterministic mock dataset
