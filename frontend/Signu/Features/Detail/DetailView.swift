@@ -12,7 +12,7 @@ struct DetailScreen: View {
     var body: some View {
         Group {
             if let payload = payload ?? loaded {
-                DetailView(payload: payload, actions: actions, scrollAnchor: scrollAnchor)
+                DetailView(payload: payload, actions: editing(actions), scrollAnchor: scrollAnchor)
             } else {
                 Color.clear
             }
@@ -21,11 +21,40 @@ struct DetailScreen: View {
             if payload == nil { loaded = await loader?() }
         }
     }
+
+    /// Re-reads after an edit that this screen displays.
+    ///
+    /// Renaming changes the hero the user is looking at, so leaving the old name
+    /// on screen would be the two-representations-of-one-row problem the write
+    /// boundary exists to avoid (v29) — just locally instead of across screens.
+    /// The wrapping happens here rather than at the shell's call site because the
+    /// payload lives here and nothing else can reload it.
+    private func editing(_ actions: DetailActions) -> DetailActions {
+        var wrapped = actions
+        wrapped.onRename = { name in
+            await actions.onRename(name)
+            loaded = await loader?()
+        }
+        wrapped.onChangeCategory = { category in
+            await actions.onChangeCategory(category)
+            loaded = await loader?()
+        }
+        return wrapped
+    }
 }
 
 struct DetailActions {
     var onBack: () -> Void = {}
-    var onMore: () -> Void = {}
+    /// The overflow menu's two actions. `onMore` used to sit here as a single
+    /// closure nobody supplied — the ellipsis was a button that opened nothing —
+    /// and the menu itself is now local to the view, because presenting a menu is
+    /// not a decision the shell has any part in. nil clears the value.
+    /// `async` on purpose: the screen re-reads itself when one of these returns,
+    /// and a fire-and-forget closure would race the write it is meant to show. The
+    /// hero renders the name being changed, so "eventually correct" is visibly
+    /// wrong here in a way it is not for the reminder toggle.
+    var onRename: (String?) async -> Void = { _ in }
+    var onChangeCategory: (String?) async -> Void = { _ in }
     var onToggleReminder: (Bool) -> Void = { _ in }
     var onMarkCancelled: () -> Void = {}
 }
@@ -34,6 +63,7 @@ struct DetailActions {
 struct DetailView: View {
     let payload: DetailPayload
     var actions = DetailActions()
+    @State private var editing: Editing?
 
     /// Seeded from the payload, so the label matches what is stored. `@State`
     /// rather than reading the payload directly because the tap must show
@@ -70,15 +100,67 @@ struct DetailView: View {
             bottomBar
         }
         .background(SignuColor.paper)
+        .sheet(item: $editing) { which in
+            switch which {
+            case .rename:
+                RenameSheet(
+                    // The ENGINE's name: the placeholder and the reset action are
+                    // both about what shows through when the nickname is gone.
+                    serviceName: payload.engineName,
+                    nickname: payload.nickname,
+                    onSave: { name in
+                        editing = nil
+                        Task { await actions.onRename(name) }
+                    }
+                )
+                .presentationDetents([.height(360)])
+                .presentationDragIndicator(.visible)
+            case .category:
+                CategorySheet(
+                    serviceName: payload.serviceName,
+                    current: payload.category,
+                    known: payload.knownCategories,
+                    onSave: { category in
+                        editing = nil
+                        Task { await actions.onChangeCategory(category) }
+                    }
+                )
+                .presentationDetents([.height(520)])
+                .presentationDragIndicator(.visible)
+            }
+        }
     }
 
     private var topChrome: some View {
         HStack {
             ChromeButton(systemName: "chevron.left", action: actions.onBack)
             Spacer()
-            ChromeButton(systemName: "ellipsis", action: actions.onMore)
+            // A native menu rather than a sheet of choices: two actions, both
+            // one-tap destinations of their own.
+            Menu {
+                Button("Rename…") { editing = .rename }
+                Button(payload.category == nil ? "Add category…" : "Change category…") {
+                    editing = .category
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(SignuColor.textPrimary)
+                    .frame(width: 44, height: 44)
+                    .background(SignuColor.surface, in: Circle())
+                    .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+                    .contentShape(Circle())
+            }
+            .accessibilityLabel("More")
         }
         .padding(.top, 4)
+    }
+
+    /// Which overflow sheet is up. One optional rather than two booleans — the
+    /// same lesson 14a's empty sheet taught: one presentation, one piece of state.
+    enum Editing: String, Identifiable {
+        case rename, category
+        var id: String { rawValue }
     }
 
     private var hero: some View {

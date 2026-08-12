@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-12** (v31) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-12** (v32) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1028,6 +1028,79 @@ Neither moved, which is the whole claim — the boundary held and the buttons wo
 
 ---
 
+## Tap targets, and the three controls that opened nothing (locked v32, 2026-08-12)
+
+*No migration. Two frontend classes of defect, both of which had been reported as
+"known but unfixed" for long enough to be worth writing down.*
+
+### A drawn surface is not a tap target
+
+- **`.buttonStyle(.plain)` hit-tests only what the label DRAWS.** Every list row in
+  this app is two text columns with a `Spacer` between them, so the middle of the
+  row and the padding above and below it were dead. A tap landing there does
+  nothing at all, which reads as a broken app rather than as a missed target.
+- **`.background(_, in:)` does not help, and that was the surprise.** A card fill
+  or a tint painted across the whole row looks exactly like a hit area and is not
+  one. Reading the code produced the opposite conclusion — Settings' Delete
+  account row was assessed as "already fine, its label wraps a filled card" — and
+  a UI test tapping the exact centre found nothing there. Everything in this
+  section was decided by tapping a real coordinate.
+- **Fixed centrally where the component is shared** (`SignuRow`, `tintedSurface`)
+  and per-site where the row is hand-built (Subs' suggested and inactive rows,
+  Settings' bank and connect rows, 12b's summary row, 9a's R4 choices, 12c's
+  history choices). **Not applied blanket**: a row containing its own button — 12a's
+  dismissed row with Restore — can have the parent swallow the child's taps, so
+  that row deliberately stays a non-button and has a regression test saying so.
+- **The tests tap coordinates, not elements.** `XCUIElement.tap()` asks XCTest for
+  *a* hittable point and happily finds the label text at the row's left edge, so it
+  passes with the bug present. `coordinate(withNormalizedOffset:)` taps where the
+  dead zone was. Ten tests, one per row, deliberately not a loop: the rows are
+  built differently and a shared helper would hide which one regressed.
+- **One real bug fell out of it.** 14a presented an **empty sheet**: the
+  delete-account flow held two pieces of state — a `Bool` and the scope the sheet
+  needed — and presented on the flag while the scope was still nil, so the `if let`
+  inside the sheet failed and 14a rendered as a blank card. Now item-driven
+  (`.sheet(item:)`), like every other presentation in the shell, which is a shape
+  that cannot express the bug. **Rule: one presentation, one piece of state.**
+
+### The three controls that opened nothing
+
+Each was a closure declared with a default value and never supplied — the same
+defect v29 found across the write path, an interface that looks complete and
+changes nothing.
+
+- **Rename and category** (the detail overflow, previously `onMore`). Both columns
+  have been user-owned since Migration #1 and had no way in. Rename writes
+  **`nickname`, never `service_name`** — the engine's name for a merchant stays the
+  engine's, `displayName` already prefers a nickname, and clearing the field is a
+  real action that lets the engine's name show through again. It therefore does
+  **not** touch `identification`: `user_renamed` exists to freeze `service_name`
+  against the engine, and nothing here writes that column. The field starts empty
+  with the engine's name as its placeholder, so "clear it" is distinguishable from
+  "delete my own name". Category offers **the categories already in the user's
+  data**, never a taxonomy invented in the client, because the engine seeds them.
+- **Search** (the Subs magnifier) is a separate screen rather than a filter over
+  the grouped list, and that is a contract decision: the /yr hero is invariant
+  under the filter chips and the group subtotals are computed over whole groups, so
+  filtering rows in place would leave a subtotal describing rows no longer on
+  screen. Results carry each row's own numbers and none of the aggregates.
+- **The renewal calendar** (Home's *Coming up · Calendar*). No mockup — designed to
+  the system, like the R4 interval sheet. It shows **only `next_expected_date`**,
+  the one renewal per run the engine actually stated, and refuses to project
+  further by adding intervals even though that would fill the grid: a projected
+  date is the app asserting a fact the engine declined to. A month with nothing
+  predicted renders empty and **says so on screen**, and a footnote states the
+  limit so a thin month cannot read as lost data. It opens on the whole month with
+  today merely marked — selecting today by default was tried and was wrong, since
+  most days hold nothing and the calendar would open on "Nothing renews on that
+  day" with a full month behind it.
+- Both overflow writes are **awaited, and the screen re-reads when they return**.
+  Fire-and-forget is right for the reminder toggle, whose result is already on
+  screen; it is wrong for a rename, because the hero the user is looking at renders
+  the name being changed.
+
+---
+
 ## Reminder delivery
 
 *Push skeleton locked 2026-07-14; channel preference + email commitment locked 2026-07-15; **email delivery built and scheduled v28, 2026-08-11**. Push remains a maybe and remains unbuilt.*
@@ -1400,6 +1473,34 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v32** — TAP TARGETS AND THE LAST INERT CONTROLS (2026-08-12). **No
+  migration.** Two long-known frontend defects closed, and one found while closing
+  them. **Dead tap zones**: `.buttonStyle(.plain)` hit-tests only what a label
+  draws, so the middle of every list row did nothing — and `.background(_, in:)`
+  does **not** extend the target, which is the part that had been read wrong. The
+  suspect list said Settings' Delete account row was fine because its label wraps a
+  filled card; tapping its exact centre proved otherwise. Fixed centrally in
+  `SignuRow` and `tintedSurface`, per-site for the hand-built rows, and
+  **deliberately not applied** to 12a's dismissed row, where a nested Restore
+  button could be swallowed — that one gets a regression test instead. Ten UI tests
+  tap raw coordinates rather than elements, because `tap()` finds the label text at
+  the row's edge and passes with the bug present. **The bug found on the way**: 14a
+  was presenting an **empty sheet** — two pieces of state (a flag plus the scope)
+  raced, the flag won, and the sheet's `if let` failed — so delete-account has been
+  unreachable in practice. Now `.sheet(item:)` like every other presentation here;
+  one presentation, one piece of state. **The three inert controls now have
+  destinations**: rename and category (the detail overflow, replacing the unsupplied
+  `onMore`) as plain column writes — rename writes `nickname` and never
+  `service_name`, and deliberately not `identification`, since `user_renamed` exists
+  to freeze a name the client is not writing; **search** as its own screen rather
+  than a filter, because the /yr hero and group subtotals are computed over whole
+  groups and filtering in place would leave a subtotal describing rows that are gone;
+  and the **renewal calendar**, which shows only the engine's own
+  `next_expected_date` values and refuses to project further, states that limit on
+  screen, and opens on the whole month with today marked — selecting today by default
+  was tried and was wrong. Both overflow writes are awaited so the screen re-reads
+  when they land: right for a rename, unnecessary for a toggle whose result is
+  already visible. 25 UI tests and 5 unit suites.
 - **v31** — CONNECTING A BANK, IN THE APP (2026-08-12). **No migration.** The
   connect button has existed since the empty state was designed (v8) and did
   nothing; the single live connection was made by hand through Pluggy's hosted

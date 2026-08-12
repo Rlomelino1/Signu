@@ -110,6 +110,12 @@ extension View {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(stroke, lineWidth: 1)
             }
+            // A drawn background is NOT a tap target. `.background(_, in:)` paints
+            // behind the content and does not extend a plain button's hit area —
+            // measured, not assumed: a UI test tapping the exact centre of Settings'
+            // Delete account row found nothing there, and that row's label is a card
+            // with a filled background. Every caller of this is a button's label.
+            .contentShape(Rectangle())
     }
 }
 

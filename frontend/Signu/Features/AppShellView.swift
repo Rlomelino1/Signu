@@ -36,8 +36,14 @@ struct AppShellView: View {
     @State private var detailSubscriptionId: UUID?
     @State private var detailFixture: DetailPayload?
     @State private var settingsConnectionId: UUID?
-    @State private var showDelete = false
-    @State private var deleteScope: DeleteAccountScope?
+    /// One piece of state for one presentation. It used to be two — a `Bool`
+    /// plus the scope it needed — and the sheet raced them: it presented on the
+    /// flag with the scope still nil, its `if let` failed, and 14a came up as an
+    /// EMPTY sheet. Found by a UI test tapping the row and looking for the
+    /// header, then reading the accessibility tree: a presented container with
+    /// nothing in it. Every other presentation in this file is already
+    /// item-driven, which is why none of them can do this.
+    @State private var deleteScope: DeleteScopeBox?
     /// Set when one of the four Edge Function writes fails. See `act`.
     @State private var actionError: String?
     /// The connect flow, presented for both "add a bank" (nil id) and
@@ -51,6 +57,10 @@ struct AppShellView: View {
     /// existed. Nothing else in the app invalidates this widely, because
     /// nothing else changes this much.
     @State private var dataVersion = 0
+    /// The Subs tab's magnifier and Home's Calendar control — both designed into
+    /// their screens and both, until now, buttons that opened nothing.
+    @State private var showSearch = false
+    @State private var showCalendar = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(provider: SignuDataProviding,
@@ -96,6 +106,7 @@ struct AppShellView: View {
                         // item, so it is the same flow with an id.
                         onFixConnection: { connectTarget = ConnectTarget(connectionId: $0) },
                         onReview: { showReview = true },
+                        onCalendar: { showCalendar = true },
                         onSeeAll: { selectedTab = .subs },
                         onSelectSubscription: { detailSubscriptionId = $0 },
                         onConnectBank: { connectTarget = ConnectTarget(connectionId: nil) }
@@ -106,7 +117,8 @@ struct AppShellView: View {
                         provider: provider,
                         actions: SubsActions(
                             onSelectSubscription: { detailSubscriptionId = $0 },
-                            onReviewSuggestion: { _ in showReview = true }
+                            onReviewSuggestion: { _ in showReview = true },
+                            onSearch: { showSearch = true }
                         ),
                         initialFilter: CommandLine.arguments.contains("--subs-inactive") ? .inactive : initialSubsFilter,
                         initialSortByCost: CommandLine.arguments.contains("--subs-cost"),
@@ -117,7 +129,8 @@ struct AppShellView: View {
                         provider: provider,
                         actions: SubsActions(
                             onSelectSubscription: { detailSubscriptionId = $0 },
-                            onReviewSuggestion: { _ in showReview = true }
+                            onReviewSuggestion: { _ in showReview = true },
+                            onSearch: { showSearch = true }
                         ),
                         initialFilter: initialSubsFilter
                     )
@@ -135,8 +148,11 @@ struct AppShellView: View {
                         },
                         onDeleteAccount: {
                             Task {
-                                deleteScope = try? await provider.deleteAccountScope()
-                                showDelete = true
+                                // The scope IS the presentation: no scope, no
+                                // sheet, rather than a sheet with nothing in it.
+                                if let scope = try? await provider.deleteAccountScope() {
+                                    deleteScope = DeleteScopeBox(scope: scope)
+                                }
                             }
                         },
                         onSetPassword: onSetPassword,
@@ -193,6 +209,22 @@ struct AppShellView: View {
                     // the nullable column is the switch. `try?` because the toggle
                     // has already shown the new state: a thrown error here would
                     // have nowhere to render, and the next read shows the truth.
+                    // The overflow menu's two writes. Column writes inside
+                    // Migration #1's grant, so they take the same shape as the
+                    // reminder toggle rather than the four Edge Function actions:
+                    // the sheet has already closed on the value the user chose,
+                    // and the next read of this screen shows what actually landed.
+                    onRename: { name in
+                        try? await provider.setNickname(subscriptionId: id, nickname: name)
+                        // The display name appears on Home and in the Subs list
+                        // too, so the tab underneath is rebuilt rather than left
+                        // showing what the subscription used to be called.
+                        dataVersion += 1
+                    },
+                    onChangeCategory: { category in
+                        try? await provider.setCategory(subscriptionId: id, category: category)
+                        dataVersion += 1
+                    },
                     onToggleReminder: { on in
                         Task {
                             try? await provider.setReminder(
@@ -235,23 +267,46 @@ struct AppShellView: View {
         // re-authenticate one (Home's banner). 12b's Reconnect presents the same
         // flow from there, because a cover cannot present a cover.
         .connectBankCover(provider: provider, target: $connectTarget) { dataVersion += 1 }
-        .sheet(isPresented: $showDelete) {
-            if let deleteScope {
-                // Tier (a): one auth.admin.deleteUser() call behind the
-                // `delete-account` function, and the cascade takes the rest.
-                // The sign-out happens only after it returns — ending the
-                // session first would look identical to the user and leave the
-                // account standing.
-                DeleteAccountSheet(scope: deleteScope, onDelete: {
-                    act({ try await provider.deleteAccount() },
-                        onSuccess: {
-                            showDelete = false
-                            onSignOut()
-                        })
-                })
-                .presentationDetents([.height(560)])
-                .presentationDragIndicator(.visible)
-            }
+        // Search (Subs) and the renewal calendar (Home). Both cover the tab bar,
+        // like every other pushed surface in this shell.
+        .fullScreenCover(isPresented: $showSearch) {
+            SearchScreen(
+                provider: provider,
+                onSelectSubscription: { id in
+                    showSearch = false
+                    detailSubscriptionId = id
+                },
+                onReviewSuggestion: { _ in
+                    showSearch = false
+                    showReview = true
+                },
+                onBack: { showSearch = false }
+            )
+        }
+        .fullScreenCover(isPresented: $showCalendar) {
+            CalendarScreen(
+                provider: provider,
+                onSelectSubscription: { id in
+                    showCalendar = false
+                    detailSubscriptionId = id
+                },
+                onBack: { showCalendar = false }
+            )
+        }
+        .sheet(item: $deleteScope) { box in
+            // Tier (a): one auth.admin.deleteUser() call behind the
+            // `delete-account` function, and the cascade takes the rest. The
+            // sign-out happens only after it returns — ending the session first
+            // would look identical to the user and leave the account standing.
+            DeleteAccountSheet(scope: box.scope, onDelete: {
+                act({ try await provider.deleteAccount() },
+                    onSuccess: {
+                        deleteScope = nil
+                        onSignOut()
+                    })
+            })
+            .presentationDetents([.height(560)])
+            .presentationDragIndicator(.visible)
         }
         // The four Edge Function writes change state no screen is showing, so a
         // failure has nowhere to be noticed. The message is the server's own
@@ -342,6 +397,15 @@ struct AppShellView: View {
         return nil
     }
     #endif
+}
+
+/// Carries 14a's scope counts into the sheet. A box rather than making
+/// `DeleteAccountScope` itself `Identifiable`: the scope is a value read from
+/// the provider, and inventing an identity on it to satisfy a presentation API
+/// would put a UI concern inside a payload.
+struct DeleteScopeBox: Identifiable {
+    let id = UUID()
+    let scope: DeleteAccountScope
 }
 
 /// Builds the data provider for a signed-in session. Called on entry to

@@ -97,6 +97,17 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
         try await update(subscriptionId: subscriptionId, values: ["ignored": .bool(ignored)])
     }
 
+    func setNickname(subscriptionId: UUID, nickname: String?) async throws {
+        // `.null` clears it, so the engine's `service_name` shows through again.
+        let value: AnyJSON = nickname.map { AnyJSON.string($0) } ?? .null
+        try await update(subscriptionId: subscriptionId, values: ["nickname": value])
+    }
+
+    func setCategory(subscriptionId: UUID, category: String?) async throws {
+        let value: AnyJSON = category.map { AnyJSON.string($0) } ?? .null
+        try await update(subscriptionId: subscriptionId, values: ["category": value])
+    }
+
     /// `[String: AnyJSON]` rather than a single concrete Swift type, because the
     /// columns genuinely differ: `remind_before_days` is a nullable int and
     /// `ignored` a boolean. An earlier draft typed the dictionary `[String: Int?]`
@@ -141,6 +152,11 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
     func deleteAccountScope() async throws -> DeleteAccountScope {
         try await ensureLoaded()
         return makeDeleteAccountScope()
+    }
+
+    func calendarPayload(monthContaining date: Date) async throws -> CalendarPayload {
+        try await ensureLoaded()
+        return makeCalendarPayload(monthContaining: date)
     }
 
     // MARK: - Loading

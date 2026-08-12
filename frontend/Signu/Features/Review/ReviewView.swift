@@ -276,6 +276,9 @@ struct IntervalPromptSheet: View {
                 RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous)
                     .strokeBorder(SignuColor.hairline, lineWidth: 1)
             }
+            // The R4 sheet's two choices are the only way to confirm a
+            // single-charge suggestion, so a dead middle here blocks the flow.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

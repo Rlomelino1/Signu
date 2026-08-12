@@ -186,6 +186,8 @@ struct ConnectionDetailView: View {
             }
             .padding(16)
             .background(SignuColor.sunken.opacity(0.7), in: RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous))
+            // As everywhere else: the fill is painted, not hit-tested.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -300,6 +302,10 @@ struct RemoveBankSheet: View {
                 RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous)
                     .strokeBorder(selected ? SignuColor.ink : SignuColor.hairline, lineWidth: selected ? 1.5 : 1)
             }
+            // 12c's history choice decides whether data is deleted. A radio the
+            // user believes they selected, that did not select, is the worst
+            // possible place for this bug.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

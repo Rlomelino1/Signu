@@ -76,6 +76,16 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         subscriptionList[i].ignored = ignored
     }
 
+    func setNickname(subscriptionId: UUID, nickname: String?) async throws {
+        guard let i = subscriptionList.firstIndex(where: { $0.id == subscriptionId }) else { return }
+        subscriptionList[i].nickname = nickname
+    }
+
+    func setCategory(subscriptionId: UUID, category: String?) async throws {
+        guard let i = subscriptionList.firstIndex(where: { $0.id == subscriptionId }) else { return }
+        subscriptionList[i].category = category
+    }
+
     // MARK: - Edge Function writes, simulated (v30)
     //
     // Each mirrors what the function on the other side actually does, including
@@ -206,6 +216,9 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         makeAttributedSubsPayload(connectionId: connectionId)
     }
     func deleteAccountScope() async throws -> DeleteAccountScope { makeDeleteAccountScope() }
+    func calendarPayload(monthContaining date: Date) async throws -> CalendarPayload {
+        makeCalendarPayload(monthContaining: date)
+    }
 
     // MARK: - Dataset
 

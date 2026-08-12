@@ -34,6 +34,9 @@ protocol SignuDataProviding {
     func connectionDetailPayload(connectionId: UUID) async throws -> ConnectionDetailPayload?
     /// Attributed-subscriptions list (13a). nil if not found.
     func attributedSubsPayload(connectionId: UUID) async throws -> AttributedSubsPayload?
+    /// The renewal calendar, one month at a time. Takes any date in the month
+    /// rather than a month index, so callers never assemble one.
+    func calendarPayload(monthContaining date: Date) async throws -> CalendarPayload
     /// Delete-account scope counts (14a).
     func deleteAccountScope() async throws -> DeleteAccountScope
     func connections() async throws -> [Connection]
@@ -67,6 +70,21 @@ protocol SignuDataProviding {
     /// nullable column *is* the switch (v5), so there is no separate flag.
     /// On maps to 2 days, per the detail contract.
     func setReminder(subscriptionId: UUID, remindBeforeDays: Int?) async throws
+
+    /// The detail screen's Rename. Writes `nickname`, NOT `service_name`:
+    /// the engine's name for a merchant is its own, and `displayName` already
+    /// prefers the nickname when there is one. Passing nil clears the nickname
+    /// and the engine's name shows through again — which is why this is one
+    /// method and not a rename plus a reset.
+    ///
+    /// Deliberately does not touch `identification`. That column is not in the
+    /// client's grant, and it does not need to be: `user_renamed` exists to
+    /// freeze `service_name` against the engine, and nothing here writes it.
+    func setNickname(subscriptionId: UUID, nickname: String?) async throws
+
+    /// The detail screen's Change category. Seeded by detection, user-editable;
+    /// nil clears it back to uncategorised.
+    func setCategory(subscriptionId: UUID, category: String?) async throws
 
     /// Review's Dismiss (`true`) and Settings' Restore (`false`).
     /// Restore is exactly `ignored = false` and nothing more: the run returns to

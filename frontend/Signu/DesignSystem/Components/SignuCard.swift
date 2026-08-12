@@ -75,6 +75,22 @@ struct SignuRow<Leading: View>: View {
         }
         .padding(.vertical, SignuMetric.rowPaddingV)
         .padding(.horizontal, SignuMetric.rowPaddingH)
+        // THE ROW IS THE TARGET, not the words in it.
+        //
+        // Every caller wraps this in `Button { … } label: { SignuRow(…) }` with
+        // `.buttonStyle(.plain)`, and a plain button hit-tests only what it
+        // DRAWS. This row draws two text columns with a `Spacer` between them
+        // and padding around them, so without this the gap in the middle and the
+        // rows' top and bottom edges do nothing — a tap that lands there reads as
+        // a broken app rather than as a missed target, because nothing moves.
+        //
+        // Fixed here rather than at each call site: this is one rule about one
+        // component, and the four screens that use it were drifting apart on it.
+        // Safe to state centrally because the row contains no interactive
+        // content of its own — a nested button would be a different problem, one
+        // where the parent can swallow the child (see Settings' dismissed row,
+        // which is deliberately not a button at all for that reason).
+        .contentShape(Rectangle())
     }
 }
 
