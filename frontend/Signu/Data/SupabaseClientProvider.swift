@@ -56,7 +56,7 @@ enum SupabaseConfig {
     /// Edge Function proxy, no secret handling. Empty until one is issued, and
     /// empty is a working state — every avatar falls through to the monogram,
     /// which is tier 3 of the chain rather than a failure mode.
-    static let logoDevKey = ""
+    static let logoDevKey = "pk_b2oHkAHwSwOI77-FBU5Hyg"
 
     static let anonKey =
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" +

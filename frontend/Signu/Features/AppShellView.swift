@@ -183,6 +183,11 @@ struct AppShellView: View {
         }
         .environment(tabBarState)
         .environment(passwordLinkState)
+        // Re-applied on every presented surface below, not only here. A
+        // full-screen cover does not reliably inherit a custom environment
+        // object from its presenter — measured, not assumed: the Subs list
+        // rendered real logos while the detail hero behind the same store kept
+        // its monogram.
         .environment(logos)
         .task {
             // Reference data, loaded once, then every catalog domain is fetched —
@@ -259,6 +264,7 @@ struct AppShellView: View {
                 ),
                 autoPresentIntervalForR4: reviewAutoR4
             )
+            .environment(logos)
         }
         // Subscription detail — covers the tab bar; from any row tap.
         .fullScreenCover(item: $detailSubscriptionId) { id in
@@ -306,9 +312,11 @@ struct AppShellView: View {
                     }
                 )
             )
+            .environment(logos)
         }
         .fullScreenCover(item: $detailFixture) { fixture in
             DetailScreen(payload: fixture, actions: DetailActions(onBack: { detailFixture = nil }))
+                .environment(logos)
         }
         // Connection detail (12b) — covers the tab bar; from a Settings bank row.
         .fullScreenCover(item: $settingsConnectionId) { id in
@@ -323,6 +331,7 @@ struct AppShellView: View {
                     dataVersion += 1
                 }
             )
+            .environment(logos)
         }
         // Connect a bank (12d's CTA, Settings' row, Home's empty state) and
         // re-authenticate one (Home's banner). 12b's Reconnect presents the same
@@ -343,6 +352,7 @@ struct AppShellView: View {
                 },
                 onBack: { showSearch = false }
             )
+            .environment(logos)
         }
         .fullScreenCover(isPresented: $showCalendar) {
             CalendarScreen(
@@ -353,6 +363,7 @@ struct AppShellView: View {
                 },
                 onBack: { showCalendar = false }
             )
+            .environment(logos)
         }
         .sheet(item: $deleteScope) { box in
             // Tier (a): one auth.admin.deleteUser() call behind the
