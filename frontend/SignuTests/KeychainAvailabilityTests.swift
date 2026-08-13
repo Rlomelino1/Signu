@@ -65,14 +65,17 @@ struct KeychainAvailabilityTests {
             // An unsigned build (CI's `CODE_SIGNING_ALLOWED=NO`) lands here, and
             // that is a property of the build rather than a defect in the app —
             // but such a build can never keep a user signed in.
-            Issue.record(
-                """
-                Skipped: this build has no keychain entitlement (-34018), so a \
-                session could not be persisted by it. Expected for an unsigned \
-                build; never acceptable for one a user signs into.
-                """,
-                severity: .warning
-            )
+            //
+            // Reported with `print` rather than a warning-severity Issue:
+            // `Issue.record(_:severity:)` does not exist in the Swift Testing
+            // that ships with CI's Xcode 16.4, and a test file is not the place
+            // to discover the toolchain gap the spec keeps warning about.
+            print("""
+                SKIPPED KeychainAvailability: this build has no keychain \
+                entitlement (-34018), so it could not persist a session. \
+                Expected for a build made with CODE_SIGNING_ALLOWED=NO; never \
+                acceptable for one a user signs into.
+                """)
             return
         }
 
