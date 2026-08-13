@@ -1693,15 +1693,20 @@ implementations back to the 21-series rendering.*
   actions already take with a server's message. **That surface is what diagnosed
   the outage**: it printed `permission denied for table profiles`, which is
   character-for-character what `anon` receives, and the app had fallen back to the
-  anon key because its session had gone. Two theories died on evidence before that
-  — production's grants match the migrations exactly (verified against a
-  throwaway user, which read `profiles` fine), and the Keychain works in an
-  unsigned simulator build (verified by a round-trip probe now kept as
-  `KeychainAvailabilityTests`, since Supabase stores the session there **and
-  nowhere else**, making it a real precondition rather than a detail). The
-  original session loss is **not explained**: a fresh sign-in works end to end,
-  and the leading candidate is a token refresh that failed and signed the client
-  out. **A defect it exposed is still open**: `SessionStore` flips the gate on a
+  anon key because its session had gone. Production's grants were cleared as a
+  cause — they match the migrations exactly, verified against a throwaway user
+  that read `profiles` fine. **The cause was the build flag.**
+  `CODE_SIGNING_ALLOWED=NO` produces an app with no entitlements, the Keychain
+  then refuses every write with -34018, and Supabase stores the session in the
+  Keychain **and nowhere else** — so `signIn` succeeded, nothing persisted,
+  `currentSession` read back nil, and every request fell back to the anon key.
+  Xcode's default simulator signing attaches an entitlement and the Keychain
+  works, which is why the same app was fine once rebuilt without the flag. That
+  difference also produced a false exoneration mid-diagnosis: a keychain probe run
+  *without* the flag passed and was taken as evidence the Keychain was fine. It is
+  now kept as `KeychainAvailabilityTests`, which skips loudly when the build has no
+  entitlement rather than passing quietly, and fails when a build that does have
+  one refuses a write. **A defect it exposed is still open**: `SessionStore` flips the gate on a
   successful sign-in and then nothing observes auth state, so a session that
   disappears leaves a signed-in shell over a signed-out client, sending every
   request as `anon`.

@@ -20,6 +20,23 @@ import Security
 // It runs in the host app's process, so it inherits the app's entitlements —
 // which is the whole point. A test bundle of its own would prove nothing about
 // the app.
+//
+// AND IT SKIPS WHEN THE BUILD HAS NO KEYCHAIN ENTITLEMENT AT ALL.
+//
+// `CODE_SIGNING_ALLOWED=NO` — which CI passes, and which any local build can pass
+// — produces an app with no entitlements, and the Keychain then refuses
+// everything with -34018. Xcode's default simulator signing does attach one, and
+// the Keychain works. That difference is the entire explanation of the outage this
+// test was written during: the build handed over for testing had been made with
+// that flag, so `signIn` succeeded, the session could not be stored,
+// `currentSession` read back nil, and every request fell back to the anon key —
+// surfacing as "permission denied for table profiles" four steps from the cause.
+//
+// The flag was also why an earlier run of this very test passed and appeared to
+// exonerate the Keychain: it was run WITHOUT the flag. So the test now
+// distinguishes "this build cannot have a keychain" (skip, and say so) from "this
+// build has a keychain and it is broken" (fail), and never claims the first is
+// evidence about the second.
 
 @Suite("Keychain availability")
 struct KeychainAvailabilityTests {
@@ -42,13 +59,29 @@ struct KeychainAvailabilityTests {
         var add = base
         add[kSecValueData as String] = secret
         let addStatus = SecItemAdd(add as CFDictionary, nil)
+
+        guard addStatus != errSecMissingEntitlement else {
+            // -34018: no keychain entitlement, so there is nothing here to test.
+            // An unsigned build (CI's `CODE_SIGNING_ALLOWED=NO`) lands here, and
+            // that is a property of the build rather than a defect in the app —
+            // but such a build can never keep a user signed in.
+            Issue.record(
+                """
+                Skipped: this build has no keychain entitlement (-34018), so a \
+                session could not be persisted by it. Expected for an unsigned \
+                build; never acceptable for one a user signs into.
+                """,
+                severity: .warning
+            )
+            return
+        }
+
         #expect(
             addStatus == errSecSuccess,
             """
-            SecItemAdd failed with OSStatus \(addStatus). -34018 is \
-            errSecMissingEntitlement: the build carries no keychain entitlement, \
-            which happens when it is signed without a development team (or with \
-            CODE_SIGNING_ALLOWED=NO). Supabase stores the session here and \
+            SecItemAdd failed with OSStatus \(addStatus) — and NOT with \
+            -34018, so this build does have a keychain and it is refusing a \
+            plain generic-password write. Supabase stores the session here and \
             nowhere else, so nothing will stay signed in.
             """
         )
