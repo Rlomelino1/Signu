@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-13** (v39) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-13** (v40) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1682,6 +1682,29 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v40** — A FAILED READ MUST NOT LOOK LIKE NO DATA (2026-08-13). **No
+  migration.** The first end-to-end run of the app against production — the thing
+  that had never been done — landed on a **blank Home with a working tab bar**.
+  Every read in the app was `try?`, and `HomeScreen` rendered `Color.clear` for
+  both "still loading" and "the read threw", so a failure was indistinguishable
+  from an empty account and named itself nowhere: not on screen, not in a log.
+  Home now catches and renders the error in its own words, with a retry —
+  `LoadFailureView`, the same posture the connect flow and the four Edge Function
+  actions already take with a server's message. **That surface is what diagnosed
+  the outage**: it printed `permission denied for table profiles`, which is
+  character-for-character what `anon` receives, and the app had fallen back to the
+  anon key because its session had gone. Two theories died on evidence before that
+  — production's grants match the migrations exactly (verified against a
+  throwaway user, which read `profiles` fine), and the Keychain works in an
+  unsigned simulator build (verified by a round-trip probe now kept as
+  `KeychainAvailabilityTests`, since Supabase stores the session there **and
+  nowhere else**, making it a real precondition rather than a detail). The
+  original session loss is **not explained**: a fresh sign-in works end to end,
+  and the leading candidate is a token refresh that failed and signed the client
+  out. **A defect it exposed is still open**: `SessionStore` flips the gate on a
+  successful sign-in and then nothing observes auth state, so a session that
+  disappears leaves a signed-in shell over a signed-out client, sending every
+  request as `anon`.
 - **v39** — LOGOS ARE LIVE (2026-08-13). The publishable key landed, Migration #8
   is on production, and real marks now render for every catalog hit while
   everything else keeps its monogram — the three-tier chain working end to end for
