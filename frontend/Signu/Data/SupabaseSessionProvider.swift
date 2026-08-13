@@ -27,6 +27,28 @@ final class SupabaseSessionProvider: SessionProviding {
     /// the gate ever seeing a token.
     var currentEmail: String? { client.auth.currentUser?.email }
 
+    /// Only `.signedOut`, deliberately narrow.
+    ///
+    /// `.initialSession` also arrives at launch and can carry a nil session, but
+    /// treating that as an ending would race `restore()` — the same shape as the
+    /// late-restore defect the gate funnel was built to prevent. Restore is
+    /// authoritative for a cold launch; this is only for a session that dies
+    /// afterwards.
+    ///
+    /// A failed token refresh is exactly this event: the SDK drops the session
+    /// and emits `.signedOut`, which until now nothing in the app observed.
+    func sessionEndings() -> AsyncStream<Void> {
+        AsyncStream { continuation in
+            let task = Task {
+                for await (event, _) in client.auth.authStateChanges {
+                    if event == .signedOut { continuation.yield(()) }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     // MARK: - Restore
 
     /// Cold launch. `.recovering` is never produced here: it exists only as the

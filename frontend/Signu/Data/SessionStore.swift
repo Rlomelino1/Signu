@@ -56,6 +56,14 @@ final class SessionStore {
         case passwordUpdated
         /// 12a's sign-out, 14a's delete.
         case signedOut
+        /// The session ended without the app asking — a refresh that failed, a
+        /// revoked token, storage cleared underneath us.
+        ///
+        /// Separate from `.signedOut` even though both land in the same state,
+        /// because the two facts differ: one is the user leaving, the other is
+        /// the session leaving. Keeping them apart is what lets a notice be
+        /// added to this one later without claiming the user asked for it.
+        case sessionEnded
     }
 
     /// The one place `gateState` is written.
@@ -165,6 +173,37 @@ final class SessionStore {
                 expiredRecoveryLink = false
                 gateState = .unauthenticated
             }
+
+        case .sessionEnded:
+            switch gateState {
+            case .authenticated:
+                // The fix. Without this cell the shell stays on screen over a
+                // client with no token, every read goes out as `anon`, and the
+                // user is told they lack permission on a table rather than that
+                // they are signed out.
+                email = nil
+                gateState = .unauthenticated
+            case .recovering:
+                // 17e runs against the recovery session, so without one the
+                // password submit cannot succeed. Returning to 16a is honest;
+                // leaving a form on screen that is guaranteed to fail is not.
+                // `expiredRecoveryLink` is deliberately NOT raised — the link
+                // did not necessarily expire, and 17d must not claim it did.
+                email = nil
+                gateState = .unauthenticated
+            case .restoring:
+                // Ignored, and this is the load-bearing cell. `restore()` is
+                // authoritative for a cold launch and is in flight here; acting
+                // on an SDK event now is the late-restore race the funnel exists
+                // to prevent — the real provider narrows to `.signedOut` for the
+                // same reason.
+                break
+            case .unauthenticated:
+                // Already the destination. Voluntary sign-out arrives here too,
+                // which is why this event has to be harmless rather than
+                // exceptional.
+                break
+            }
         }
     }
 
@@ -173,8 +212,26 @@ final class SessionStore {
     /// Resolves `.restoring` into a real state. Runs while `SplashView` is on
     /// screen; the splash is what keeps a signed-in user from seeing 16a flash
     /// past on every launch.
+    ///
+    /// Also starts watching for sessions that end on their own — after the
+    /// restore, so a launch-time event cannot race the state restore resolves to.
     func restore() async {
         apply(.restored(await provider.restore()))
+        watchForSessionEnd()
+    }
+
+    /// One observer for the life of the store. `@ObservationIgnored` because the
+    /// task is plumbing rather than state a view should re-render on.
+    @ObservationIgnored private var sessionWatch: Task<Void, Never>?
+
+    private func watchForSessionEnd() {
+        guard sessionWatch == nil else { return }
+        sessionWatch = Task { [weak self] in
+            guard let stream = self?.provider.sessionEndings() else { return }
+            for await _ in stream {
+                self?.apply(.sessionEnded)
+            }
+        }
     }
 
     // MARK: - Actions
