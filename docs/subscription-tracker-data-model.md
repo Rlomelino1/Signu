@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-13** (v37) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-13** (v38) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -704,6 +704,10 @@ Detection cannot be sharded by account without silently disabling that filter.
 - **MERCHANT_CATALOG does not exist**, so **R4 cannot fire.** The engine ships with
   R1, R2, R3 and R5; R4 is contract-only until the catalog table exists. Said out
   loud because a rule that silently never fires reads as a rule that works.
+  *Amended v38: the table exists and is seeded (Migration #8), so the blocker is
+  gone — but **R4 still does not fire**, because the engine has not been taught to
+  read it. The catalog currently feeds logo resolution only. The same sentence
+  applies for the same reason: a rule that never fires reads as a rule that works.*
 - **R1's positive path has fired on exactly one anchor** in real data, and that
   anchor only exists because v21 switched `merchant_key` to CNPJ. Zero false
   positives across 163 POSTED rows is evidence about the filters, not about the
@@ -1242,6 +1246,70 @@ anywhere and unexplained. A finished feature with no discoverable entry point.
 
 ---
 
+## The merchant catalog, and how logos are fetched without leaking (locked v38, 2026-08-13)
+
+*Migration #8, additive. Closes the input side of the [logo sourcing
+contract](#logo-sourcing-contract) locked in v12, and unblocks — without
+building — R4.*
+
+- **MERCHANT_CATALOG exists**: `service_name`, nullable `domain`, `category`,
+  `subscription_only`, `patterns[]`. Seeded in the migration itself rather than a
+  seed script, because `db reset` and production must agree and CI's *Schema
+  applies* then checks it on every PR.
+- **It is reference data, not user data.** Every row is the same for every
+  account, so the RLS policy reads `using (true)` — there is no `user_id` to
+  carry, and inventing one would make a shared fact look like a private one.
+  `authenticated` gets SELECT, `service_role` full DML, `anon` nothing.
+- **Defaults are revoked first**, exactly as Migration #1 does. A new table in
+  `public` arrives carrying REFERENCES, TRIGGER and TRUNCATE for `anon` and
+  `authenticated`; without the revoke this one did too, which a local apply showed
+  and CI would not have — *Schema applies* checks that migrations apply, not what
+  they leave behind.
+
+### The seed is deliberately not derived from the user's data
+
+This is a privacy constraint, and it is load-bearing rather than tidy.
+
+- Logos are fetched by domain from a third party. Fetching **only the domains a
+  user is subscribed to** would hand that third party the subscription list, one
+  request at a time — a financial-behaviour fingerprint against an IP.
+- So the client fetches **every domain in the catalog**, regardless of what the
+  user has. The request set is identical for every install and independent of
+  anyone's data. Roughly two megabytes once per 30-day TTL.
+- **The padding only works if the catalog is user-independent.** A catalog seeded
+  from the user's own merchants would make "fetch everything" leak precisely the
+  list it was meant to hide. The seed is therefore a general list of well-known
+  services, most of which any given user will not have.
+- The same constraint serves R4 when it is built: a catalog assembled from
+  services the user already has could only ever recognise services the user
+  already has, which is the opposite of catching a first charge.
+- **Stated as mitigation, not anonymity**: logo.dev still sees an IP fetching
+  logos and roughly when. Hiding that entirely means the bundled tier, which
+  trades away the rebrand freshness the tier order was inverted to get. The
+  network sees nothing either way — the merchant is in the URL path, which TLS
+  encrypts.
+
+### Client shape
+
+- **`LogoStore`** owns the cache and the prefetch. Rendering a row **never**
+  fetches: the prefetch pass owns every request, which is also what keeps the
+  request set independent of what the user is looking at. A cache miss is a
+  monogram, this launch.
+- **Disk cache keyed by domain, 30-day TTL measured from the file's own write
+  time** — not from a response header, because the TTL is ours to state and
+  leaving it to logo.dev's defaults would put the contract at their discretion.
+- **Rendering is the locked treatment**: full-colour mark inside a neutral tile,
+  with a hairline so a near-white tile does not dissolve into the paper ground.
+- **The key is empty until one is issued, and empty is a working state**: every
+  avatar falls through to the monogram, which is tier 3 of the chain rather than
+  a failure mode.
+- **Known limitation, recorded as a test**: a renamed subscription is displayed by
+  its nickname, and a nickname does not match the catalog, so it loses its logo.
+  Fixing it means carrying the engine's name to every avatar — a wide change for a
+  decorative gain.
+
+---
+
 ## Reminder delivery
 
 *Push skeleton locked 2026-07-14; channel preference + email commitment locked 2026-07-15; **email delivery built and scheduled v28, 2026-08-11**. Push remains a maybe and remains unbuilt.*
@@ -1614,6 +1682,28 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v38** — THE MERCHANT CATALOG (2026-08-13). **Migration #8, additive.** The
+  table the spec has called "future" since v3 exists and is seeded: `service_name`,
+  nullable `domain`, `category`, `subscription_only`, `patterns[]`. It closes the
+  input side of v12's logo chain — `domain` is the only source of a merchant
+  domain anywhere, which is why `subscription.logo_url` was dropped — and removes
+  R4's blocker without building R4, which still does not fire and is still said
+  out loud. Reference data, not user data: the policy reads `using (true)` because
+  there is no `user_id` to carry, `authenticated` gets SELECT, `anon` nothing, and
+  **default privileges are revoked first** — a new `public` table arrives carrying
+  TRUNCATE for `anon`, which a local apply caught and CI would not have, since
+  *Schema applies* checks that migrations apply rather than what they leave
+  behind. **The seed is deliberately a general list of services, not the user's
+  own merchants, and that is a privacy constraint**: the client fetches EVERY
+  catalog domain regardless of subscriptions, so the request set is constant and
+  discloses nothing — padding that only works while the catalog is
+  user-independent. The same property serves R4 later, since a catalog built from
+  what the user already has could never catch a first charge. Client side:
+  `LogoStore` owns cache and prefetch, rendering never fetches, the disk TTL is
+  measured from the file's own write time rather than a response header, the mark
+  renders in the locked neutral tile with a hairline, and an empty key is a
+  working state — every avatar falls through to the monogram. Recorded as a test:
+  a renamed subscription loses its logo, because the avatar sees a nickname.
 - **v37** — THE APP ICON (2026-08-13). **No migration, no code.** The
   `AppIcon.appiconset` had held nothing but a `Contents.json` since the project
   began, so every install showed a blank tile — the last thing making a finished

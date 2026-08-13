@@ -154,6 +154,15 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
         return makeDeleteAccountScope()
     }
 
+    /// Not part of `ensureLoaded()`'s graph: the catalog is reference data with a
+    /// different lifetime — it changes when a migration ships, not when the user
+    /// does anything — so it is fetched once by whoever needs it rather than
+    /// re-read on every invalidation.
+    func merchantCatalog() async throws -> [MerchantCatalogEntry] {
+        let rows: [MerchantCatalogRow] = try await fetch("merchant_catalog")
+        return rows.map(\.domainModel)
+    }
+
     func calendarPayload(monthContaining date: Date) async throws -> CalendarPayload {
         try await ensureLoaded()
         return makeCalendarPayload(monthContaining: date)

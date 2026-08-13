@@ -52,6 +52,12 @@ enum SupabaseConfig {
     /// that list was empty until config was pushed).
     static let redirectURL = "signu://auth-callback"
 
+    /// logo.dev's **publishable** key, embedded client-side by design (v12): no
+    /// Edge Function proxy, no secret handling. Empty until one is issued, and
+    /// empty is a working state — every avatar falls through to the monogram,
+    /// which is tier 3 of the chain rather than a failure mode.
+    static let logoDevKey = ""
+
     static let anonKey =
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" +
         ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlyZGloc2l6ZnRkbWxieXR3eHRnIiwicm9sZSI6ImFub24i" +

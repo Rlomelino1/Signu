@@ -221,6 +221,31 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         makeCalendarPayload(monthContaining: date)
     }
 
+    /// A handful of entries, deliberately including services the fixtures do NOT
+    /// subscribe to. The catalog is reference data about the world, and a mock
+    /// that only listed the user's own merchants would quietly model the one
+    /// shape the real thing must never have.
+    func merchantCatalog() async throws -> [MerchantCatalogEntry] {
+        [
+            MerchantCatalogEntry(id: UUID(), serviceName: "Netflix", domain: "netflix.com",
+                                 category: "Streaming", subscriptionOnly: true, patterns: ["netflix"]),
+            MerchantCatalogEntry(id: UUID(), serviceName: "Spotify", domain: "spotify.com",
+                                 category: "Music", subscriptionOnly: true, patterns: ["spotify"]),
+            MerchantCatalogEntry(id: UUID(), serviceName: "ChatGPT Plus", domain: "openai.com",
+                                 category: "AI", subscriptionOnly: true, patterns: ["openai", "chatgpt"]),
+            MerchantCatalogEntry(id: UUID(), serviceName: "iCloud+", domain: "icloud.com",
+                                 category: "Storage", subscriptionOnly: true, patterns: ["icloud"]),
+            MerchantCatalogEntry(id: UUID(), serviceName: "Disney+", domain: "disneyplus.com",
+                                 category: "Streaming", subscriptionOnly: true, patterns: ["disney"]),
+            MerchantCatalogEntry(id: UUID(), serviceName: "Duolingo", domain: "duolingo.com",
+                                 category: "Learning", subscriptionOnly: true, patterns: ["duolingo"]),
+            MerchantCatalogEntry(id: UUID(), serviceName: "Amazon Prime", domain: "amazon.com.br",
+                                 category: "Shopping", subscriptionOnly: true, patterns: ["amazon prime"]),
+            MerchantCatalogEntry(id: UUID(), serviceName: "Twitch", domain: "twitch.tv",
+                                 category: "Gaming", subscriptionOnly: false, patterns: ["twitch"])
+        ]
+    }
+
     /// Always false: the fixtures are the source of truth and nothing writes to
     /// them from outside the app, so a refresh here genuinely finds nothing new.
     /// Saying so is what lets a preview exercise pull-to-refresh without the
