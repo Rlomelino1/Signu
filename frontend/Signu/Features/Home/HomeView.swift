@@ -7,25 +7,47 @@ struct HomeScreen: View {
     var scrollAnchor: UnitPoint = .top
 
     @State private var payload: HomePayload?
+    /// Why the load failed, when it did.
+    ///
+    /// This screen used to render `Color.clear` for both "still loading" and
+    /// "the read threw", which meant a failed load was indistinguishable from an
+    /// empty account — and worse, from a working app with nothing in it. A
+    /// signed-in user with a broken read got a blank page and a tab bar, with
+    /// nothing on screen or in a log to say what happened.
+    @State private var failure: String?
 
     var body: some View {
         Group {
             if let payload {
                 HomeView(payload: payload, actions: actions, scrollAnchor: scrollAnchor)
+            } else if let failure {
+                LoadFailureView(message: failure) { await load() }
             } else {
                 Color.clear
             }
         }
-        .task {
-            payload = try? await provider.homePayload()
-        }
+        .task { await load() }
         // Pull-to-refresh, on the screen most likely to be open when the daily
         // sync lands. The `refresh()` verdict is ignored on purpose: the user
         // asked, so the payload is re-read either way and the gesture never
         // appears to do nothing.
         .refreshable {
             try? await provider.refresh()
-            payload = try? await provider.homePayload()
+            await load()
+        }
+    }
+}
+
+extension HomeScreen {
+    /// One loader for the first read and for every retry, so the failure state
+    /// and the success state cannot drift apart.
+    fileprivate func load() async {
+        do {
+            payload = try await provider.homePayload()
+            failure = nil
+        } catch {
+            payload = nil
+            failure = error.localizedDescription
         }
     }
 }
