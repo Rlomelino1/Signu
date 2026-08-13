@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-13** (v36) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-13** (v37) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1614,6 +1614,23 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v37** — THE APP ICON (2026-08-13). **No migration, no code.** The
+  `AppIcon.appiconset` had held nothing but a `Contents.json` since the project
+  began, so every install showed a blank tile — the last thing making a finished
+  app look unfinished on a home screen. Rafael's mark ships: the paper monogram on
+  the ink ground, full bleed, no pre-rounded corners (iOS applies the superellipse
+  mask itself, and pre-rounding double-rounds). **One 1024×1024 PNG**, not the
+  legacy size ladder — the catalog is in Xcode's single-size format and iOS
+  downsamples every slot. Two corrections to the export, both invisible until they
+  are not: the **alpha channel was stripped** (present but unused — sampled
+  minimum alpha 255, so the strip changed no visible pixel, and App Store
+  validation rejects transparency outright, at submission rather than at build),
+  and **sRGB was embedded** where the file carried no profile at all. Verified the
+  way the rest of this project verifies UI: installed to a simulator and
+  screenshotted from SpringBoard, because the asset catalog looking right is not
+  evidence about what iOS renders. Dark and tinted variants are supported by the
+  toolchain and deliberately not shipped; the mark is a single-colour silhouette
+  and would take a tinted variant well if it is ever wanted.
 - **v36** — THE REMINDER OFFER (2026-08-13, design 22b). **No migration, no new
   column, no grant change.** Renewal reminders have been deployed and scheduled
   since v28 and had **never sent an email**: `remind_before_days` starts null on
