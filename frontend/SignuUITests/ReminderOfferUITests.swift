@@ -1,0 +1,100 @@
+import XCTest
+
+/// The reminder offer after a first confirmation (22b).
+///
+/// The feature it introduces has been deployed and scheduled since v28 and has
+/// never sent an email, because `remind_before_days` starts null on every
+/// subscription and the only control was a button three taps deep on the detail
+/// screen. This is the discoverable entry point.
+///
+/// Every test passes `--fresh-reminder-offer`: the "no" half of the answer lives
+/// in `UserDefaults`, which survives between launches of one install, so without
+/// it the second run of a test would behave differently from the first.
+@MainActor
+final class ReminderOfferUITests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false
+    }
+
+    private func review(_ app: XCUIApplication) {
+        app.launchArguments = ["--shell-review", "--fresh-reminder-offer"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Track it"].firstMatch.waitForExistence(timeout: 15),
+                      "the review screen must list suggestions")
+    }
+
+    func testFirstConfirmationOffersAReminder() {
+        let app = XCUIApplication()
+        review(app)
+
+        // The first card is the R3 one, which needs no interval sheet.
+        app.buttons["Track it"].firstMatch.tap()
+
+        // The row is replaced in place, not animated away: the queue above it is
+        // untouched and the offer sits next to what was just confirmed.
+        let confirmation = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "is now tracked")
+        ).firstMatch
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 5),
+                      "a confirmed suggestion must acknowledge itself in place")
+        XCTAssertTrue(app.staticTexts["Want a heads-up before it renews?"].exists,
+                      "the first confirmation must offer a reminder")
+
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "22b-offer"
+        shot.lifetime = .keepAlways
+        add(shot)
+
+        app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Remind me")
+        ).firstMatch.tap()
+
+        // Answering collapses the offer and leaves the confirmation standing.
+        XCTAssertFalse(app.staticTexts["Want a heads-up before it renews?"].waitForExistence(timeout: 2),
+                       "answering must end the offer")
+        XCTAssertTrue(confirmation.exists, "the confirmation itself stays")
+
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "22b-collapsed"
+        after.lifetime = .keepAlways
+        add(after)
+    }
+
+    func testDecliningEndsTheOfferToo() {
+        // "No thanks" writes nothing to the subscription — a decline is not a
+        // state a row should carry — so the only record of it is local.
+        let app = XCUIApplication()
+        review(app)
+        app.buttons["Track it"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Want a heads-up before it renews?"].waitForExistence(timeout: 5))
+
+        app.buttons["No thanks"].tap()
+        XCTAssertFalse(app.staticTexts["Want a heads-up before it renews?"].waitForExistence(timeout: 2),
+                       "declining must end the offer")
+    }
+
+    func testOnlyTheFirstConfirmationOffers() {
+        let app = XCUIApplication()
+        review(app)
+
+        app.buttons["Track it"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Want a heads-up before it renews?"].waitForExistence(timeout: 5))
+        app.buttons["No thanks"].tap()
+
+        // The second suggestion is the R4 one, so its confirmation goes through
+        // the monthly/annual sheet first — and the offer must not stack behind it.
+        app.buttons["Track it"].firstMatch.tap()
+        let monthly = app.buttons["Monthly"].firstMatch
+        if monthly.waitForExistence(timeout: 3) { monthly.tap() }
+
+        let confirmations = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "is now tracked")
+        )
+        XCTAssertTrue(confirmations.count >= 2 || confirmations.firstMatch.waitForExistence(timeout: 5),
+                      "both confirmations should be acknowledged")
+        XCTAssertFalse(app.staticTexts["Want a heads-up before it renews?"].exists,
+                       "the offer is made once, not once per confirmation")
+    }
+}

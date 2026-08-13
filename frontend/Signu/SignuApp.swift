@@ -5,6 +5,13 @@ struct SignuApp: App {
     /// Owned here, above the gate, so it survives every root swap.
     @State private var session = SessionStore(provider: SignuApp.sessionProvider())
 
+    init() {
+        // Before any screen reads it. `UserDefaults` survives between launches of
+        // one install, so without this a test or screenshot run would behave
+        // differently the second time it ran.
+        ReminderOffer.resetIfRequested()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView(session: session)
