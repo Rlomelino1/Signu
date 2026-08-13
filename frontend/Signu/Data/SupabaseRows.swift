@@ -170,6 +170,35 @@ struct BankAccountRow: Decodable {
     }
 }
 
+/// MERCHANT_CATALOG — shared reference data, the same rows for every user, which
+/// is why nothing here is scoped by `user_id` and the policy behind it reads
+/// `using (true)`.
+struct MerchantCatalogRow: Decodable {
+    let id: UUID
+    let serviceName: String
+    let domain: String?
+    let category: String?
+    let subscriptionOnly: Bool
+    let patterns: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, domain, category, patterns
+        case serviceName = "service_name"
+        case subscriptionOnly = "subscription_only"
+    }
+
+    var domainModel: MerchantCatalogEntry {
+        MerchantCatalogEntry(
+            id: id,
+            serviceName: serviceName,
+            domain: domain,
+            category: category,
+            subscriptionOnly: subscriptionOnly,
+            patterns: patterns
+        )
+    }
+}
+
 struct SubscriptionRow: Decodable {
     let id: UUID
     let serviceName: String

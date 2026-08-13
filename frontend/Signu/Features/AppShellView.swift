@@ -65,6 +65,9 @@ struct AppShellView: View {
     /// refreshed at the two moments it can change: a trip through review, and any
     /// rebuild of the tab.
     @State private var suggestionCount = 0
+    /// Owned by the shell so one cache serves every screen, and so the prefetch
+    /// runs once per launch rather than once per row.
+    @State private var logos = LogoStore()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -180,6 +183,17 @@ struct AppShellView: View {
         }
         .environment(tabBarState)
         .environment(passwordLinkState)
+        .environment(logos)
+        .task {
+            // Reference data, loaded once, then every catalog domain is fetched —
+            // including merchants this user has never heard of. That is the
+            // privacy property rather than an oversight: a request set that
+            // depends on the subscription list would disclose the subscription
+            // list. See `LogoStore`.
+            guard let catalog = try? await provider.merchantCatalog() else { return }
+            logos.adopt(catalog: catalog)
+            await logos.prefetch()
+        }
         .task(id: dataVersion) { await refreshSuggestionCount() }
         // Coming back to the app is the other moment the graph can have moved
         // without the app moving it: the sync runs at 15:30 UTC daily, and a

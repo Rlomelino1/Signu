@@ -52,6 +52,11 @@ protocol SignuDataProviding {
     @discardableResult
     func refresh() async throws -> Bool
 
+    /// MERCHANT_CATALOG. Shared reference data rather than the user's rows, so it
+    /// carries no `user_id` and is identical for every account — which is the
+    /// property the logo prefetch depends on (see `LogoStore`).
+    func merchantCatalog() async throws -> [MerchantCatalogEntry]
+
     /// The renewal calendar, one month at a time. Takes any date in the month
     /// rather than a month index, so callers never assemble one.
     func calendarPayload(monthContaining date: Date) async throws -> CalendarPayload
