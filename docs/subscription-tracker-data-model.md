@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-12** (v35) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-13** (v36) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1193,6 +1193,55 @@ changes nothing.
 
 ---
 
+## The reminder offer (22b, locked v36, 2026-08-13)
+
+*Design 22b — a variant of 21j. No migration, no new column, no change to the
+grants.*
+
+**The problem.** Reminder delivery has been built, deployed and scheduled since
+v28 and has never sent an email. `remind_before_days` starts null on every
+subscription, and the only control is the detail screen's button, three taps from
+anywhere and unexplained. A finished feature with no discoverable entry point.
+
+- **The offer is made at the first confirmation**, which is the first moment
+  there is a concrete thing to be reminded about and the first time the user has
+  said out loud that they care about it.
+- **The confirmed row is replaced in place, not animated away.** It becomes a
+  confirmation card — *"Meli+ is now tracked · Monthly · renews Aug 05 · ~R$
+  17,99"* — with the offer nested inside it. The queue above is untouched and
+  still actionable, so nothing is interrupted and the offer reads as being about
+  the thing just confirmed rather than about the app in general.
+- **It lands after the R4 interval sheet, never beside it.** A single-charge
+  suggestion still asks monthly/annual first; the card then shows the answer. The
+  R3 path skips the middle step. No two sheets in a row, because the offer is not
+  a sheet.
+- **Answering collapses the card to its header** and leaves it standing for the
+  rest of the visit. On the next visit the row is gone entirely — review lists
+  `possible` runs, and a confirmed one has moved to the Subs tab while a dismissed
+  one has moved to Settings.
+- **Every claim in the copy is one the pipeline keeps**: *"One email, 2 days
+  before the expected charge — sent to the address you signed in with."* Email
+  only, because push is in the schema and deliberately unbuilt; two days, per the
+  detail contract; the address from `auth.users.email`, never stored (v9).
+- **Dates render bare.** The tilde is amounts-only (locked 2026-07-15) — the
+  mockup drew "renews ~Aug 05" and the rule stands.
+- **"We won't ask again" is stored in two places, because the two answers are not
+  symmetrical.** *Yes* is durable in the database: the subscription now carries a
+  `remind_before_days`, so `ReviewPayload.remindersNeverUsed` is false on every
+  device, forever. *No* writes **nothing** — declining must not leave a mark on a
+  row the user did not ask to change — so it is a local flag. A `profiles` column
+  would make the decline durable across devices at the cost of a migration **and**
+  an extension of Migration #1's column-scoped UPDATE grant; for a single-user app
+  the failure mode is that a reinstall asks once more, and the question is one tap
+  to decline.
+- **The trigger is "reminders have never been used", not "this is the first
+  tracked subscription".** R1 auto-confirms without anyone tapping anything, so a
+  user can arrive with eight tracked subscriptions having never been asked. A
+  reminder set on a *dismissed* subscription counts too: the question is whether
+  the user has met the feature, not whether the row is still visible.
+
+---
+
 ## Reminder delivery
 
 *Push skeleton locked 2026-07-14; channel preference + email commitment locked 2026-07-15; **email delivery built and scheduled v28, 2026-08-11**. Push remains a maybe and remains unbuilt.*
@@ -1565,6 +1614,27 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v36** — THE REMINDER OFFER (2026-08-13, design 22b). **No migration, no new
+  column, no grant change.** Renewal reminders have been deployed and scheduled
+  since v28 and had **never sent an email**: `remind_before_days` starts null on
+  every subscription and the only control was a button three taps deep on the
+  detail screen. The offer now appears at the **first confirmation** — the first
+  moment there is something concrete to be reminded about. The confirmed row is
+  **replaced in place** rather than animated away, becoming a confirmation card
+  with the offer nested inside it, so the review queue is never interrupted and
+  the offer lands *after* the R4 interval sheet instead of stacking behind it.
+  Answering collapses the card to its header; the row is gone on the next visit
+  because a confirmed suggestion has moved to the Subs tab. Copy states only what
+  the pipeline keeps — one email, two days, to the address the account was created
+  with — and **dates render bare**, since the tilde is amounts-only (the mockup
+  drew "renews ~Aug 05"; the rule stands). **"We won't ask again" is stored
+  asymmetrically, and deliberately**: *yes* is durable in the database, because
+  the subscription now carries a reminder; *no* writes nothing at all — declining
+  must not mark a row the user did not ask to change — so it is a local flag,
+  rather than a migration plus an extension of the column-scoped UPDATE grant. The
+  trigger is **"reminders have never been used"**, not "first tracked
+  subscription": R1 auto-confirms without anyone tapping anything, so the latter
+  would silently never fire for some users. 30 UI tests, 8 unit suites.
 - **v35** — THE APP CAN NOTICE DATA IT DID NOT WRITE (2026-08-12). **No
   migration.** Two halves of one gap, found while discussing onboarding. First:
   there was **no refresh path at all**. The provider loads the graph once and

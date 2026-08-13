@@ -284,10 +284,17 @@ extension SignuPayloadSource {
                     charges: charges,
                     renewsDate: next,
                     renewsAmount: last.amount,
-                    asksIntervalOnTrack: run.detectedBy == .r4
+                    asksIntervalOnTrack: run.detectedBy == .r4,
+                    billingInterval: run.billingInterval
                 )
             }
-        return ReviewPayload(suggestions: suggestions)
+        return ReviewPayload(
+            suggestions: suggestions,
+            // Across every subscription, not just the visible ones: a reminder
+            // set on something dismissed still means the user has met the
+            // feature and does not need introducing to it.
+            remindersNeverUsed: subscriptionList.allSatisfy { $0.remindBeforeDays == nil }
+        )
     }
 
     /// Full evidence headline (9a). R3 measured cadence + varying amounts;

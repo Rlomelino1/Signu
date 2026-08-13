@@ -31,6 +31,10 @@ struct ReviewActions {
     /// is a statement about the subscription ("not a subscription"), not about one
     /// run of it, and a suggestion carries both ids anyway.
     var onDismiss: (UUID) -> Void = { _ in }
+    /// SUBSCRIPTION id → `remind_before_days = 2`, the same write the detail
+    /// screen's toggle makes. Only fires on "Remind me": declining writes
+    /// nothing, because a decline is not a state a subscription should carry.
+    var onRemind: (UUID) -> Void = { _ in }
 }
 
 /// Review screen (9a — mockup 21j): full charge evidence per possible run,
@@ -39,14 +43,32 @@ struct ReviewView: View {
     let payload: ReviewPayload
     var actions = ReviewActions()
 
-    // UI-only resolution for the mock: confirmed/dismissed rows animate out.
+    /// Dismissed rows animate out. Confirmed ones do NOT — they are replaced in
+    /// place by a confirmation card (22b), so the queue above them is untouched
+    /// and the user reads the reminder offer next to the thing they just
+    /// confirmed. The rows are gone on the next visit either way: review lists
+    /// `possible` runs, and a confirmed one has moved to the Subs tab while a
+    /// dismissed one has moved to Settings.
     @State private var resolved: Set<UUID> = []
+    /// Confirmed this session → the interval it was confirmed with.
+    @State private var confirmed: [UUID: BillingInterval] = [:]
+    /// The one confirmation carrying the reminder offer, and whether it has been
+    /// answered. Answering collapses the card rather than removing it.
+    @State private var offering: UUID?
     @State private var intervalPrompt: ReviewPayload.Suggestion?
     /// Screenshot harness: auto-open the R4 interval sheet on appear.
     var autoPresentIntervalForR4 = false
 
     private var remaining: [ReviewPayload.Suggestion] {
         payload.suggestions.filter { !resolved.contains($0.id) }
+    }
+
+    /// Offered once, on the first confirmation by a user who has never used
+    /// reminders. `remindersNeverUsed` covers the durable half (a "yes" leaves a
+    /// `remind_before_days` behind); `ReminderOffer.answered` covers the "no",
+    /// which deliberately writes nothing to the database.
+    private var offersReminder: Bool {
+        payload.remindersNeverUsed && !ReminderOffer.answered
     }
 
     var body: some View {
@@ -58,7 +80,11 @@ struct ReviewView: View {
                     allCaughtUp
                 } else {
                     ForEach(remaining) { suggestion in
-                        card(suggestion)
+                        if let interval = confirmed[suggestion.id] {
+                            confirmationCard(suggestion, interval: interval)
+                        } else {
+                            card(suggestion)
+                        }
                     }
                     Text("Dismissed suggestions can be restored in Settings.")
                         .font(.signuSubtitle)
@@ -127,6 +153,80 @@ struct ReviewView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
         .padding(.horizontal, 20)
+    }
+
+    // MARK: - Confirmation card (22b)
+
+    /// What a confirmed row becomes, in place. Collapsed to the header alone once
+    /// the offer is answered — or immediately, when there is no offer to make.
+    private func confirmationCard(
+        _ suggestion: ReviewPayload.Suggestion,
+        interval: BillingInterval
+    ) -> some View {
+        SignuCard(background: SignuColor.sunken.opacity(0.7)) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 12) {
+                    ServiceAvatar(name: suggestion.serviceName, size: 44)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(suggestion.serviceName) is now tracked")
+                            .font(.signuRowTitle)
+                            .foregroundStyle(SignuColor.textPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        // Bare date, tilde amount — the tilde rule is amounts-only
+                        // (locked 2026-07-15), and a predicted date carries the
+                        // same ±3-day window whatever rule found it.
+                        Text("\(interval == .annual ? "Annual" : "Monthly") · renews \(SignuFormat.monthDay(suggestion.renewsDate)) · \(SignuFormat.brl(suggestion.renewsAmount, approximate: true))")
+                            .font(SignuFont.font(13, .semibold))
+                            .foregroundStyle(SignuColor.green)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(SignuColor.green)
+                }
+
+                if offering == suggestion.id {
+                    reminderOffer(suggestion)
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    /// The offer, nested inside the confirmation so it reads as being about the
+    /// thing just confirmed rather than about the app in general.
+    private func reminderOffer(_ suggestion: ReviewPayload.Suggestion) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Want a heads-up before it renews?")
+                .font(SignuFont.font(16, .semibold))
+                .foregroundStyle(SignuColor.textPrimary)
+            // Every claim here is one the pipeline actually keeps: email only,
+            // two days, to the address the account was created with. Push exists
+            // in the schema and is deliberately unbuilt, so it is not mentioned.
+            Text("One email, 2 days before the expected charge — sent to the address you signed in with.")
+                .font(.signuBody)
+                .foregroundStyle(SignuColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 12) {
+                Button { answerOffer(suggestion, remind: true) } label: {
+                    Label("Remind me", systemImage: "bell").lineLimit(1)
+                }
+                .buttonStyle(.signuSuccess)
+                Button("No thanks") { answerOffer(suggestion, remind: false) }
+                    .buttonStyle(.signuSecondary)
+            }
+
+            Text("We won't ask again — reminders live on each subscription's detail screen.")
+                .font(SignuFont.font(13))
+                .foregroundStyle(SignuColor.textTertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: - Suggestion card
@@ -213,7 +313,22 @@ struct ReviewView: View {
 
     private func track(_ suggestion: ReviewPayload.Suggestion, interval: BillingInterval?) {
         actions.onTrack(suggestion.id, interval)
-        withAnimation(.easeOut(duration: 0.25)) { _ = resolved.insert(suggestion.id) }
+        // Replaced in place rather than animated away: the confirmation is the
+        // acknowledgement, and on a first confirmation it carries the reminder
+        // offer. Only the first one offers — a second confirmation in the same
+        // session shows the compact card alone.
+        withAnimation(.easeOut(duration: 0.25)) {
+            confirmed[suggestion.id] = interval ?? suggestion.billingInterval
+            if offering == nil && offersReminder { offering = suggestion.id }
+        }
+    }
+
+    private func answerOffer(_ suggestion: ReviewPayload.Suggestion, remind: Bool) {
+        // Either answer ends the offer for good. "Yes" also writes the reminder,
+        // which is what makes the decision durable without a column of its own.
+        ReminderOffer.answered = true
+        if remind { actions.onRemind(suggestion.subscriptionId) }
+        withAnimation(.easeOut(duration: 0.2)) { offering = nil }
     }
 
     private func dismiss(_ suggestion: ReviewPayload.Suggestion) {

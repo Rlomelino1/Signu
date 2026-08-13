@@ -234,6 +234,13 @@ struct AppShellView: View {
                     },
                     onDismiss: { id in
                         Task { try? await provider.setIgnored(subscriptionId: id, ignored: true) }
+                    },
+                    // 22b's offer, taken right after a first confirmation. The
+                    // same column write the detail toggle makes — on = 2 days,
+                    // per the detail contract — so there is one way to be
+                    // reminded and one place it is stored.
+                    onRemind: { id in
+                        Task { try? await provider.setReminder(subscriptionId: id, remindBeforeDays: 2) }
                     }
                 ),
                 autoPresentIntervalForR4: reviewAutoR4
