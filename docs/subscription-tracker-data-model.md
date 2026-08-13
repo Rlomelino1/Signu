@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-13** (v40) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-13** (v41) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1682,6 +1682,30 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v41** — THE GATE NOTICES A SESSION THAT ENDS (2026-08-13). **No migration.**
+  `SessionStore` flipped to `.authenticated` when sign-in succeeded and then
+  nothing observed auth state again, so a session that disappeared afterwards left
+  a **signed-in shell over a signed-out client**: every read went out with the
+  anon key, `anon` holds nothing since Migration #1, and the user was told
+  "permission denied for table profiles" on a blank screen with a working tab bar.
+  That is how a build-flag problem spent an hour being investigated as a database
+  permissions bug (v40). `SessionProviding` gains `sessionEndings()`; the live
+  provider maps the SDK's `.signedOut` onto it — **narrowly**, since
+  `.initialSession` can also carry a nil session at launch and acting on it would
+  be the late-restore race the gate funnel exists to prevent. A new
+  `.sessionEnded` event runs through that same funnel with a decision per state:
+  `.authenticated` and `.recovering` both return to `.unauthenticated`; `.restoring`
+  ignores it, because restore is authoritative for a cold launch and the watcher
+  is only started after restore resolves; `.unauthenticated` is already the
+  destination, which matters because a voluntary sign-out arrives here too and
+  must be harmless rather than exceptional. **`expiredRecoveryLink` is deliberately
+  NOT raised** when a recovery session dies — a session that ended is not evidence
+  the link expired, and 17d must not claim it was. Five tests, one per cell.
+  Writing them surfaced a real subtlety worth keeping: the observer attaches when
+  its task first runs, so "restore returned" does not mean "the observer is
+  listening", and the tests wait for the attachment rather than assuming it.
+  **Deliberately not included**: any on-screen notice explaining the sign-out. It
+  would be new copy on 16a, which is a design decision rather than a bug fix.
 - **v40** — A FAILED READ MUST NOT LOOK LIKE NO DATA (2026-08-13). **No
   migration.** The first end-to-end run of the app against production — the thing
   that had never been done — landed on a **blank Home with a working tab bar**.

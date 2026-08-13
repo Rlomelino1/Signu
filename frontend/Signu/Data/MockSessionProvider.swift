@@ -53,6 +53,20 @@ final class MockSessionProvider: SessionProviding {
 
     // MARK: - SessionProviding
 
+    /// Drivable rather than inert: `--session-ends` makes the mock drop its
+    /// session two seconds after the watcher starts, so the gate's reaction is
+    /// testable without a real token to revoke.
+    func sessionEndings() -> AsyncStream<Void> {
+        AsyncStream { continuation in
+            guard CommandLine.arguments.contains("--session-ends") else { return }
+            let task = Task {
+                try? await Task.sleep(for: .seconds(2))
+                continuation.yield(())
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     func restore() async -> AuthGateState {
         try? await Task.sleep(for: Self.restoreDelay)
         switch scenario {

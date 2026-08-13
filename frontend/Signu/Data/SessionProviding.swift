@@ -67,6 +67,22 @@ protocol SessionProviding {
     /// Address of the current session — 17e renders it ("You're signed in
     /// as …"), which doubles as a right-account check.
     var currentEmail: String? { get }
+
+    /// Sessions that end without the app asking: a token refresh that failed, a
+    /// token revoked server-side, storage cleared underneath us.
+    ///
+    /// This exists because the gate had no way to hear about one. It flipped to
+    /// `.authenticated` when sign-in succeeded and then never looked again, so a
+    /// session that disappeared left a **signed-in shell over a signed-out
+    /// client**: every read went out with the anon key, and since `anon` was
+    /// revoked everything by Migration #1, the user got "permission denied for
+    /// table profiles" on a blank screen with a working tab bar. Four steps
+    /// between the real problem and the message — the auth failure presented
+    /// itself as a database permissions bug.
+    ///
+    /// Called once, at launch. Voluntary sign-out may also arrive here; the gate
+    /// is written so that is harmless, since both end in the same state.
+    func sessionEndings() -> AsyncStream<Void>
 }
 
 /// What an auth-callback deep link produced. The three real outcomes of the
