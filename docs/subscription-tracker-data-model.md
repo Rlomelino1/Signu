@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-13** (v38) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-13** (v39) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -900,7 +900,7 @@ established card lands in 21i and a thin or new card lands here.
 - **Schema impact: one field.** Nullable **`domain`** on the future MERCHANT_CATALOG table drives tiers 1 and 2; tier 3 needs nothing. No new tables, no image storage in Supabase — bytes live in the app bundle and the iOS disk cache only.
 - **`subscription.logo_url` dropped** (same-day amendment): the column predated this contract as a denormalized landing spot for a catalog-provided URL — a mechanism that was never designed. The locked chain gives it no writer (detection copies nothing), no reader (the client resolves from `domain` at render time), and one liability (a stored URL goes stale on rebrand — the frozen-asset failure mode the tier inversion exists to avoid). Removal was believed free at the time; in fact Migration #1 already existed and the column was not removed until v17. The keep-as-override reading (user-supplied logos) was rejected as a speculative feature with no design; if it ever materializes, re-adding a nullable column is a one-line additive migration.
 - **Legal posture** (settled before the mechanism): displaying real merchant marks to identify the merchant's own charges is nominative-fair-use territory — the pattern every finance app uses — and the personal-only deployment removes even the theoretical exposure (no commerce, no App Store review gate). Constraints kept anyway, as-if-public standard: marks rendered undistorted, never used in Signu's own icon or as branding.
-- **Rendering treatment locked (same-day amendment): full-color mark inside a neutral tile.** Real logos arrive at full brand saturation and would turn the muted-palette list into competing billboards; a uniform neutral container (paper/white tile, mark rendered smaller within it) re-imposes the tile-grid calm while keeping the mark's color — recognition is the point of fetching real logos, so grayscale was ruled out (pays the fetch complexity, loses the recognition value). The neutral container is also the robust choice for runtime-fetched images: logo.dev marks vary in shape and background, and the container absorbs all of it with zero per-merchant styling. **Open check, not a blocker**: white tiles on the ink-dark detail hero will pop brighter than the current monograms — verify on that screen; a surface-matched off-white tile is the known fix if it bothers. Judged against a three-treatment comparison (monogram / naked full-color / neutral tile), not a re-rendered 21r.
+- **Rendering treatment locked (same-day amendment): full-color mark inside a neutral tile.** Real logos arrive at full brand saturation and would turn the muted-palette list into competing billboards; a uniform neutral container (paper/white tile, mark rendered smaller within it) re-imposes the tile-grid calm while keeping the mark's color — recognition is the point of fetching real logos, so grayscale was ruled out (pays the fetch complexity, loses the recognition value). The neutral container is also the robust choice for runtime-fetched images: logo.dev marks vary in shape and background, and the container absorbs all of it with zero per-merchant styling. **Open check, not a blocker**: white tiles on the ink-dark detail hero will pop brighter than the current monograms — verify on that screen; a surface-matched off-white tile is the known fix if it bothers. *Closed v39, on a screenshot rather than an argument: it does pop, and it reads as a badge rather than a blemish. Shipped as-is; the off-white fix stays available and unused.* Judged against a three-treatment comparison (monogram / naked full-color / neutral tile), not a re-rendered 21r.
 
 ---
 
@@ -1682,6 +1682,22 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v39** — LOGOS ARE LIVE (2026-08-13). The publishable key landed, Migration #8
+  is on production, and real marks now render for every catalog hit while
+  everything else keeps its monogram — the three-tier chain working end to end for
+  the first time since v12 locked it. **One bug, found by looking rather than by
+  reasoning**: a full-screen cover does not reliably inherit a custom environment
+  object from its presenter, so the Subs list rendered real logos while the detail
+  hero behind the same store kept its monogram. The store is now re-applied on
+  every presented surface. **v12's open check is closed on evidence**: a white tile
+  on the ink-dark hero does pop, and it reads as a badge rather than a blemish —
+  shipped as-is, with the surface-matched off-white fix still available and
+  unused. Volume against the free tier is a non-issue: 61 domains once per 30-day
+  TTL against 500K requests a month. Recorded for the day this stops being a
+  personal deployment: the free plan requires a visible "Logos provided by
+  Logo.dev" link for **commercial** use, which personal projects are exempt from —
+  the same personal-only footing v12's nominative-fair-use posture already rests
+  on.
 - **v38** — THE MERCHANT CATALOG (2026-08-13). **Migration #8, additive.** The
   table the spec has called "future" since v3 exists and is seeded: `service_name`,
   nullable `domain`, `category`, `subscription_only`, `patterns[]`. It closes the
