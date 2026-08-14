@@ -71,7 +71,7 @@ extension SignuPayloadSource {
         let troubled = connectionList.filter { $0.status == .needsAction || $0.status == .expired }
         guard let first = troubled.first else { return nil }
         let text = troubled.count == 1
-            ? "\(first.institutionName) connection needs attention"
+            ? "\(bankLabel(first)) connection needs attention"
             : "\(troubled.count) bank connections need attention"
         return HomePayload.Banner(connectionId: first.id, text: text)
     }
@@ -84,7 +84,7 @@ extension SignuPayloadSource {
             return !sub.ignored
         }
         guard visibleRuns.contains(where: { $0.status != .possible }) else {
-            let bank = connectionList.first?.institutionName ?? ""
+            let bank = connectionList.first.map(bankLabel) ?? ""
             // Suggestions are exactly the runs this branch is reached BY, so the
             // screen that reports "nothing yet" is the one screen guaranteed to
             // have them. Sorted by name so two reads of the same state name the

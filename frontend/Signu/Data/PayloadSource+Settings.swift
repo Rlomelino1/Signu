@@ -15,7 +15,7 @@ extension SignuPayloadSource {
         let banks = connectionList.map { connection -> SettingsPayload.BankRow in
             let (chipText, chipTone, subtitle) = bankStatus(connection)
             return SettingsPayload.BankRow(
-                id: connection.id, name: connection.institutionName,
+                id: connection.id, name: bankLabel(connection),
                 subtitle: subtitle, chipText: chipText, chipTone: chipTone
             )
         }
@@ -94,7 +94,7 @@ extension SignuPayloadSource {
 
         return ConnectionDetailPayload(
             id: connection.id,
-            institutionName: connection.institutionName,
+            institutionName: bankLabel(connection),
             connectedSinceText: "Connected \(SignuFormat.monthYearLong(connection.createdAt)) · via Open Finance",
             statusText: chipText, statusTone: chipTone,
             lastSyncedText: connection.lastSyncedAt.map(SignuFormat.syncStamp) ?? "—",
@@ -141,8 +141,8 @@ extension SignuPayloadSource {
         }
 
         return AttributedSubsPayload(
-            institutionName: connection.institutionName,
-            institutionInitial: String(connection.institutionName.prefix(1)).uppercased(),
+            institutionName: bankLabel(connection),
+            institutionInitial: String(bankLabel(connection).prefix(1)).uppercased(),
             headerCount: attributed.count,
             headerLine: "\(attributed.count) subscription\(attributed.count == 1 ? "" : "s") · \(attributedTotalLine(attributed))",
             cardGroups: groups,
