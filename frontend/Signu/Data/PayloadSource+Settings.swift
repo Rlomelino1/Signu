@@ -31,7 +31,9 @@ extension SignuPayloadSource {
         return SettingsPayload(
             displayName: profileValue.displayName,
             email: profileValue.email,
-            initial: String(profileValue.displayName.prefix(1)).uppercased(),
+            initial: settingsInitial,
+            avatarPath: profileValue.avatarPath,
+            displayNameIsFallback: profileValue.displayNameIsFallback,
             providers: profileValue.providers.map(providerLabel),
             // The raw identity, not the label: `providerLabel` renders "email" as
             // "Password" for the chip, and matching on display copy would break
@@ -41,6 +43,16 @@ extension SignuPayloadSource {
             dismissed: dismissed,
             deleteScopeLine: "Everything, permanently — banks, history, profile"
         )
+    }
+
+    /// The monogram beside the identity. Uppercased first letter of the name, or of
+    /// the email when the name is standing in — an address that begins with a
+    /// non-letter would otherwise render as punctuation in an ink circle.
+    private var settingsInitial: String {
+        let source = profileValue.displayNameIsFallback
+            ? profileValue.email
+            : profileValue.displayName
+        return String(source.prefix(1)).uppercased()
     }
 
     private func providerLabel(_ raw: String) -> String {

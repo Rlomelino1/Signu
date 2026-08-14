@@ -107,19 +107,15 @@ struct HomeView: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 OverlineText(SignuFormat.weekdayFull(payload.now))
-                Text("\(greeting), \(payload.firstName)")
+                // The name only when there is one. This greeted with the full
+                // email address for as long as `display_name` stayed null, which
+                // is not a greeting (#7 from the production run).
+                Text(payload.firstName.map { "\(greeting), \($0)" } ?? greeting)
                     .font(.signuTitle)
                     .foregroundStyle(SignuColor.textPrimary)
             }
             Spacer()
-            Circle()
-                .fill(SignuColor.ink)
-                .frame(width: 44, height: 44)
-                .overlay {
-                    Text(String(payload.firstName.prefix(1)).uppercased())
-                        .font(SignuFont.font(18, .semibold))
-                        .foregroundStyle(SignuColor.onInk)
-                }
+            ProfileAvatar(path: payload.avatarPath, initial: payload.initial, size: 44)
         }
         .padding(.top, 4)
     }

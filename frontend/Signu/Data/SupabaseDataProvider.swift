@@ -103,6 +103,80 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
         try await update(subscriptionId: subscriptionId, values: ["nickname": value])
     }
 
+    // MARK: - Profile (v47)
+
+    func setDisplayName(_ name: String?) async throws {
+        let value: AnyJSON = name.map { AnyJSON.string($0) } ?? .null
+        try await updateProfile(values: ["display_name": value])
+    }
+
+    func setAvatar(jpeg: Data) async throws {
+        guard let userId = client.auth.currentUser?.id else { throw ProviderError.noProfile }
+        // A new path per upload, so the path is a usable cache key and no CDN or
+        // disk copy can be stale for a picture that changed (Migration #11).
+        // Seconds, not milliseconds: the collision it has to avoid is "the user
+        // changed their photo", not "two writes in the same instant".
+        let path = "\(userId.uuidString.lowercased())/\(Int(Date().timeIntervalSince1970)).jpg"
+        let previous = profileValue?.avatarPath
+
+        try await upload(path: path, jpeg: jpeg)
+        // Column after object, the opposite order from removal: a column pointing
+        // at an object that exists is the only intermediate state worth being
+        // interrupted in.
+        try await updateProfile(values: ["avatar_path": .string(path)])
+
+        // Best effort, and deliberately after the row is correct: the old object is
+        // now unreferenced, and failing to delete it costs storage rather than
+        // correctness. Throwing here would report a failed change that succeeded.
+        if let previous, previous != path {
+            try? await removeObjects([previous])
+        }
+    }
+
+    func removeAvatar() async throws {
+        guard let path = profileValue?.avatarPath else { return }
+        try await removeObjects([path])
+        try await updateProfile(values: ["avatar_path": .null])
+    }
+
+    func avatarData(path: String) async throws -> Data {
+        try await download(path: path)
+    }
+
+    /// `nonisolated` for the reason `execute(subscriptionId:values:)` documents:
+    /// the response types are not Sendable, so awaiting them from a main-actor
+    /// method crosses an isolation boundary that CI's Swift 6.1 compiler rejects
+    /// even though newer ones allow it.
+    private nonisolated func executeProfile(userId: UUID, values: [String: AnyJSON]) async throws {
+        try await client
+            .from("profiles")
+            .update(values)
+            .eq("id", value: userId.uuidString)
+            .execute()
+    }
+
+    private nonisolated func upload(path: String, jpeg: Data) async throws {
+        try await client.storage
+            .from("avatars")
+            .upload(path, data: jpeg, options: FileOptions(contentType: "image/jpeg"))
+    }
+
+    private nonisolated func removeObjects(_ paths: [String]) async throws {
+        try await client.storage.from("avatars").remove(paths: paths)
+    }
+
+    private nonisolated func download(path: String) async throws -> Data {
+        try await client.storage.from("avatars").download(path: path)
+    }
+
+    private func updateProfile(values: [String: AnyJSON]) async throws {
+        guard let userId = client.auth.currentUser?.id else { throw ProviderError.noProfile }
+        try await executeProfile(userId: userId, values: values)
+        // Same posture as every other write: invalidate rather than patch the local
+        // copy, so the next read comes from the row that was actually written.
+        loaded = false
+    }
+
     func setCategory(subscriptionId: UUID, category: String?) async throws {
         let value: AnyJSON = category.map { AnyJSON.string($0) } ?? .null
         try await update(subscriptionId: subscriptionId, values: ["category": value])
@@ -222,11 +296,17 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
         profileValue = Profile(
             id: row.id,
             displayName: row.displayName ?? user?.email ?? "",
+            // Recorded rather than re-derived: a screen that wants to avoid
+            // greeting someone by their email address cannot tell the two apart
+            // from the string alone, and comparing it back against the email at
+            // each call site would be the same rule written four times.
+            displayNameIsFallback: row.displayName == nil,
             // Email and identity providers live in auth.users, never in profiles
             // — the schema says the reminder address is derived, not stored.
             email: user?.email ?? "",
             providers: user?.identities?.map(\.provider) ?? [],
             reminderChannels: ReminderChannels(rawValue: row.reminderChannels) ?? .email,
+            avatarPath: row.avatarPath,
             createdAt: row.createdAt
         )
 

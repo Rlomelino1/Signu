@@ -86,12 +86,16 @@ struct ProfileRow: Decodable {
     let id: UUID
     let displayName: String?
     let reminderChannels: String
+    /// Storage object path, `<uid>/<epoch>.jpg`, or nil for no picture. A path and
+    /// never a URL — see Migration #11.
+    let avatarPath: String?
     let createdAtRaw: String
 
     enum CodingKeys: String, CodingKey {
         case id
         case displayName = "display_name"
         case reminderChannels = "reminder_channels"
+        case avatarPath = "avatar_path"
         case createdAtRaw = "created_at"
     }
 

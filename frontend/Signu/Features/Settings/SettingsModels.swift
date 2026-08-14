@@ -5,6 +5,11 @@ struct SettingsPayload {
     var displayName: String
     var email: String
     var initial: String
+    /// Profile picture path, for `ProfileAvatar`. nil renders the monogram.
+    var avatarPath: String?
+    /// True when `displayName` is the email standing in for a name never given, so
+    /// the row can invite the user to set one instead of implying it is their name.
+    var displayNameIsFallback: Bool
     var providers: [String]              // "Google" / "Password"
     /// Drives the v19 password row off the same identities the chips render:
     /// present ⇒ "Change password", Google-only ⇒ "Set a password". Data, so it

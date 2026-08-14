@@ -87,6 +87,43 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         subscriptionList[i].category = category
     }
 
+    // MARK: - Profile (v47)
+
+    /// The avatar bytes the mock is standing in for storage with. Keyed by path so
+    /// the fixture behaves like the bucket does: a new upload is a new key, and the
+    /// old one stops being reachable.
+    private var avatarObjects: [String: Data] = [:]
+
+    func setDisplayName(_ name: String?) async throws {
+        // Mirrors the live read, including the fallback: clearing the name puts the
+        // email back, and marks it as standing in rather than chosen.
+        profileValue.displayName = name ?? profileValue.email
+        profileValue.displayNameIsFallback = name == nil
+    }
+
+    func setAvatar(jpeg: Data) async throws {
+        let path = "\(profileValue.id.uuidString.lowercased())/\(Int(Date().timeIntervalSince1970)).jpg"
+        let previous = profileValue.avatarPath
+        avatarObjects[path] = jpeg
+        profileValue.avatarPath = path
+        if let previous, previous != path { avatarObjects[previous] = nil }
+    }
+
+    func removeAvatar() async throws {
+        if let path = profileValue.avatarPath { avatarObjects[path] = nil }
+        profileValue.avatarPath = nil
+    }
+
+    func avatarData(path: String) async throws -> Data {
+        // Throws rather than returning empty for a path that is not there, because
+        // the real bucket 404s and a store that treats "missing" as "zero bytes"
+        // would cache the emptiness.
+        guard let data = avatarObjects[path] else { throw MockError.noSuchAvatar }
+        return data
+    }
+
+    enum MockError: Error { case noSuchAvatar }
+
     // MARK: - Edge Function writes, simulated (v30)
     //
     // Each mirrors what the function on the other side actually does, including

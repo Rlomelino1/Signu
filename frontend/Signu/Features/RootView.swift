@@ -215,6 +215,20 @@ private struct SettingsDebugView: View {
             ConnectionDetailScreen(provider: provider, connectionId: connId(String(name.dropFirst("connection-".count))))
         case "attributed-itau":
             AttributedSubsScreen(provider: provider, connectionId: connId("itau"))
+        // v47. `edit-profile-unnamed` clears the name first, so the state the
+        // production account was actually in — no name, email standing in — can be
+        // seen rather than reasoned about.
+        case "edit-profile", "edit-profile-unnamed":
+            SignuColor.paper.ignoresSafeArea()
+                .sheet(isPresented: .constant(true)) {
+                    EditProfileSheet(provider: provider)
+                        .environment(AvatarStore())
+                        .presentationDetents([.height(460)])
+                        .presentationDragIndicator(.visible)
+                }
+                .task {
+                    if name.hasSuffix("unnamed") { try? await provider.setDisplayName(nil) }
+                }
         case "remove":
             SignuColor.paper.ignoresSafeArea()
                 .sheet(isPresented: .constant(true)) {
