@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-14** (v49) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-14** (v50) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,22 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v50** — NO PERSONAL ADDRESS IN THE REPO (2026-08-14). **No migration.** v47's
+  greeting work needed an example of the email-as-name fallback, and used the
+  maintainer's real personal address for it — in two doc comments, a preview, a test
+  comment and the v47 entry above. **This repository is public.** None of it was
+  observed from the app; it was invented as illustrative copy, which is the whole
+  problem: a real address is never the right placeholder, and the point each comment
+  makes is about the SHAPE of the fallback (an address standing where a name should
+  be) rather than whose address it is.
+  Replaced with `you@example.com`, matching the `rafael.souza@example.com` fixture
+  convention the tests already used. Real project mail — Resend senders, recipients,
+  registered accounts — uses the project address, which is deliberately not the
+  maintainer's personal one.
+  **Checked while here**: `backend/pluggy-probe-raw.json` holds a real name, CPF,
+  account numbers and balances, and is **gitignored and untracked** (`.gitignore:33`).
+  It is not in the repository. The address remains in commit history, which is a
+  rewrite decision rather than a code one.
 - **v49** — THE AUTH EMAILS ARE SIGNU'S (2026-08-14). **No migration.** The
   password-reset mail was Supabase's default: unbranded, and indistinguishable from
   a generic service email — what a reset can least afford to look like (#5 from the
@@ -1800,7 +1816,7 @@ implementations back to the 21-series rendering.*
   interrupted in.
   **Home stops reading an email address aloud.** `displayName` falls back to the
   email so nothing renders blank, which is right for a row showing an identity and
-  wrong for a greeting — "Good morning, rafael.pastor@sinatra.pro" is not one. The
+  wrong for a greeting — "Good morning, you@example.com" is not one. The
   fallback is now *recorded* (`displayNameIsFallback`) rather than re-derived at
   four call sites, `firstName` is nil when it applies, and the monogram takes the
   email's letter instead of the `@` that `prefix(1)` would have produced.

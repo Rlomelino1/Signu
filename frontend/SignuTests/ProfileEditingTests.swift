@@ -37,7 +37,7 @@ struct ProfileEditingTests {
 
     @Test("Home greets without a name rather than reading an email address")
     func homeDropsTheNameWhenItIsAFallback() async throws {
-        // The reported bug: Home said "Good morning, rafael.pastor@sinatra.pro".
+        // The reported bug: Home said "Good morning, you@example.com".
         let p = provider()
         try await p.setDisplayName(nil)
         let home = try await p.homePayload()

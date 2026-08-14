@@ -69,7 +69,7 @@ extension SignuPayloadSource {
     ///
     /// `displayName` falls back to the email address so nothing renders blank, and
     /// that fallback is right for a row that shows an identity — but "Good morning,
-    /// rafael.pastor@sinatra.pro" is not a greeting. Home drops the name instead.
+    /// you@example.com" is not a greeting. Home drops the name instead.
     private var firstName: String? {
         guard !profileValue.displayNameIsFallback else { return nil }
         return profileValue.displayName.split(separator: " ").first.map(String.init)
