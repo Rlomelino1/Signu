@@ -70,6 +70,64 @@ struct ProfileEditingTests {
         #expect(named.displayName == "Rafael")
     }
 
+    // MARK: - "No name" as production actually stores it (v52)
+
+    // The gap v47 shipped with. Its fallback test asserted `display_name == nil`,
+    // which is true only for fixtures: Migration #1's trigger coalesces to the EMAIL
+    // when no name is given, so a real account stores the address in that column.
+    // Home therefore kept greeting the production account by its own email while
+    // every test passed. These pin the rule against the shape the database has.
+
+    @Test("the stored email counts as no name, whatever its case or padding")
+    func storedEmailIsAFallback() {
+        let email = "someone@example.com"
+        for stored in [email, "SOMEONE@Example.com", "  someone@example.com  "] {
+            let resolved = ProfileName.resolve(stored: stored, email: email)
+            #expect(resolved.isFallback, "\(stored) should read as no name")
+            // Still displayed, because a blank identity row is worse than an
+            // address — only the GREETING declines to use it.
+            #expect(resolved.display.isEmpty == false)
+        }
+    }
+
+    @Test("nil and blank are the same state as the stored email")
+    func nilAndBlankAreFallbacks() {
+        let email = "someone@example.com"
+        for stored in [nil, "", "   "] as [String?] {
+            let resolved = ProfileName.resolve(stored: stored, email: email)
+            #expect(resolved.isFallback)
+            #expect(resolved.display == email)
+        }
+    }
+
+    @Test("a real name is a name, and is not trimmed away")
+    func realNameSurvives() {
+        let resolved = ProfileName.resolve(stored: "  Rafael  ", email: "someone@example.com")
+        #expect(resolved.isFallback == false)
+        #expect(resolved.display == "Rafael")
+    }
+
+    @Test("a name that merely contains the address is still a name")
+    func nameContainingTheAddressIsNotAFallback() {
+        // Equality, not containment: someone whose name legitimately includes their
+        // address as a substring has still chosen it.
+        let resolved = ProfileName.resolve(
+            stored: "someone@example.com (Rafael)", email: "someone@example.com"
+        )
+        #expect(resolved.isFallback == false)
+    }
+
+    @Test("Home declines the greeting when the stored name is the address")
+    func homeDeclinesTheStoredEmail() async throws {
+        // End to end through the payload, which is where the bug was visible.
+        let p = provider()
+        let email = try await p.profile().email
+        try await p.setDisplayName(email)
+        let home = try await p.homePayload()
+        #expect(home.firstName == nil, "the greeting must not read an address aloud")
+        #expect(try await p.settingsPayload().displayNameIsFallback)
+    }
+
     // MARK: - The picture
 
     @Test("an uploaded picture is reachable at the path the profile names")
