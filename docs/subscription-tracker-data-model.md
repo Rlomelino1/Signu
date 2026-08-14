@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-14** (v50) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-14** (v51) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,35 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v51** — THE BRAND MARK IN THE AUTH EMAILS (2026-08-14). **Migration #12,
+  additive** — one storage bucket, nothing else. v49 drew the mark as a styled
+  letter "S" under a blanket "no images" rule. **The mark is not a letter**: it is
+  two counter-rotated arcs, and no font substitutes for it, so the choice was a
+  hosted PNG or a wrong logo.
+  **v49's rule is narrowed rather than abandoned.** It was right about the failure
+  mode and wrong about the conclusion: SVG is dropped by Gmail and a `data:` URI is
+  stripped by it too, so "embed it" was never available. What is available is ONE
+  small image with a working degradation path — the ink `<td>` stays behind it with
+  `alt="Signu"` in paper-on-ink, so Outlook desktop shows an ink square bearing the
+  name rather than a broken-image icon. Gmail proxies and displays images by
+  default; Apple Mail loads them.
+  **The bucket is public, which is the opposite of Migration #11's, deliberately.** A
+  mail client holds no session and an email outlives any signed URL's expiry, so a
+  private bucket cannot serve this at all. #11 is private because it holds
+  photographs of the user's face; this holds a logo whose entire job is to be
+  fetched unauthenticated. Same mechanism, opposite requirements.
+  **No policies, and that is not an omission**: public reads go through
+  `/storage/v1/object/public/…`, which does not consult `storage.objects` RLS, so a
+  SELECT policy would be decoration — and writes are left with no policy at all, so
+  `authenticated` cannot put anything in a bucket the app treats as read-only
+  reference data.
+  `assets/signu-mark-80.png` is committed as the source of truth — 80×80, **2.6 KB**,
+  derived from the 1024 app icon with alpha stripped per v37, rendered at 40×40 so
+  retina costs nothing. **Placing it in the bucket is a one-off step per
+  environment** (`supabase storage cp`), documented beside the templates for the same
+  reason Migration #6's Vault secrets are: a binary does not belong in a migration.
+  Validated with CI's own container set before going near production: applies from
+  scratch, twice, with no new notices.
 - **v50** — NO PERSONAL ADDRESS IN THE REPO (2026-08-14). **No migration.** v47's
   greeting work needed an example of the email-as-name fallback, and used the
   maintainer's real personal address for it — in two doc comments, a preview, a test
