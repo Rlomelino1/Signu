@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-14** (v42) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-14** (v43) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,45 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v43** — THE BANK IS NAMED BY ITS ACCOUNTS WHEN THE CONNECTOR IS A PROXY
+  (2026-08-14). **No migration.** The first production run showed the bank as
+  **"MeuPluggy"**. `institution_name` is sync-owned and holds Pluggy's *connector*
+  name, which is normally the brand the user knows — but **connector 200 is the
+  own-accounts proxy** behind `meu.pluggy.ai`, and its payload names no bank
+  anywhere: `institutionUrl` is `https://meu.pluggy.ai/` and `imageUrl` is
+  Pluggy's *sandbox* icon. The column was accurate about the connector and useless
+  to the person who had linked a Nubank account.
+  **The bank is one level down**, and was already stored: the checking account
+  arrived as "Nu Pagamentos S.A. - Instituição de Pagamento (Conta Pré-paga)", with
+  `bankData.transferNumber` `260/0001/…` — 260 being Nubank's COMPE code.
+  **Derived at render time; the raw value is never overwritten.** Writing a derived
+  name into `institution_name` would put an interpretation in a sync-owned column,
+  which is the boundary v26 drew when it kept both amounts rather than
+  reconstructing one from the other. `BankLabel` + one `SignuPayloadSource` helper,
+  so all **six** label sites go through one rule instead of drifting.
+  **A real connector is returned untouched, and that requirement is tested first**
+  — it is the half that a plausible-looking rule gets wrong. `connector.name` is
+  the *brand*; the account carries the *legal entity*, so deriving unconditionally
+  would replace "Nubank" with "Nu Pagamentos S.A." and make every real connection
+  worse. Only membership of `proxyConnectorIds` diverts, matched on Pluggy's stable
+  **id** rather than a display name they can reword.
+  **Cards are excluded rather than ranked last**: a card's official name is its
+  product tier — this ledger's is literally "platinum" — and `bankData` is null on
+  cards, so there is no issuer to find. A proxy connection holding only cards
+  therefore keeps the connector name, which is honest about what is known. Two
+  trims drop what describes the *account* rather than the institution (a trailing
+  parenthetical, then anything after `" - "`), yielding **"Nu Pagamentos S.A."**
+  **The trim ORDER is load-bearing, and a test caught it**: trimming leading
+  whitespace first turned `" - Conta Corrente"` into `"- Conta Corrente"`, where
+  the separator no longer matched and an account descriptor was returned as a bank
+  name. Trailing whitespace goes first; leading survives until after the split.
+  **Not attempted**: mapping the COMPE code to a brand ("260" → "Nubank"). It reads
+  better but needs seeded reference data for every Brazilian bank and still misses
+  credit cards, which carry no `bankData` at all. Also **not** a user-editable
+  connection nickname — considered and set aside, since one connection is one bank
+  in practice and the derivation needs no help from the user. 11 tests.
+  **Verified against production data, not invented**: the account name in the tests
+  is the verbatim string in the `bank_account` row.
 - **v42** — THE SYNC HAD NOT RUN IN THREE DAYS, AND EVERYTHING SAID IT HAD
   (2026-08-14). **Migration #9, additive** — two function bodies replaced, one
   argument added to each. Found from the app itself: Home read "Updated 2d ago",
