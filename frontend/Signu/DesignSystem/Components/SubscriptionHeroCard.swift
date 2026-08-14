@@ -73,31 +73,8 @@ struct SubscriptionHeroCard: View {
             }
             .padding(.bottom, 16)
 
-            // Amount dominates; the date slot's bottom line shares its baseline.
-            HStack(alignment: .lastTextBaseline, spacing: 2) {
-                Text(amount)
-                    .font(.signuHeroCompact)
-                    .foregroundStyle(SignuColor.onInk.opacity(dateSlot.isDead ? 0.72 : 1))
-                    .lineLimit(1)
-                if let unit {
-                    Text(unit)
-                        .font(.signuSubtitle)
-                        .foregroundStyle(SignuColor.onInkSecondary)
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 3) {
-                    OverlineText(
-                        dateSlot.label,
-                        color: dateSlot.isAlert ? SignuColor.redOnInk : SignuColor.onInkSecondary
-                    )
-                    Text(dateSlot.value)
-                        .font(.signuSubtitleEmphasis)
-                        .foregroundStyle(dateSlot.isAlert ? SignuColor.redOnInk : SignuColor.onInk)
-                        .lineLimit(1)
-                }
-                .fixedSize()
-            }
-            .padding(.bottom, 16)
+            amountAndDate
+                .padding(.bottom, 16)
 
             HStack(spacing: 12) {
                 ForEach(stats.indices, id: \.self) { index in
@@ -105,6 +82,74 @@ struct SubscriptionHeroCard: View {
                 }
             }
         }
+    }
+
+    /// Amount beside the date slot, or above it when they cannot both fit.
+    ///
+    /// **A cropped number is a wrong number.** "R$ 34,…" is not an amount, and
+    /// unlike a truncated service name the user cannot rename their way out of it.
+    /// The side-by-side row is the design (21k: the amount dominates and the date
+    /// slot's bottom line shares its baseline) and it is tried first — but it is
+    /// only honest while both halves fit.
+    ///
+    /// `ViewThatFits` rather than a Dynamic Type threshold, because the overflow
+    /// is not caused by type size alone: a long amount, a long date slot
+    /// ("Aug 19 · in 5 days" is the widest the slot produces) and a large text
+    /// size each contribute, and measuring the result is exact where a hardcoded
+    /// breakpoint is a guess. It works here because the row's ideal width is
+    /// honest — `Spacer(minLength: 8)` reports 8, and the date block is
+    /// `.fixedSize()`.
+    ///
+    /// The stacked fallback moves the date under the amount, both at full size
+    /// and both left-aligned. Losing the shared baseline is the cost; losing
+    /// digits was never an option.
+    @ViewBuilder
+    private var amountAndDate: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .lastTextBaseline, spacing: 2) {
+                amountPair
+                Spacer(minLength: 8)
+                dateBlock(.trailing)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                amountPair
+                dateBlock(.leading)
+            }
+        }
+    }
+
+    private var amountPair: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 2) {
+            Text(amount)
+                .font(.signuHeroCompact)
+                .foregroundStyle(SignuColor.onInk.opacity(dateSlot.isDead ? 0.72 : 1))
+                .lineLimit(1)
+                // Second line of defence, for the case even the stacked layout
+                // cannot fit at full size. Every other number in the ink hero
+                // already scales — both `HeroStatTile` lines do (0.7 and 0.6) —
+                // and this was the one site that missed the convention while
+                // being the largest number on the screen.
+                .minimumScaleFactor(0.6)
+            if let unit {
+                Text(unit)
+                    .font(.signuSubtitle)
+                    .foregroundStyle(SignuColor.onInkSecondary)
+            }
+        }
+    }
+
+    private func dateBlock(_ alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 3) {
+            OverlineText(
+                dateSlot.label,
+                color: dateSlot.isAlert ? SignuColor.redOnInk : SignuColor.onInkSecondary
+            )
+            Text(dateSlot.value)
+                .font(.signuSubtitleEmphasis)
+                .foregroundStyle(dateSlot.isAlert ? SignuColor.redOnInk : SignuColor.onInk)
+                .lineLimit(1)
+        }
+        .fixedSize()
     }
 }
 
@@ -144,6 +189,20 @@ extension SubscriptionHeroCard {
             amount: "R$ 19,90",
             dateSlot: .paidThrough("Apr 18"),
             stats: [("This year", "R$ 79,60"), ("Since Jun 24", "R$ 219,90")]
+        )),
+        // The production row that found the crop, verbatim: a long merchant name
+        // from the real ledger, the widest date slot the layout produces
+        // ("· in 5 days" on top of a date), and an amount long enough that the
+        // three together overflowed. The state is kept as a preview rather than a
+        // test because the failure is geometric — it can only be seen, and a
+        // screenshot of this is what closed #2.
+        ("Widest case — long name + full date slot (#2)", SubscriptionHeroCard(
+            serviceName: "TRUELINE VALVE CORPORATION",
+            subtitle: "Monthly · Master – 2049",
+            statusText: "Active", statusTone: .positive,
+            amount: "R$ 34,51",
+            dateSlot: .renews("Aug 19 · in 5 days"),
+            stats: [("This year", "R$ 103,53"), ("Since Jun 26", "R$ 103,53")]
         )),
     ]
 }
