@@ -75,6 +75,40 @@ final class PasswordRowUITests: XCTestCase {
         }
     }
 
+    /// v48. The other half of the tab-switch property above: the cooldown must
+    /// survive leaving *while it is running*, and the sent state must NOT survive
+    /// leaving once it has expired.
+    ///
+    /// Nothing cleared it before this, so one tap left "Check your email for a link"
+    /// and a live Resend standing for the rest of the process lifetime — describing a
+    /// 120-second window that had long since closed.
+    ///
+    /// Backdated by the harness rather than waited out: a test that slept two
+    /// minutes to assert this would be a test nobody runs.
+    func testTheSentStateIsForgottenOnceExpiredAndTheUserLeaves() {
+        let app = launchSettings("--settings-password-sent=expired")
+
+        // Expired, so the row is in its sent state with the resend already offered
+        // — the state the user was left stuck in.
+        let resend = app.buttons["Send another link"]
+        XCTAssertTrue(resend.waitForExistence(timeout: 10),
+                      "an expired cooldown must offer the resend")
+        XCTAssertFalse(app.buttons["Change password"].exists,
+                       "the row is still in its sent state before leaving")
+
+        app.buttons["Home"].tap()
+        app.buttons["Settings"].tap()
+
+        // Back to the original row. The harness arms once per launch, so this is the
+        // reset rather than a re-armed fixture.
+        let row = app.buttons["Change password"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5),
+                      "an expired sent state must be forgotten once the user leaves")
+        XCTAssertFalse(text(app, startingWith: "Check ").exists,
+                       "the stale confirmation must be gone, not merely scrolled past")
+        XCTAssertFalse(resend.exists, "and so must the resend it offered")
+    }
+
     func testGoogleOnlyAccountIsOfferedToSetAPassword() {
         // "Set" not "Change" — the same distinction v11 made naming 17d, because a
         // Google-first account has no old password to change.

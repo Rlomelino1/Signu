@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-14** (v47) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-14** (v48) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,35 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v48** — THE PASSWORD ROW STOPS CLAIMING A WINDOW THAT CLOSED (2026-08-14).
+  **No migration.** One tap on the Settings password row left "Check your email for
+  a link" and a live Resend standing **for the rest of the process lifetime**:
+  nothing anywhere set `sentAt` back to nil. The copy describes a 120-second
+  cooldown, so after 120 seconds the row was making a stale claim with no way back
+  (#8 from the production run).
+  **Leaving is the trigger; an expired cooldown is the condition** — and both
+  clauses are load-bearing in opposite directions. Clearing on a timer while the
+  user is looking at the row would pull the confirmation out from under them
+  mid-sentence, which is worse than staleness. Clearing on exit *during* the
+  cooldown would defeat the reason the state lives above the view at all (v19): it
+  must survive a tab switch, because `switch selectedTab` destroys the branch and a
+  Resend that silently no-ops inside Supabase's window is the failure the countdown
+  exists to prevent. So `onDisappear`, guarded on expiry.
+  **The rule is a function, not an inline comparison.** `AuthCooldown.shouldForget`
+  is testable where `cooldown == 0` inside a view body is not, and it decides how
+  long a piece of UI keeps asserting something. It reads `Date()` rather than the
+  ticked `clock`, which can be a second stale — there is no tick coming on the way
+  out. A **backwards** clock jump keeps the state rather than dropping it, because
+  `remaining` clamps a future stamp to the full window; that is the safe direction.
+  **The screenshot harness now arms once per launch, not once per appearance.** It
+  re-armed on every `onAppear`, so a UI test returning to Settings would have had
+  the sent state put back exactly where it was checking that leaving cleared it —
+  and the test would have passed against a screen that never reset.
+  `--settings-password-sent=expired` backdates the stamp past the window, because a
+  test that slept two minutes is a test nobody runs. 7 unit tests on both edges of
+  the boundary (last second kept, exact boundary forgotten), plus a fourth
+  `PasswordRowUITests` case; the existing "cooldown survives leaving the tab" case
+  still passes, which is what proves the new condition did not widen.
 - **v47** — THE PROFILE ROW LEADS SOMEWHERE, WITH A NAME AND A PICTURE
   (2026-08-14). **Migration #11, additive** — one nullable column, one
   column-scoped grant, one private bucket, four owner-scoped policies. Closes two
