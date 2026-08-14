@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-14** (v43) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-14** (v44) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,30 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v44** — AN EDITED MIGRATION IS NOT A RE-APPLIED ONE (2026-08-14).
+  **Migration #10, additive** — the same two function bodies as #9, now including
+  the guard #9 never delivered. Production was read rather than trusted, and the
+  two disagreed: `supabase db dump --schema public` showed
+  `timeout_milliseconds := 150000` present in both triggers and the
+  `length(v_secret)` floor **absent**.
+  **Why: `supabase db push` compares migration VERSIONS, not their contents.**
+  Version `20260814120000` was recorded in `supabase_migrations.schema_migrations`
+  while the file still held only the timeout change; the floor was added to that
+  same file minutes later. Every later push then reported "Remote database is up to
+  date" and applied nothing, because the version was already in the ledger. So a
+  migration edited after it was applied leaves the repo and the database disagreeing
+  with **no command reporting it** — the ledger says done, the file says otherwise,
+  and both are internally consistent.
+  **CI's `Schema applies` gate cannot catch this class, and that is structural**:
+  it builds from scratch, where #9's edited file is complete and correct. The gap
+  exists only on a database that applied the earlier version — which is to say,
+  only in production. The general lesson is the one v33 keeps earning: a check that
+  proves migrations apply to an empty database says nothing about the database that
+  matters.
+  **Fixed by a second migration rather than an edit to the first**, which is the
+  rule this exists to restate. `create or replace` is idempotent, so the two orders
+  converge: from scratch #9 already produces these bodies and #10 rewrites them
+  identically; on production #10 adds the missing floor.
 - **v43** — THE BANK IS NAMED BY ITS ACCOUNTS WHEN THE CONNECTOR IS A PROXY
   (2026-08-14). **No migration.** The first production run showed the bank as
   **"MeuPluggy"**. `institution_name` is sync-owned and holds Pluggy's *connector*
