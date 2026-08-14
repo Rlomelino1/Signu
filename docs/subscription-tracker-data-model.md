@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-14** (v48) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-14** (v49) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,55 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v49** — THE AUTH EMAILS ARE SIGNU'S (2026-08-14). **No migration.** The
+  password-reset mail was Supabase's default: unbranded, and indistinguishable from
+  a generic service email — what a reset can least afford to look like (#5 from the
+  production run). Two templates now live in `supabase/templates/`, registered in
+  `config.toml`.
+  **The signup confirmation is included, though only the reset was reported.**
+  `enable_confirmations` is on and non-negotiable here, which makes that mail the
+  **first** any account receives; fixing only the reset would fix the second
+  impression and not the first. `email_change`, `invite`, `magic_link` and
+  `reauthentication` are deliberately left alone — unreachable or never sent, so a
+  template for them would be untested copy maintained for a path nothing walks.
+  **Construction is constrained, not stylistic**: table layout with inline styles
+  because Outlook renders no flexbox and strips `<style>` blocks; **no images at
+  all**, because clients block remote ones by default and the app icon would arrive
+  as an alt-texted void, so the monogram is a styled table cell; and the link
+  appears twice, as a button and as copyable text, for clients that strip anchors.
+  **The documentation was moved OUT of the HTML.** An earlier draft explained the
+  Outlook constraints inline and named `Theme.swift` — comments in an email template
+  are *delivered*, visible in "show original", so that would have shipped internal
+  notes to every inbox. Worse, `{{ .Email }}` mentioned in prose is substituted like
+  any other, putting the address in the source an extra time. Found by parsing the
+  files rather than by reading them. The HTML now carries no comments; the reasoning
+  is in `templates/README.md`.
+  **Copy was checked, not written**: "within the hour" is `otp_expiry = 3600`. A
+  draft line claiming the bank connection "is read-only" and that Signu "cannot"
+  move money was **cut** — the Pluggy connector payload advertises
+  `supportsPaymentInitiation`, so that needs the consent scope verified before it
+  goes in writing to a user.
+  **Verified as far as local can go**: the auth container's own env was read back
+  (`GOTRUE_MAILER_TEMPLATES_RECOVERY`, `…_SUBJECTS_RECOVERY`) and the served HTML
+  fetched out of the container, which also settled the path convention the CLI's own
+  commented examples disagree about — `./supabase/templates/…`, relative to the
+  project root, is the form that resolves.
+  **Deployed through the dashboard, deliberately, and this is the interesting
+  decision.** `supabase config push` sends all **74** auth settings with no dry-run,
+  and **no `config push` has ever been run against this project** — the spec records
+  none, and the only commit touching the phrase added the warning comment. So this
+  file has never been reconciled wholesale with production; one setting was ever
+  checked by hand. At least one more is wrong for production today:
+  `max_frequency = "1s"` is the CLI's local default against production's 60s, so a
+  push would relax the server-side rate limit on reset emails to one second —
+  removing the protection v19's countdown exists to make *visible* rather than
+  replace. That line is now flagged in place. `supabase config pull` does not exist
+  (verified), so nothing can diff the remaining settings first.
+  **The drift is accepted knowingly**: Migration #6's header is right that dashboard
+  config drifts invisibly, which is why the templates and their registration are
+  committed — the repo stays the source of truth and the dashboard is only the
+  delivery mechanism. Reconciling all 74 settings against production is its own
+  task, and it is what would make `config push` usable here.
 - **v48** — THE PASSWORD ROW STOPS CLAIMING A WINDOW THAT CLOSED (2026-08-14).
   **No migration.** One tap on the Settings password row left "Check your email for
   a link" and a live Resend standing **for the rest of the process lifetime**:

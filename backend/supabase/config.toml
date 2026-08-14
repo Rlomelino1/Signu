@@ -252,6 +252,18 @@ enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
+#
+# DO NOT PUSH THIS VALUE (v49). "1s" is the CLI's LOCAL-DEV default and exists so a
+# developer is not rate-limited while testing 17d. Production's default is 60s, and
+# `supabase config push` would overwrite it with this — quietly removing the
+# server-side limit that v19's 120s countdown exists to make VISIBLE rather than
+# replace.
+#
+# It stays at "1s" because local testing is what this file configures for local
+# runs, and it is flagged rather than changed because the fix is not a different
+# number here: it is reconciling all 74 auth settings against production before any
+# push, which has never been done. Until then, auth config changes go through the
+# dashboard. See supabase/templates/README.md.
 max_frequency = "1s"
 # Number of characters used in the email OTP.
 otp_length = 6
@@ -267,6 +279,33 @@ otp_expiry = 3600
 # pass = "env(SENDGRID_API_KEY)"
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
+
+# The two emails this app actually sends (v49). Both were Supabase's defaults until
+# now, which is to say unbranded and, in the reset case, indistinguishable from a
+# generic service email — the thing a password reset can least afford to look like.
+#
+# Bodies live in ./supabase/templates/, and the reasoning lives in the README beside
+# them rather than inside the HTML: comments in an email template are DELIVERED, so
+# an inline note about Outlook or a `{{ .Email }}` mentioned in prose would ship to
+# every recipient.
+#
+# Paths are relative to the project root (the directory holding `supabase/`), which
+# is why they are prefixed `./supabase/` — the CLI's own commented examples show it
+# both ways, and only this one resolves.
+#
+# `email_change`, `invite`, `magic_link` and `reauthentication` are deliberately NOT
+# customised: the app has no change-email UI and never sends the other three, so a
+# template for them would be untested copy maintained for a path nothing walks.
+[auth.email.template.confirmation]
+# Sent at signup, because `enable_confirmations` is on and non-negotiable above —
+# which makes this the FIRST email any account receives.
+subject = "Confirm the email for your Signu account"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+# 17d's send, and the Settings password row that reuses it (v19).
+subject = "Set a new password for your Signu account"
+content_path = "./supabase/templates/recovery.html"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]
