@@ -54,6 +54,22 @@ final class PasswordLinkState {
     var sentAt: Date?
 }
 
+#if DEBUG
+/// Whether the screenshot/UI-test harness has already armed the sent state.
+///
+/// Static because the thing it must outlive is the view: `switch selectedTab`
+/// destroys `SettingsView`, so `@State` would reset on every return and the harness
+/// would re-arm — masking the one behaviour v48's test exists to check.
+///
+/// `@MainActor` rather than `nonisolated(unsafe)`: it is only ever touched from
+/// `onAppear`, which is already main-actor work, and the project is in the Swift 6
+/// language mode where the unchecked form would be the loophole rather than the fix.
+@MainActor
+private enum PasswordSentHarness {
+    static var armed = false
+}
+#endif
+
 /// Settings (12a; empty-banks state = 12d).
 struct SettingsView: View {
     let payload: SettingsPayload
@@ -81,6 +97,29 @@ struct SettingsView: View {
         actions.onSetPassword()
     }
 
+    /// Returns the row to its original state once the cooldown has fully elapsed
+    /// AND the user has left the screen (v48).
+    ///
+    /// Nothing cleared `sentAt` before this, so one tap left "Check your email for a
+    /// link" and a live Resend standing for the rest of the process — long after the
+    /// 120s window they describe, and long after the mail was dealt with.
+    ///
+    /// **Both conditions are load-bearing.** Clearing on a timer while the user is
+    /// looking at the row would pull the confirmation out from under them
+    /// mid-sentence, which is worse than a stale row. And clearing on exit *during*
+    /// the cooldown would defeat the reason the state lives above this view at all
+    /// (v19): the countdown has to survive a tab switch, because a Resend that
+    /// silently no-ops inside Supabase's window is the failure it exists to prevent.
+    ///
+    /// So: leaving is the trigger, an expired cooldown is the condition.
+    private func resetPasswordRowIfSettled() {
+        // `Date()` rather than the ticked `clock`, which can be up to a second
+        // stale: this runs on the way out, when no tick is coming to correct it.
+        guard AuthCooldown.shouldForget(sentAt: sentAt, now: Date()) else { return }
+        passwordLink?.sentAt = nil
+        localSentAt = nil
+    }
+
     private var dismissed: [SettingsPayload.DismissedRow] {
         payload.dismissed.filter { !restored.contains($0.id) }
     }
@@ -103,13 +142,30 @@ struct SettingsView: View {
         }
         .background(SignuColor.paper)
         .onReceive(tick) { _ in clock = Date() }
+        // Leaving is the trigger; an expired cooldown is the condition. See
+        // `resetPasswordRowIfSettled` for why it is both and not either.
+        .onDisappear { resetPasswordRowIfSettled() }
         #if DEBUG
         // The sent state is otherwise reachable only by tapping, which no
         // screenshot run can do.
+        //
+        // `--settings-password-sent=expired` backdates the stamp past the window, so
+        // v48's reset can be exercised without a 120-second test.
+        //
+        // ARMED ONCE PER LAUNCH, not per appearance: re-arming on return would put
+        // the sent state back exactly when the test is checking that leaving cleared
+        // it, and the test would pass against a screen that never reset.
         .onAppear {
-            if CommandLine.arguments.contains("--settings-password-sent"), sentAt == nil {
-                localSentAt = Date()
-            }
+            guard !PasswordSentHarness.armed,
+                  let arg = CommandLine.arguments.first(where: {
+                      $0.hasPrefix("--settings-password-sent")
+                  }),
+                  sentAt == nil
+            else { return }
+            PasswordSentHarness.armed = true
+            localSentAt = arg.hasSuffix("=expired")
+                ? Date().addingTimeInterval(-Double(AuthCooldown.seconds + 10))
+                : Date()
         }
         #endif
     }

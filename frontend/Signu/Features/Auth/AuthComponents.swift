@@ -27,6 +27,19 @@ enum AuthCooldown {
         guard let sentAt else { return 0 }
         return min(max(seconds - Int(now.timeIntervalSince(sentAt)), 0), seconds)
     }
+
+    /// Whether a sent state should be forgotten as the user leaves the screen (v48).
+    ///
+    /// A function rather than an inline `cooldown == 0` so the rule can be pinned by
+    /// tests: it decides how long a piece of UI keeps claiming something, and both
+    /// of its clauses are easy to get subtly wrong. `remaining` clamps a backwards
+    /// clock jump to the full window, so a device whose time moved back reads as
+    /// "still cooling down" and the state survives — the safe direction, since the
+    /// alternative is a Resend that no-ops inside Supabase's window.
+    static func shouldForget(sentAt: Date?, now: Date) -> Bool {
+        guard sentAt != nil else { return false }
+        return remaining(since: sentAt, now: now) == 0
+    }
 }
 
 /// Labeled input field for the auth screens (17a–17e). Ink border on focus,
