@@ -270,7 +270,7 @@ struct EditProfileView: View {
 #if DEBUG
 #Preview("Edit profile · no name yet") {
     EditProfileView(
-        currentName: "rafael.pastor@sinatra.pro",
+        currentName: "you@example.com",
         nameIsFallback: true,
         avatarPath: nil,
         initial: "R",

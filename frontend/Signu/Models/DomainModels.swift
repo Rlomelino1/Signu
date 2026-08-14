@@ -63,7 +63,7 @@ struct Profile: Identifiable, Hashable {
     /// True when `displayName` is standing in for a name the user never gave, so
     /// screens can decline to greet someone by their email address. The fallback
     /// itself stays in place — a blank greeting would be worse — but "Hi
-    /// rafael.pastor@sinatra.pro" is not a greeting either.
+    /// you@example.com" is not a greeting either.
     var displayNameIsFallback: Bool = false
     var email: String
     var providers: [String]          // from auth.users identities: "google", "email"
