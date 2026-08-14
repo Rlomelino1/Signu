@@ -29,9 +29,24 @@ receives: fixing only the reset would fix the second impression and not the firs
 - **Table layout, inline styles.** Outlook renders no flexbox and strips `<style>`
   blocks, so a stylesheet degrades to unstyled text in the client most likely to
   open it. Every colour is stated on the element that uses it.
-- **No images at all.** Most clients block remote images by default, so the app icon
-  would arrive as an alt-texted void — worse than no logo. The monogram is a styled
-  letter in a table cell, which also keeps the email single-part.
+- **One image, with a fallback that still reads as the brand (v51).** The mark is
+  two counter-rotated arcs, not a letter, so no font substitutes for it — a styled
+  "S" was the wrong mark, which is why v49's blanket "no images" rule was narrowed
+  rather than kept. Gmail proxies and displays images by default and Apple Mail
+  loads them; Outlook desktop blocks them, and there the ink `<td>` plus
+  `alt="Signu"` in paper-on-ink still carries it. SVG is not an option (Gmail drops
+  it) and neither is a `data:` URI (Gmail strips those too), so it has to be hosted.
+  - Source of truth: `assets/signu-mark-80.png` — 80×80, 2.6 KB, derived from the
+    1024 app icon with alpha stripped, per v37.
+  - Served from the **public** `brand` bucket (Migration #12) at
+    `https://<ref>.supabase.co/storage/v1/object/public/brand/signu-mark-80.png`.
+    Public because a mail client holds no session and an email outlives any signed
+    URL's expiry — the opposite requirement to Migration #11's private avatars.
+  - **Placing the asset is a one-off step per environment**, like Migration #6's
+    Vault secrets, because a binary does not belong in a migration:
+    `supabase storage cp supabase/templates/assets/signu-mark-80.png ss:///brand/signu-mark-80.png`
+  - Rendered at 40×40 from an 80×80 source, so it stays sharp on retina without
+    paying for a larger file.
 - **The link appears twice**, as a button and as selectable text, because a client
   that strips anchor styling still leaves something the reader can copy.
 - **Palette copied from `frontend/Signu/DesignSystem/Theme.swift`**: paper `#EFEDE6`,
