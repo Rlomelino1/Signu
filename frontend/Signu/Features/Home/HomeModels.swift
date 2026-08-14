@@ -4,7 +4,15 @@ import Foundation
 /// (standing in for the future endpoint). The view computes nothing —
 /// home screen contract: "UI reads state, never guesses".
 struct HomePayload {
-    var firstName: String
+    /// nil when the profile has no name of its own. Home then greets without one
+    /// rather than reading an email address aloud — see `displayNameIsFallback`.
+    var firstName: String?
+    /// Monogram for the header circle: the name's initial where there is a name,
+    /// the email's where there is not. Computed with the payload so the header does
+    /// not have to know about the fallback.
+    var initial: String
+    /// Profile picture path, for `ProfileAvatar`. nil renders the monogram.
+    var avatarPath: String?
     var now: Date
     /// Connection-problem banner — the structural severity channel.
     /// Overdue runs never render here (transactional channel: tinted rows).

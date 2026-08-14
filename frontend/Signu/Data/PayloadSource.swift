@@ -57,14 +57,30 @@ extension SignuPayloadSource {
     func makeHomePayload() -> HomePayload {
         HomePayload(
             firstName: firstName,
+            initial: profileInitial,
+            avatarPath: profileValue.avatarPath,
             now: now,
             banner: connectionBanner,
             content: homeContent
         )
     }
 
-    private var firstName: String {
-        profileValue.displayName.split(separator: " ").first.map(String.init) ?? profileValue.displayName
+    /// nil when the profile carries no name of its own.
+    ///
+    /// `displayName` falls back to the email address so nothing renders blank, and
+    /// that fallback is right for a row that shows an identity — but "Good morning,
+    /// rafael.pastor@sinatra.pro" is not a greeting. Home drops the name instead.
+    private var firstName: String? {
+        guard !profileValue.displayNameIsFallback else { return nil }
+        return profileValue.displayName.split(separator: " ").first.map(String.init)
+            ?? profileValue.displayName
+    }
+
+    /// The name's initial, or the email's when there is no name. Never the "@" that
+    /// `displayName.prefix(1)` would produce for an address beginning with one.
+    private var profileInitial: String {
+        let source = firstName ?? profileValue.email
+        return String(source.prefix(1)).uppercased()
     }
 
     private var connectionBanner: HomePayload.Banner? {

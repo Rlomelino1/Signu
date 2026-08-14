@@ -20,6 +20,8 @@ struct SettingsScreen: View {
 
 struct SettingsActions {
     var onSelectBank: (UUID) -> Void = { _ in }
+    /// The Profile row (v47). Opens the edit-profile sheet.
+    var onEditProfile: () -> Void = {}
     var onConnectBank: () -> Void = {}
     var onRestore: (UUID) -> Void = { _ in }
     var onDeleteAccount: () -> Void = {}
@@ -119,27 +121,37 @@ struct SettingsView: View {
             SectionHeader("Profile")
             SignuCard {
                 VStack(spacing: 0) {
-                    HStack(spacing: 14) {
-                        Circle().fill(SignuColor.ink).frame(width: 46, height: 46)
-                            .overlay {
-                                Text(payload.initial)
-                                    .font(SignuFont.font(18, .semibold))
-                                    .foregroundStyle(SignuColor.onInk)
+                    // The chevron promised a destination for four versions and had
+                    // none: the row was an HStack, so the whole thing was inert
+                    // (#4 from the production run). It is a Button now, and the
+                    // destination is where the name and picture are changed (#7).
+                    Button { actions.onEditProfile() } label: {
+                        HStack(spacing: 14) {
+                            ProfileAvatar(path: payload.avatarPath, initial: payload.initial, size: 46)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(payload.displayName)
+                                    .font(.signuRowTitle)
+                                    .foregroundStyle(SignuColor.textPrimary)
+                                    .lineLimit(1)
+                                // Invites the name rather than restating the address
+                                // under itself, which is what this row did when
+                                // `display_name` was null: two lines, one value.
+                                Text(payload.displayNameIsFallback ? "Add your name" : payload.email)
+                                    .font(SignuFont.font(14))
+                                    .foregroundStyle(SignuColor.textSecondary)
+                                    .lineLimit(1)
                             }
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(payload.displayName)
-                                .font(.signuRowTitle)
-                                .foregroundStyle(SignuColor.textPrimary)
-                            Text(payload.email)
-                                .font(SignuFont.font(14))
-                                .foregroundStyle(SignuColor.textSecondary)
-                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            chevron
                         }
-                        Spacer(minLength: 8)
-                        chevron
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 9)
+                        // v32's lesson, and it applies to every row added since: a
+                        // background does not extend a plain button's hit area, so
+                        // the shape is declared.
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 9)
+                    .buttonStyle(.plain)
 
                     if !payload.providers.isEmpty {
                         rowDivider

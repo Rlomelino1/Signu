@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-14** (v46) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-14** (v47) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,59 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v47** — THE PROFILE ROW LEADS SOMEWHERE, WITH A NAME AND A PICTURE
+  (2026-08-14). **Migration #11, additive** — one nullable column, one
+  column-scoped grant, one private bucket, four owner-scoped policies. Closes two
+  items that turned out to be one: the first Profile row was an `HStack` with a
+  **chevron and no Button**, so it promised a destination for four versions and had
+  none (#4), and that missing destination is exactly where a name and picture would
+  be changed (#7).
+  **`display_name` needed no migration** — it has been in the client's grant since
+  Migration #1 and simply had no writer. `avatar_path` is the eighth user-owned
+  column, and the boundary is unchanged: the client writes what the user asserts,
+  never what the sync or the engine owns.
+  **The bucket is private.** A public one makes rendering a plain URL, which is the
+  tempting answer and the wrong one here: v38 set this app's posture by padding the
+  logo request set so it discloses nothing, and a world-readable photo of the user's
+  face at a URL outliving every session is a larger disclosure than the thing that
+  padding protects. Unguessable is not private.
+  **The column holds a PATH, never a URL.** A URL in a user-writable column is a
+  URL the client can set to anything, and something eventually renders it. A path is
+  scoped by the policies to the owner's own folder, so a tampered value can at worst
+  name a file that does not exist.
+  **Every upload writes a new path** (`<uid>/<epoch>.jpg`), which makes the path a
+  cache key: a changed picture is a changed key, so a stale cached copy is
+  impossible by construction rather than by TTL. `AvatarStore` therefore needs no
+  expiry at all, where `LogoStore` needed 30 days — the difference is that a logo
+  changes *behind* a fixed URL and this cannot.
+  **The name and the picture save independently.** Pairing them means either a photo
+  upload blocking a one-character name fix, or a failed upload discarding a typed
+  name. They are two writes against two systems — a column and a bucket — and the
+  sheet reports on each. Order matters and is opposite per direction: on upload the
+  object precedes the column, on removal the column follows the delete, because a
+  column pointing at a live object is the only intermediate state worth being
+  interrupted in.
+  **Home stops reading an email address aloud.** `displayName` falls back to the
+  email so nothing renders blank, which is right for a row showing an identity and
+  wrong for a greeting — "Good morning, rafael.pastor@sinatra.pro" is not one. The
+  fallback is now *recorded* (`displayNameIsFallback`) rather than re-derived at
+  four call sites, `firstName` is nil when it applies, and the monogram takes the
+  email's letter instead of the `@` that `prefix(1)` would have produced.
+  **The migration was validated with CI's own container set**, not merely locally:
+  `supabase start -x storage-api …` then `db reset`, which also answered the real
+  question — the `storage` schema, `storage.objects` and `storage.foldername` all
+  come from the database image, so excluding the storage API does not stop this
+  applying. `drop policy if exists` was written first and **measured**: four
+  `NOTICE` lines per reset. The gate only greps `warning:` so it would have passed;
+  fixed with `if not exists` blocks rather than by suppressing messages, since
+  `client_min_messages` session-wide would mask later migrations' warnings and
+  weaken the gate itself.
+  105 tests (10 new): the JPEG magic number, a 12MP source landing under the 2 MiB
+  ceiling, a tall image cropped rather than squashed (verified by sampling a pixel),
+  and removal making the object *unreachable* rather than merely unreferenced.
+  **Not verified, and stated rather than implied**: the live upload path. That needs
+  a signed build with a real session, so Storage's actual response to these policies
+  is code-reviewed only.
 - **v46** — THE CALENDAR SHOWS WHAT HAPPENED, AND ITS GRID STOPS MOVING
   (2026-08-14). **No migration.** Two items from the production run, one surface.
   **Past charges now appear (#9 on the list).** `makeCalendarPayload` consulted

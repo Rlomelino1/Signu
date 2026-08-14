@@ -68,6 +68,12 @@ struct AppShellView: View {
     /// Owned by the shell so one cache serves every screen, and so the prefetch
     /// runs once per launch rather than once per row.
     @State private var logos = LogoStore()
+    /// Owned here for the same two reasons as `logos`: one cache serves every
+    /// surface that renders the picture, and the download happens once per launch
+    /// rather than once per appearance.
+    @State private var avatars = AvatarStore()
+    /// Drives the edit-profile sheet (v47).
+    @State private var editingProfile = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -146,6 +152,7 @@ struct AppShellView: View {
                 case .settings:
                     SettingsScreen(provider: provider, actions: SettingsActions(
                         onSelectBank: { settingsConnectionId = $0 },
+                        onEditProfile: { editingProfile = true },
                         onConnectBank: { connectTarget = ConnectTarget(connectionId: nil) },
                         // Restore is `ignored = false` and nothing more: the run returns
                         // to `possible` and resurfaces in review, because it never left
@@ -189,6 +196,7 @@ struct AppShellView: View {
         // rendered real logos while the detail hero behind the same store kept
         // its monogram.
         .environment(logos)
+        .environment(avatars)
         .task {
             // Reference data, loaded once, then every catalog domain is fetched —
             // including merchants this user has never heard of. That is the
@@ -200,6 +208,12 @@ struct AppShellView: View {
             await logos.prefetch()
         }
         .task(id: dataVersion) { await refreshSuggestionCount() }
+        // Keyed on dataVersion so this covers all three moments the path can
+        // change: launch, an upload from the sheet below, and the foreground
+        // re-read finding a picture set on another device.
+        .task(id: dataVersion) {
+            await avatars.load(path: try? await provider.profile().avatarPath, using: provider)
+        }
         // Coming back to the app is the other moment the graph can have moved
         // without the app moving it: the sync runs at 15:30 UTC daily, and a
         // session left open across it renders yesterday's state indefinitely.
@@ -379,6 +393,15 @@ struct AppShellView: View {
             })
             .presentationDetents([.height(560)])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $editingProfile) {
+            EditProfileSheet(provider: provider, onChanged: { dataVersion += 1 })
+                // Re-applied here for the reason the `logos` comment above records:
+                // a presented surface does not reliably inherit a custom
+                // environment object, and the sheet renders the same avatar.
+                .environment(avatars)
+                .presentationDetents([.height(460)])
+                .presentationDragIndicator(.visible)
         }
         // The four Edge Function writes change state no screen is showing, so a
         // failure has nowhere to be noticed. The message is the server's own

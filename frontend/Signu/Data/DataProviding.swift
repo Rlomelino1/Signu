@@ -114,6 +114,36 @@ protocol SignuDataProviding {
     /// `possible` and resurfaces in review, because it never left that state.
     func setIgnored(subscriptionId: UUID, ignored: Bool) async throws
 
+    /// Settings' edit-profile sheet. `display_name` has been in the client's
+    /// column-scoped grant since Migration #1 and had no writer until v47.
+    ///
+    /// Passing nil clears it, and the read falls back to the email address again —
+    /// the same shape as `setNickname`, and for the same reason: "no name" is a
+    /// state the user is allowed to return to.
+    func setDisplayName(_ name: String?) async throws
+
+    /// Uploads a **downscaled JPEG** and points `profiles.avatar_path` at it.
+    ///
+    /// The caller passes finished bytes rather than a `UIImage`, so the encoding
+    /// rule lives in one testable place (`AvatarImage`) instead of in whichever
+    /// screen happens to call this. Each upload writes a NEW path, which is what
+    /// makes the path a cache key — see Migration #11.
+    func setAvatar(jpeg: Data) async throws
+
+    /// Clears the picture: the object is deleted and the column set to null.
+    ///
+    /// The column goes last. Nulling first and failing to delete leaves an
+    /// orphaned object the owner can no longer name; deleting first and failing to
+    /// null leaves a path to nothing, which renders as the monogram — the same as
+    /// no picture. Only one of those two orders degrades honestly.
+    func removeAvatar() async throws
+
+    /// The bytes behind `avatar_path`, for the cache to store on disk.
+    ///
+    /// On the provider rather than in `AvatarStore` because the bucket is private:
+    /// reading it needs the authenticated client, and the store must not hold one.
+    func avatarData(path: String) async throws -> Data
+
     // MARK: - Writes the client is not granted (Edge Functions, v30)
     //
     // These four throw where the two above swallow. A column write the user can
