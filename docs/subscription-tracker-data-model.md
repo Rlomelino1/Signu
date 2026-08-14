@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-14** (v45) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-14** (v46) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,44 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v46** — THE CALENDAR SHOWS WHAT HAPPENED, AND ITS GRID STOPS MOVING
+  (2026-08-14). **No migration.** Two items from the production run, one surface.
+  **Past charges now appear (#9 on the list).** `makeCalendarPayload` consulted
+  only `next_expected_date`, so a month holding a real charge rendered empty —
+  July had a charge on the 19th and showed nothing. The model's refusal to
+  *project* future dates is right and stands: a projected date is the app asserting
+  what the engine declined to. **A charge that already landed is not a projection**,
+  it is a fact with the transaction's own amount, so showing it violates nothing.
+  The asymmetry is now the documented design: **backwards complete, forwards one
+  renewal per run.**
+  **Every run state contributes its charges**, including cancelled and ended.
+  Scoping the backward pass the way the forward pass is scoped would report a
+  cheaper past than the ledger holds — a subscription cancelled in June still cost
+  money in May.
+  **A landed charge is never approximate**, even on an R3 run: the tilde marks a
+  *predicted* amount, and R3's uncertainty is about the NEXT amount, not a past
+  one. Pinned by a test that takes one R3 run and asserts a plain past charge in
+  one month and a tilded forecast in the next.
+  **The month total became one figure** — "R$ 387,93 this month", paid plus still
+  expected — because calling it "expected" would misdescribe the larger half of a
+  past month. Entry identity is the **charge id** for paid and the **run id** for
+  forecasts, so a month holding both for one run cannot collide.
+  **The grid is always six rows (#10).** It was `leadingBlanks + dayCount` cells,
+  so a month occupied four, five or six rows depending on where it started and the
+  screen moved under the thumb as the user paged. Six is the most any month can
+  span; the spare cells carry the adjacent months' **real days**, muted and inert.
+  A tap there does nothing rather than paging, because a gesture that both changes
+  month and selects a day is two actions from one tap, and `onStep` already exists.
+  **A second bug appeared only on screen, and this is the second time today.** The
+  first version rendered June with five rows and an empty sixth: three sibling
+  `ForEach`es share one identity space inside a `LazyVGrid`, the trailing days
+  (1…11) collided with the month's own 1…11, and SwiftUI **silently dropped them**.
+  Now one `ForEach` over cells identified by position *and* day. Reading the code
+  gave no hint, exactly as with v45's XXXL crop.
+  A `--calendar[=offset]` harness joins the per-screen debug pattern, because
+  neither change can be checked without looking. 11 new tests (101 total), the
+  calendar **UI test** run locally as well — it scrolls to reach a row, and a taller
+  grid pushes that list down.
 - **v45** — THE AMOUNT IS NEVER CROPPED (2026-08-14). **No migration.** The detail
   hero rendered **"R$ 34,…&nbsp;/mo"**. A cropped number is a wrong number, and
   unlike the truncated service name beside it ("TRUELINE VAL…", accepted) the user

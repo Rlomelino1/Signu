@@ -48,6 +48,14 @@ struct RootView: View {
                 name: String(arg.dropFirst("--detail=".count)),
                 bottom: CommandLine.arguments.contains("--detail-bottom")
             )
+        } else if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--calendar") }) {
+            // `--calendar` opens on today's month, `--calendar=-1` a month back.
+            // The offset exists because the calendar's two v46 changes can only be
+            // checked by looking: a past month proves landed charges render, and
+            // paging proves the grid keeps its six rows.
+            CalendarDebugView(
+                monthOffset: arg.split(separator: "=").dropFirst().first.flatMap { Int($0) } ?? 0
+            )
         } else if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--settings=") }) {
             SettingsDebugView(name: String(arg.dropFirst("--settings=".count)))
         } else if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--auth=") }) {
@@ -184,6 +192,18 @@ private struct DetailDebugView: View {
 /// Screenshot harness for settings sub-screens: `--settings=<name>` where
 /// name is connection-itau / connection-nubank / connection-bradesco /
 /// attributed-itau / remove / delete.
+/// The calendar at an arbitrary month, for the screenshots v46's two changes need.
+/// `MockDataProvider`'s clock is pinned, so `--calendar=-1` lands on the same
+/// month every run and the images stay comparable.
+private struct CalendarDebugView: View {
+    let monthOffset: Int
+    private let provider = MockDataProvider()
+
+    var body: some View {
+        CalendarScreen(provider: provider, startingMonthOffset: monthOffset)
+    }
+}
+
 private struct SettingsDebugView: View {
     let name: String
     private let provider = MockDataProvider()
