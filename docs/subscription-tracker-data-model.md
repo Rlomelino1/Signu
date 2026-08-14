@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-13** (v41) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-14** (v42) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -506,7 +506,13 @@ against the real item: 1 connection, 2 accounts, 258 transactions.*
   - **Unconfigured means loud, not silent.** `cron.schedule` calls
     `public.trigger_pluggy_sync()`, which raises a named exception when either
     secret is missing rather than POSTing to a null URL — a schedule that quietly
-    no-ops is indistinguishable from one that works.
+    no-ops is indistinguishable from one that works. *A **wrong** secret is a
+    different matter and was silent for three days — see v42.*
+  - **The POST is given 150s (Migration #9), not pg_net's default 5s**, because
+    the work behind the URL takes ~7s and the default overwrote every real status
+    with a timeout. `cron.job_run_details` cannot substitute: it reports success
+    for the *queueing*, so a 200, a 403 and a DNS failure all read identically
+    there. `net._http_response` is the only record of what actually happened.
   - Idempotent: pg_cron upserts on jobname, so a reset yields exactly one entry.
 - **`connection` was seeded by hand** via `supabase/seed/seed-connection.sql`,
   with the itemId passed in rather than committed. Committed as a parameterized
@@ -1682,6 +1688,58 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v42** — THE SYNC HAD NOT RUN IN THREE DAYS, AND EVERYTHING SAID IT HAD
+  (2026-08-14). **Migration #9, additive** — two function bodies replaced, one
+  argument added to each. Found from the app itself: Home read "Updated 2d ago",
+  which is `max(connection.last_synced_at)`, and `pluggy-sync` stamps that column
+  only on success. Every other indicator disagreed. Both cron jobs fired on
+  schedule as `postgres`, `job_run_details` said **"succeeded"** for every run,
+  all three Vault secrets existed, and `last_sync_error` was **null**.
+  **The cause was a paste that never happened.** The Vault copy of
+  `signu_sync_secret` held **four characters** — `<⌘V>`, the literal placeholder —
+  against a 64-character `SYNC_SECRET` in the function env, so every firing was
+  rejected by `pluggy-sync`'s own shared-secret gate with **HTTP 403**. Vault's
+  `updated_at` was 2026-08-10 19:07:28, **108 seconds after** the 19:05:40 manual
+  test that v27 recorded as proof the chain worked. The test was honest; what it
+  proved was destroyed two minutes later, and nothing ever re-checked it. A Vault
+  write reports success no matter what lands in it, so the fix carries a
+  **read-back**: compare `md5(decrypted_secret)` against the digest
+  `supabase secrets list` prints for the deployed value, which confirms the two
+  copies match without either being displayed. It caught a second failed paste
+  immediately — 61 characters instead of 64.
+  **Three indicators lied, and each for its own reason.** `job_run_details` says
+  "succeeded" because `trigger_pluggy_sync()` returns when pg_net *queues* the
+  request, so its status describes the queueing and reads identically for a 200, a
+  403 or a DNS failure. `last_sync_error` stayed null because the 403 is returned
+  by the gate, four exits before the per-connection error path that writes that
+  column. And `net._http_response`, the one place the HTTP status is recorded, was
+  being overwritten with a **guaranteed** timeout: the POST took pg_net's default
+  5000 ms deadline while the work behind it needs ~7s. **Migration #9 raises both
+  triggers to 150s**, matched to the Edge Function request ceiling so a slow run is
+  not mislabelled as a dead one.
+  **Both triggers also gain a length floor** — `raise` if the Vault secret is under
+  32 characters. A floor, not a format assertion: it is chosen low enough that a
+  future rotation to a shorter secret is not broken by it, and it cannot catch a
+  wrong-but-plausible value. What it buys is that the failure that actually
+  happened becomes a **failed cron run on the first firing** rather than three days
+  of syncing nothing, because a 403 at the gate is invisible from inside Postgres.
+  **Verified rather than assumed, because the fixes are opposite**: pg_net giving
+  up does not abort the function. Detection wrote charges at 11:46:02.888, **1.9s
+  after** pg_net recorded its timeout at 11:46:01, so the run completed in full
+  while the caller was told it had not. Nothing was retried or repaired.
+  **The 16:30 reminder job was failing identically** — Migration #7 reuses
+  `signu_sync_secret` — so no reminder could have been sent regardless of settings.
+  The one tracked subscription has `remind_before_days = 2` against a
+  `next_expected_date` of 2026-08-19, so the first genuine candidate is 2026-08-17;
+  a dry run before then correctly finds nothing, which is not evidence of a fault.
+  **Deliberately not included**: anything that notices this class of failure
+  without being asked. Migration #9 makes the evidence *correct*, not *loud* —
+  `net._http_response` is still read by nobody and pruned within hours. A staleness
+  alert over `max(last_synced_at)` is a new Edge Function and a third cron entry,
+  and it would also cover the failures the sync contract already anticipates
+  (Pluggy's five-strikes rule silently clearing `nextAutoSyncAt`, `/auth` failing,
+  the function crashing) rather than only this one. Left as a decision, not
+  smuggled into a function-body swap.
 - **v41** — THE GATE NOTICES A SESSION THAT ENDS (2026-08-13). **No migration.**
   `SessionStore` flipped to `.authenticated` when sign-in succeeded and then
   nothing observed auth state again, so a session that disappeared afterwards left
