@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-14** (v44) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-14** (v45) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,36 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v45** — THE AMOUNT IS NEVER CROPPED (2026-08-14). **No migration.** The detail
+  hero rendered **"R$ 34,…&nbsp;/mo"**. A cropped number is a wrong number, and
+  unlike the truncated service name beside it ("TRUELINE VAL…", accepted) the user
+  cannot rename their way out of it. Cause: the amount `Text` had `lineLimit(1)`
+  and **no `minimumScaleFactor`**, while the date slot beside it is `.fixedSize()`
+  — so the amount was the side that got squeezed. Every other number in the ink
+  hero already scaled: both `HeroStatTile` lines do (0.7 and 0.6). This was the one
+  site that missed the convention, and it held the largest number on the screen.
+  **The obvious fix was not enough, and only a screenshot showed it.** Adding
+  `minimumScaleFactor(0.6)` fixed the reported case, and at XXXL Dynamic Type the
+  hero still rendered "R$ 3…&nbsp;/mo": the date slot grows with type size, so the
+  amount hit its 60% floor and truncated anyway. Reading the diff would have
+  concluded the bug was fixed — this is the v37/v39 lesson again, that a layout
+  claim is only worth what the screenshot says.
+  **`ViewThatFits`, not a Dynamic Type threshold.** Three things contribute to the
+  overflow — amount length, date-slot width ("Aug 19 · in 5 days" is the widest the
+  slot produces), and type size — so measuring the result is exact where a
+  breakpoint is a guess. It works here because the row's ideal width is honest:
+  `Spacer(minLength: 8)` reports 8 and the date block is `.fixedSize()`. The
+  designed side-by-side row (21k, amount dominant with the date slot sharing its
+  baseline) is tried first and still chosen at every normal size; the fallback
+  stacks the date under the amount, both at full size. Losing the shared baseline
+  is the cost; losing digits was never an option. `minimumScaleFactor` stays as a
+  second line of defence.
+  **The failing case is now a permanent preview state** — the production row
+  verbatim (`TRUELINE VALVE CORPORATION`, `R$ 34,51`, `Aug 19 · in 5 days`),
+  reachable as `--hero-states=4`. Kept as a preview rather than a test because the
+  failure is geometric: it can only be seen, and a screenshot of it is what closed
+  the item. Verified at default type (all four original states unchanged,
+  side-by-side, baseline intact) and at XXXL (reflowed, nothing cropped).
 - **v44** — AN EDITED MIGRATION IS NOT A RE-APPLIED ONE (2026-08-14).
   **Migration #10, additive** — the same two function bodies as #9, now including
   the guard #9 never delivered. Production was read rather than trusted, and the
