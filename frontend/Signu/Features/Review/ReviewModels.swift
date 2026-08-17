@@ -24,7 +24,15 @@ struct ReviewPayload {
         var evidence: String
         var charges: [ChargeLine]       // newest first
         /// Prediction line: renews <date, bare> · ~<amount>.
-        var renewsDate: Date
+        ///
+        /// **Nil when the run's lifecycle has already ended** — its expected date and
+        /// grace period both passed, so there is nothing to predict. It was a
+        /// non-optional `Date` until v64, which made `makeReviewPayload` drop such a
+        /// suggestion inside a `compactMap` while Home's `suggestionCount` and the Subs
+        /// "SUGGESTED" row both still counted it: three surfaces disagreeing, and the
+        /// one that could act on it was the one that hid it. Found in production, by
+        /// tapping Review and being told "You're all caught up".
+        var renewsDate: Date?
         var renewsAmount: Decimal
         /// R4 asks monthly/annual at confirmation; R3 already measured it.
         var asksIntervalOnTrack: Bool

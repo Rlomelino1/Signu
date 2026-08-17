@@ -176,7 +176,12 @@ struct ReviewView: View {
                         // Bare date, tilde amount — the tilde rule is amounts-only
                         // (locked 2026-07-15), and a predicted date carries the
                         // same ±3-day window whatever rule found it.
-                        Text("\(interval == .annual ? "Annual" : "Monthly") · renews \(SignuFormat.monthDay(suggestion.renewsDate)) · \(SignuFormat.brl(suggestion.renewsAmount, approximate: true))")
+                        // No predicted date means the run is already over, so the
+                        // amount is not a prediction either -- claiming "~R$ 20,97"
+                        // next to nothing would be inventing a renewal (v64).
+                        Text(suggestion.renewsDate.map {
+                            "\(interval == .annual ? "Annual" : "Monthly") · renews \(SignuFormat.monthDay($0)) · \(SignuFormat.brl(suggestion.renewsAmount, approximate: true))"
+                        } ?? "\(interval == .annual ? "Annual" : "Monthly") · no renewal expected")
                             .font(SignuFont.font(13, .semibold))
                             .foregroundStyle(SignuColor.green)
                             .lineLimit(1)
@@ -253,7 +258,9 @@ struct ReviewView: View {
                 evidenceList(suggestion.charges)
 
                 // Prediction: bare date, tilde amount (tilde rule — amounts only).
-                Text("If confirmed: renews \(SignuFormat.monthDay(suggestion.renewsDate)) · \(SignuFormat.brl(suggestion.renewsAmount, approximate: true))")
+                Text(suggestion.renewsDate.map {
+                    "If confirmed: renews \(SignuFormat.monthDay($0)) · \(SignuFormat.brl(suggestion.renewsAmount, approximate: true))"
+                } ?? "If confirmed: no renewal expected — the last charge is too old to predict one")
                     .font(.signuSubtitle)
                     .foregroundStyle(SignuColor.textSecondary)
 

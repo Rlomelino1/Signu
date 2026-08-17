@@ -402,7 +402,12 @@ export function catalogEntryFor(
  *  the strongest available signal has already said this merchant's charges are not
  *  always subscriptions, and "ask every name until one agrees" is a false-positive
  *  generator. */
-function suggestR4(group: TxRow[], catalog: CatalogRow[]): ProtoRun | null {
+function suggestR4(
+  group: TxRow[],
+  catalog: CatalogRow[],
+  today: string,
+  confirmedR4Exists: boolean,
+): ProtoRun | null {
   if (!group.length || !catalog.length) return null
   const first = group[0]
 
@@ -417,7 +422,30 @@ function suggestR4(group: TxRow[], catalog: CatalogRow[]): ProtoRun | null {
   // is the case R4 exists for -- but when R1 and R3 have both declined a handful of
   // charges from a merchant whose every charge is a subscription, they belong to one
   // suggestion rather than being dropped on the floor. "Generous to extend."
-  return { charges: [...group], detected_by: 'R4', interval: 'monthly' }
+  const proto: ProtoRun = { charges: [...group], detected_by: 'R4', interval: 'monthly' }
+
+  // FRESHNESS, AND IT GATES CREATION ONLY (v64).
+  //
+  // R4's first firing in production proposed a subscription whose single charge was
+  // FIVE MONTHS old: the derived lifecycle had already ended it, so the run carried an
+  // `end_date`, no `next_expected_date`, and an invitation to track something that was
+  // over. With a year of replayed history, every long-dead single charge from a catalog
+  // merchant becomes a standing suggestion, and a `possible` run is re-derived forever
+  // -- it never ages out on its own.
+  //
+  // `confirmedR4Exists` is why this is not simply "refuse ended runs". A CONFIRMED R4
+  // run that never receives a second charge must die THROUGH the lifecycle -- active,
+  // overdue, ended -- which the spec requires explicitly and a test pins. Declining to
+  // regenerate it would delete the run instead of ending it, and with it the user's
+  // confirmation. So: an assertion is always continued; a suggestion nobody has acted
+  // on is only ever CREATED while it could still be alive.
+  //
+  // A stale `possible` run left over from before this rule is not regenerated, so it
+  // leaves through `delete_run_ids` on the next pass. Suggestions clean themselves up;
+  // assertions never do.
+  if (!confirmedR4Exists && lifecycle(proto, today).status === 'ended') return null
+
+  return proto
 }
 
 /** R2 — backfill. On a confirmed run, claim an unclaimed same-merchant charge
@@ -635,6 +663,14 @@ export function detect(input: EngineInput): DesiredState {
   for (const merchant of [...groups.keys()].sort()) {
     const group = groups.get(merchant)!.slice().sort(compareRows)
 
+    // Resolved before the rules, not after: R4 needs to know whether an assertion
+    // already exists for this merchant (see `suggestR4`).
+    const storedSubs = storedByMerchant.get(merchant) ?? []
+    const candidateStoredRuns = storedSubs.flatMap((s) => runsBySub.get(s.id) ?? [])
+    const confirmedR4Exists = candidateStoredRuns.some(
+      (r) => r.detected_by === 'R4' && r.status !== 'possible',
+    )
+
     const claimed = new Set<string>()
     const protos = anchorR1(group)
     protos.forEach((p) => p.charges.forEach((c) => claimed.add(c.id)))
@@ -653,7 +689,7 @@ export function detect(input: EngineInput): DesiredState {
     // R1 continuation's business, and a second 'possible' run for a merchant the user
     // already tracks is noise. "Strict to create."
     if (protos.length === 0) {
-      const s = suggestR4(group, input.catalog ?? [])
+      const s = suggestR4(group, input.catalog ?? [], input.today, confirmedR4Exists)
       if (s) protos.push(s)
     }
     if (protos.length === 0) continue
@@ -663,8 +699,6 @@ export function detect(input: EngineInput): DesiredState {
     r4Runs += protos.filter((p) => p.detected_by === 'R4').length
 
     const keys = dedupeKeys(merchant, protos)
-    const storedSubs = storedByMerchant.get(merchant) ?? []
-    const candidateStoredRuns = storedSubs.flatMap((s) => runsBySub.get(s.id) ?? [])
     const matches = matchRuns(protos, candidateStoredRuns, input.charges)
 
     protos.forEach((proto, idx) => {

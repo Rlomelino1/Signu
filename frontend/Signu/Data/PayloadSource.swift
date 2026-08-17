@@ -278,9 +278,14 @@ extension SignuPayloadSource {
             .filter { $0.status == .possible }
             .filter { run in subscription(run.subscriptionId).map { !$0.ignored } ?? false }
             .compactMap { run -> ReviewPayload.Suggestion? in
+                // `nextExpectedDate` is deliberately NOT required (v64). An ended
+                // run has none, and refusing to render it here while Home and Subs
+                // both count it produced a Review screen that said "You're all
+                // caught up" over a suggestion the user could see two taps away.
+                // A charge is still required: a run with none has no evidence to
+                // show, and suggestions are decided on evidence.
                 guard let sub = subscription(run.subscriptionId),
-                      let last = latestCharge(run.id),
-                      let next = run.nextExpectedDate else { return nil }
+                      let last = latestCharge(run.id) else { return nil }
                 let charges = chargeList
                     .filter { $0.runId == run.id }
                     .sorted { $0.date > $1.date }
@@ -296,7 +301,7 @@ extension SignuPayloadSource {
                     id: run.id, subscriptionId: sub.id, serviceName: sub.displayName,
                     evidence: reviewEvidence(run),
                     charges: charges,
-                    renewsDate: next,
+                    renewsDate: run.nextExpectedDate,
                     renewsAmount: last.amount,
                     asksIntervalOnTrack: run.detectedBy == .r4,
                     billingInterval: run.billingInterval
