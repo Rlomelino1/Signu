@@ -165,10 +165,9 @@ extension SignuPayloadSource {
                 guard let sub = subscription(run.subscriptionId),
                       let next = run.nextExpectedDate,
                       let last = latestCharge(run.id) else { return nil }
-                let interval = run.billingInterval == .monthly ? "Monthly" : "Annual"
                 return HomePayload.SubscriptionItem(
                     id: sub.id, serviceName: sub.displayName,
-                    subtitle: "\(interval) · \(last.cardLabel)",
+                    subtitle: intervalAndCard(run, last),
                     amount: last.amount, approximate: run.detectedBy.isApproximate,
                     nextDate: next,
                     overdueDays: run.status == .overdue ? days(from: next, to: today) : nil
@@ -207,10 +206,9 @@ extension SignuPayloadSource {
             switch run.status {
             case .active, .overdue:
                 guard let next = run.nextExpectedDate else { continue }
-                let interval = run.billingInterval == .monthly ? "Monthly" : "Annual"
                 let row = SubsPayload.Row(
                     id: sub.id, serviceName: sub.displayName,
-                    subtitle: "\(interval) · \(last.cardLabel)",
+                    subtitle: intervalAndCard(run, last),
                     amount: last.amount, approximate: run.detectedBy.isApproximate,
                     nextDate: next,
                     overdueDays: run.status == .overdue ? days(from: next, to: today) : nil,
@@ -366,6 +364,51 @@ extension SignuPayloadSource {
                   let sub = subscription(run.subscriptionId), !sub.ignored else { return sum }
             return sum + charge.amount
         }
+    }
+
+    /// "Monthly · Master 2049", or just "Monthly" when the card cannot be named.
+    ///
+    /// **Two bugs in one line, and the visible one was the smaller.** These subtitles
+    /// interpolated `charge.card_label` directly, which is NULL for every charge in
+    /// production — the engine hardcodes it (`detection.ts`, `card_label: null`), so the
+    /// column has a reader and no writer. The row rendered "Monthly · " with a dangling
+    /// separator, saying less than the data supports and drawing punctuation around the
+    /// absence.
+    ///
+    /// The card is derivable from data the app already holds: `transactionAccountMap`
+    /// resolves the charge's transaction to its `bank_account`, which carries the brand
+    /// and last four. Same mechanism the connection detail already uses, and the same
+    /// posture as `BankLabel` (v43): derive at render time rather than write an
+    /// interpretation into a sync-owned column.
+    ///
+    /// The separator is part of the label, so an unnameable card produces "Monthly"
+    /// and never "Monthly · ". A charge whose raw transaction has been deleted
+    /// (`transaction_id = NULL`, by design) lands there, which is exactly when a
+    /// trailing separator would be a lie about missing data rather than absent data.
+    func intervalAndCard(_ run: SubscriptionRun, _ charge: Charge) -> String {
+        let interval = run.billingInterval == .monthly ? "Monthly" : "Annual"
+        guard let card = derivedCardLabel(for: charge) else { return interval }
+        return "\(interval) · \(card)"
+    }
+
+    /// The stored snapshot when the engine ever writes one, otherwise the account the
+    /// charge resolves to. Stored first on purpose: `card_label` is documented as a
+    /// snapshot at billing time, so if it is ever populated it describes the card as it
+    /// was, which outranks the account as it is now.
+    func derivedCardLabel(for charge: Charge) -> String? {
+        let stored = charge.cardLabel.trimmingCharacters(in: .whitespaces)
+        if !stored.isEmpty { return stored }
+
+        guard let transactionId = charge.transactionId,
+              let accountId = transactionAccountMap[transactionId],
+              let account = accountList.first(where: { $0.id == accountId })
+        else { return nil }
+
+        let brand = account.brand?.lowercased() == "mastercard"
+            ? "Master"
+            : account.brand.map { $0.prefix(1).uppercased() + $0.dropFirst() }
+        guard let brand, !account.last4.isEmpty else { return nil }
+        return "\(brand) \(account.last4)"
     }
 
     private func subscription(_ id: UUID) -> Subscription? {

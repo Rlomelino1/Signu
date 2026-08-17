@@ -36,13 +36,18 @@ extension SignuPayloadSource {
         }
 
         let interval = latest.billingInterval
-        let currentCard = lastCharge.cardLabel
+        let currentCardLabel = derivedCardLabel(for: lastCharge)
 
         // MARK: Hero
         let unit = interval == .monthly ? "/mo" : "/yr"
         let approx = latest.detectedBy.isApproximate            // tilde iff R3/R4
         let amountText = SignuFormat.brl(lastCharge.amount, approximate: approx)
-        let subtitle = "\(interval == .monthly ? "Monthly" : "Annual") · \(cardWithDash(currentCard))"
+        // Derived rather than read straight from `card_label`, which is null for every
+        // charge in production (v59). `cardWithDash` renders "Master – 2049"; the
+        // separator lives inside the label, so an unnameable card gives "Monthly"
+        // instead of "Monthly · ".
+        let heroCard = derivedCardLabel(for: lastCharge).map { " · \(cardWithDash($0))" } ?? ""
+        let subtitle = "\(interval == .monthly ? "Monthly" : "Annual")\(heroCard)"
 
         let (statusText, statusTone) = statusChip(latest.status)
         let dateSlot = heroDateSlot(latest)
@@ -102,16 +107,26 @@ extension SignuPayloadSource {
                         id: UUID(), title: "Price raised · was \(SignuFormat.brl(prev.amount))",
                         dateText: dateText, amountText: amount, tone: .warning, marker: .filled
                     )))
-                } else if let prev, charge.cardLabel != prev.cardLabel {
-                    // Switch-point charge carries the transition annotation.
+                } else if let prev,
+                          let card = derivedCardLabel(for: charge),
+                          let previousCard = derivedCardLabel(for: prev),
+                          card != previousCard {
+                    // Switch-point charge carries the transition annotation. BOTH cards
+                    // must be nameable to claim a change: with `card_label` null
+                    // everywhere, comparing raw values made every charge look like a
+                    // card switch to an empty string, and the annotation read "card
+                    // changed to " (v59).
                     dated.append((charge.date, TimelineEvent(
                         id: UUID(), title: "Charged",
-                        dateText: "\(dateText) · card changed to \(charge.cardLabel)",
+                        dateText: "\(dateText) · card changed to \(card)",
                         amountText: amount, tone: .info, marker: .filled
                     )))
                 } else {
                     // Ordinary charge; inline card only when it differs from current.
-                    let dt = charge.cardLabel != currentCard ? "\(dateText) · \(charge.cardLabel)" : dateText
+                    let card = derivedCardLabel(for: charge)
+                    let dt = (card != nil && card != currentCardLabel)
+                        ? "\(dateText) · \(card!)"
+                        : dateText
                     dated.append((charge.date, TimelineEvent(
                         id: UUID(), title: "Charged", dateText: dt,
                         amountText: amount, tone: .normal, marker: .filled

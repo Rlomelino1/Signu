@@ -7,6 +7,11 @@ struct ServiceAvatar: View {
     let name: String
     var size: CGFloat = 44
     var color: Color?
+    /// Rendered on the ink hero rather than the paper ground (v59). Drops the hairline:
+    /// it exists to stop a pale tile dissolving into paper, and on ink it is the thing
+    /// you see — a white outline drawn around a logo that needs no help standing out.
+    /// This closes v12's open check, which flagged exactly this pairing.
+    var onInk = false
     /// Which half of the catalog this name may match (v58). Defaults to `.service`
     /// because most avatars in the app are subscriptions; the bank surfaces pass
     /// `.institution` explicitly. A wrong value costs a monogram, never a wrong logo —
@@ -62,11 +67,13 @@ struct ServiceAvatar: View {
             }
             .overlay {
                 // A hairline, because a near-white tile on the paper ground would
-                // otherwise dissolve into it. v12 flagged the opposite case as an
-                // open check — these tiles on the ink-dark detail hero — and this
-                // is what keeps both readable without a second treatment.
-                RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
-                    .strokeBorder(SignuColor.hairline, lineWidth: 1)
+                // otherwise dissolve into it. NOT on ink: there the same stroke reads as
+                // a white outline around the mark, which is what v12 flagged as an open
+                // check and what this closes (v59).
+                if !onInk {
+                    RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
+                        .strokeBorder(SignuColor.hairline, lineWidth: 1)
+                }
             }
     }
 

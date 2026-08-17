@@ -112,7 +112,7 @@ struct ConnectionDetailView: View {
     private var hero: some View {
         InkHeroCard {
             HStack(alignment: .center, spacing: 13) {
-                ServiceAvatar(name: payload.institutionName, size: 46, kind: .institution)
+                ServiceAvatar(name: payload.institutionName, size: 46, onInk: true, kind: .institution)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(payload.institutionName)
                         .font(.signuHeadline)

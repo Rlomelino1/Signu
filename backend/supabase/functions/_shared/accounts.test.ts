@@ -3,6 +3,7 @@ import {
   accountKey,
   accountLabel,
   accountType,
+  cardLabel,
   lastFour,
   pluggyAccountKey,
 } from './accounts.ts'
@@ -107,4 +108,28 @@ Deno.test('accountLabel degrades rather than rendering half a sentence', () => {
   assertEquals(accountLabel(null, '2049'), '···· 2049')
   assertEquals(accountLabel(null, null), 'an account')
   assertEquals(accountLabel('   ', null), 'an account')
+})
+
+// --------------------------------------------------------------- cardLabel (v60)
+
+Deno.test('cardLabel renders the label the column documents', () => {
+  // The column's own comment gives 'Visa 4821' as the example, so the value is a
+  // label rather than raw provider data.
+  assertEquals(cardLabel('MASTERCARD', '2049'), 'Master 2049')
+  assertEquals(cardLabel('VISA', '4821'), 'Visa 4821')
+})
+
+Deno.test('an unmapped network reads as itself, not as a guess', () => {
+  assertEquals(cardLabel('elo', '7730'), 'Elo 7730')
+  assertEquals(cardLabel('HIPERCARD', '1234'), 'Hipercard 1234')
+})
+
+Deno.test('cardLabel is null when there is no card to name', () => {
+  // A checking account has no brand. 'Account 3816' would be inventing one, and the
+  // subtitle drops the separator rather than printing punctuation around nothing.
+  assertEquals(cardLabel(null, '3816'), null)
+  assertEquals(cardLabel('MASTERCARD', null), null)
+  assertEquals(cardLabel('', '2049'), null)
+  assertEquals(cardLabel('MASTERCARD', '   '), null)
+  assertEquals(cardLabel(undefined, undefined), null)
 })
