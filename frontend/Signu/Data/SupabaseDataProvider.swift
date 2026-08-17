@@ -232,8 +232,8 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
     /// different lifetime — it changes when a migration ships, not when the user
     /// does anything — so it is fetched once by whoever needs it rather than
     /// re-read on every invalidation.
-    func merchantCatalog() async throws -> [MerchantCatalogEntry] {
-        let rows: [MerchantCatalogRow] = try await fetch("merchant_catalog")
+    func brandCatalog() async throws -> [BrandCatalogEntry] {
+        let rows: [BrandCatalogRow] = try await fetch("brand_catalog")
         return rows.map(\.domainModel)
     }
 

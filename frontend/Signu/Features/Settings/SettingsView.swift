@@ -355,7 +355,7 @@ struct SettingsView: View {
         // avatar fixed — so short subtitles ("Synced 2h ago · 2 cards") stay
         // one line at any width, long ones wrap to two.
         HStack(spacing: 10) {
-            ServiceAvatar(name: bank.name)
+            ServiceAvatar(name: bank.name, kind: .institution)
             VStack(alignment: .leading, spacing: 1) {
                 Text(bank.name)
                     .font(.signuRowTitle)

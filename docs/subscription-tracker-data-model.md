@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-17** (v57) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-17** (v58) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -189,7 +189,7 @@ Managed entirely by Supabase Auth — not part of our schema.
   - one merchant / several instances (`netflix`, `netflix:2` — forked when two charges land in one cycle), and
   - one descriptor / several services (`apple:4.90`, `apple:34.90`).
 - Ambiguous splits are resolved by the user via merge/split actions (later UI).
-- **Future app-level table — MERCHANT_CATALOG** (patterns → service, **domain**, category, subscription-only flag). Feeds R4 and the [logo sourcing contract](#logo-sourcing-contract) — the nullable `domain` field is what drives logo resolution (v12).
+- **App-level table — BRAND_CATALOG** (patterns → brand, **domain**, category, subscription-only flag, `kind`). Named MERCHANT_CATALOG until v58, renamed when it began holding financial institutions as well as services. Feeds R4 and the [logo sourcing contract](#logo-sourcing-contract) — the nullable `domain` field is what drives logo resolution (v12).
 
 ---
 
@@ -707,7 +707,7 @@ Detection cannot be sharded by account without silently disabling that filter.
 
 ### Scope limits, stated
 
-- **MERCHANT_CATALOG does not exist**, so **R4 cannot fire.** The engine ships with
+- **BRAND_CATALOG did not exist** (as MERCHANT_CATALOG), so **R4 could not fire.** The engine ships with
   R1, R2, R3 and R5; R4 is contract-only until the catalog table exists. Said out
   loud because a rule that silently never fires reads as a rule that works.
   *Amended v38: the table exists and is seeded (Migration #8), so the blocker is
@@ -903,7 +903,7 @@ established card lands in 21i and a thin or new card lands here.
   2. **Bundled assets, deferred.** Insurance tier: first-launch-offline, logo.dev outage, uncovered domain. **Deliberately not populated at the start** — "don't build it until it hurts": bundled assets are only added if tier 1 fails in practice.
   3. **Monogram tile** (the existing colored-initial design). Final fallback: no known `domain`, or both fetches fail. Needs no data at all — same graceful-degradation philosophy as the `card_label` snapshot.
 - **Cache contract**: fetched logos cached **to disk, keyed by domain**, TTL **30 days** (drop to 7 if rebrand latency ever bothers — request volume is trivial either way). Within TTL: offline behavior and instant renders (what bundling would have bought). On expiry: re-fetch picks up rebrands automatically — the point of the tier swap. Accepted consequence, eyes open: a rebrand can take up to one TTL to appear. Implementation: `URLCache` with long TTL, or a tiny custom disk cache keyed by domain (more predictable; barely more work).
-- **Schema impact: one field.** Nullable **`domain`** on the future MERCHANT_CATALOG table drives tiers 1 and 2; tier 3 needs nothing. No new tables, no image storage in Supabase — bytes live in the app bundle and the iOS disk cache only.
+- **Schema impact: one field.** Nullable **`domain`** on BRAND_CATALOG (MERCHANT_CATALOG until v58) drives tiers 1 and 2; tier 3 needs nothing. No new tables, no image storage in Supabase — bytes live in the app bundle and the iOS disk cache only.
 - **`subscription.logo_url` dropped** (same-day amendment): the column predated this contract as a denormalized landing spot for a catalog-provided URL — a mechanism that was never designed. The locked chain gives it no writer (detection copies nothing), no reader (the client resolves from `domain` at render time), and one liability (a stored URL goes stale on rebrand — the frozen-asset failure mode the tier inversion exists to avoid). Removal was believed free at the time; in fact Migration #1 already existed and the column was not removed until v17. The keep-as-override reading (user-supplied logos) was rejected as a speculative feature with no design; if it ever materializes, re-adding a nullable column is a one-line additive migration.
 - **Legal posture** (settled before the mechanism): displaying real merchant marks to identify the merchant's own charges is nominative-fair-use territory — the pattern every finance app uses — and the personal-only deployment removes even the theoretical exposure (no commerce, no App Store review gate). Constraints kept anyway, as-if-public standard: marks rendered undistorted, never used in Signu's own icon or as branding.
 - **Rendering treatment locked (same-day amendment): full-color mark inside a neutral tile.** Real logos arrive at full brand saturation and would turn the muted-palette list into competing billboards; a uniform neutral container (paper/white tile, mark rendered smaller within it) re-imposes the tile-grid calm while keeping the mark's color — recognition is the point of fetching real logos, so grayscale was ruled out (pays the fetch complexity, loses the recognition value). The neutral container is also the robust choice for runtime-fetched images: logo.dev marks vary in shape and background, and the container absorbs all of it with zero per-merchant styling. **Open check, not a blocker**: white tiles on the ink-dark detail hero will pop brighter than the current monograms — verify on that screen; a surface-matched off-white tile is the known fix if it bothers. *Closed v39, on a screenshot rather than an argument: it does pop, and it reads as a badge rather than a blemish. Shipped as-is; the off-white fix stays available and unused.* Judged against a three-treatment comparison (monogram / naked full-color / neutral tile), not a re-rendered 21r.
@@ -1259,7 +1259,10 @@ contract](#logo-sourcing-contract) locked in v12, and unblocks — without
 building — R4.*
 
 - **MERCHANT_CATALOG exists**: `service_name`, nullable `domain`, `category`,
-  `subscription_only`, `patterns[]`. Seeded in the migration itself rather than a
+  `subscription_only`, `patterns[]`. *Amended v58: renamed **BRAND_CATALOG** with
+  `service_name` → `brand_name` and a new `kind` ('service' | 'institution'), when it
+  began holding banks. The rename is a hard cutover — the table name is the PostgREST
+  endpoint — so the client shipped with Migration #14.* Seeded in the migration itself rather than a
   seed script, because `db reset` and production must agree and CI's *Schema
   applies* then checks it on every PR.
 - **It is reference data, not user data.** Every row is the same for every
@@ -1688,6 +1691,48 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v58** — BRAND_CATALOG, AND BANKS GET THEIR LOGOS (2026-08-17). **Migration #14** —
+  one table renamed with its index, policy and constraints, one column renamed, one
+  column added, nine rows inserted.
+  Banks rendered monograms because the catalog only knew about services. The obvious
+  fix — bank rows in `merchant_catalog` — needed **zero client code** and was rejected:
+  `patterns` are matched against transaction descriptors, and **'NU PAGAMENTOS' appears
+  on Brazilian statements as the ACQUIRER**. A Nubank-acquired subscription would have
+  matched the bank row and worn the bank's logo, and once R4 reads `patterns`, worse
+  than a wrong logo. One table was being asked two different questions.
+  **`kind` ('service' | 'institution') answers which**, and the lookup takes it as a
+  REQUIRED argument rather than a defaulted one — a default would make the unscoped
+  behaviour, the thing this exists to prevent, the easiest thing to write. Tested in
+  both directions: an acquirer descriptor cannot reach an institution row, and a bank
+  label cannot reach a service row.
+  **A second table was the alternative and lost on the privacy property.** The logo
+  prefetch's padding (v38) depends on fetching EVERY domain in the catalog; two tables
+  means two fetches that must both stay complete, and a future change that forgets one
+  turns the request set into a description of the user. One table, one fetch, one
+  discriminator — and `allDomains` deliberately spans both kinds, with a test saying so.
+  **The rename** — Rafael's call, and the right one: 'merchant' stops being true when
+  the table holds banks, and `service_name` is not what a bank's name is. `BRAND_CATALOG`
+  is neutral about what the brand sells, which is now `kind`'s job. Zero Edge Functions
+  referenced the table (R4 is still unwired), so the blast radius was 7 Swift files and
+  the spec.
+  **It is a hard cutover**: the table name IS the PostgREST endpoint, so
+  `/rest/v1/merchant_catalog` stops existing the moment this applies and the client
+  ships with it. A compatibility view was considered and skipped — with one user it is
+  ceremony, and a permanent alias leaves two names for one table, the ambiguity the
+  rename exists to remove. Degradation if the app is stale is a monogram, not a crash.
+  **Migrations #8 and #13 are NOT edited.** They keep the old name, per v44: editing an
+  applied migration leaves the repo and the database disagreeing with nothing to report
+  it. A from-scratch rebuild passes through both states in order — verified, with the
+  old endpoint returning **404** and the new one returning **62 services and 9
+  institutions**, every pre-existing row correctly defaulted to 'service'.
+  Every institution domain was checked against logo.dev before being written (200,
+  image/png), because a row whose logo does not resolve is a row that quietly does
+  nothing. `subscription_only` is false throughout and meaningless for a bank; the
+  column is not nullable, so false is honest rather than a claim.
+  **Two collisions caught by the compiler, worth recording**: the mechanical rename hit
+  `SubscriptionRow.serviceName` and a `Subscription` in a test — different concepts
+  sharing a property name, which is exactly the ambiguity the rename removes at the
+  table level. 150 tests.
 - **v57** — LOGOS FILL THEIR TILE (2026-08-17). **No migration.** `ServiceAvatar`
   drew the fetched mark inside `.padding(size * 0.18)`, so the Steam logo arrived as a
   small icon floating in a near-white square.

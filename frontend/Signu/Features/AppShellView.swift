@@ -203,7 +203,7 @@ struct AppShellView: View {
             // privacy property rather than an oversight: a request set that
             // depends on the subscription list would disclose the subscription
             // list. See `LogoStore`.
-            guard let catalog = try? await provider.merchantCatalog() else { return }
+            guard let catalog = try? await provider.brandCatalog() else { return }
             logos.adopt(catalog: catalog)
             await logos.prefetch()
         }

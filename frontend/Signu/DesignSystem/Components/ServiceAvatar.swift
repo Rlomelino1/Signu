@@ -7,6 +7,11 @@ struct ServiceAvatar: View {
     let name: String
     var size: CGFloat = 44
     var color: Color?
+    /// Which half of the catalog this name may match (v58). Defaults to `.service`
+    /// because most avatars in the app are subscriptions; the bank surfaces pass
+    /// `.institution` explicitly. A wrong value costs a monogram, never a wrong logo —
+    /// the scoping is what guarantees that.
+    var kind: BrandKind = .service
 
     /// Optional so every preview, screenshot harness and test that renders a row
     /// without a store keeps working — and gets tier 3, which is a complete
@@ -19,7 +24,7 @@ struct ServiceAvatar: View {
     }
 
     var body: some View {
-        if let logo = logos?.image(forName: name) {
+        if let logo = logos?.image(forName: name, kind: kind) {
             mark(logo)
         } else {
             monogram
