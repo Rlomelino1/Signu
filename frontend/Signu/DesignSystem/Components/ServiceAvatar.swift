@@ -26,14 +26,24 @@ struct ServiceAvatar: View {
         }
     }
 
-    /// Tier 1: the real mark, inside a neutral tile.
+    /// Tier 1: the real mark, filling the tile.
     ///
-    /// The container is locked (v12) and does two jobs. It keeps the muted list
-    /// calm — real logos arrive at full brand saturation and a row of naked marks
-    /// reads as competing billboards — and it absorbs logo.dev's shape and
-    /// background variance with zero per-merchant styling. Colour is kept because
-    /// recognition is the entire point of fetching real logos; greyscale would pay
-    /// the fetch complexity and throw away what it bought.
+    /// The container is still doing two of its three jobs (v12): it absorbs
+    /// logo.dev's background variance, and colour is kept because recognition is the
+    /// entire point of fetching real logos.
+    ///
+    /// **What changed (v57): the mark fills the tile instead of sitting inside an
+    /// 18% inset.** v12 added that padding to keep a list of real logos calm rather
+    /// than reading as competing billboards. That was a real concern and it lost to a
+    /// plainer one: logo.dev returns square icons that already carry their own
+    /// padding and background, so ours stacked on top and produced a small mark
+    /// floating in a near-white square — the tile looked unfinished rather than calm.
+    ///
+    /// `scaledToFill` with an explicit frame and clip, not `scaledToFit` with the
+    /// padding removed. Every image logo.dev serves here is square (verified: 128×128
+    /// across the catalog), so for real data the two are identical — but a future
+    /// non-square source should fill and be clipped by the tile's own shape rather
+    /// than letterbox inside it, which is the request this implements.
     private func mark(_ logo: Image) -> some View {
         RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
             .fill(SignuColor.surfaceBright)
@@ -41,8 +51,9 @@ struct ServiceAvatar: View {
             .overlay {
                 logo
                     .resizable()
-                    .scaledToFit()
-                    .padding(size * 0.18)
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.32, style: .continuous))
             }
             .overlay {
                 // A hairline, because a near-white tile on the paper ground would
