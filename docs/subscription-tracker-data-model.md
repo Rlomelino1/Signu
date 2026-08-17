@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-17** (v61) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-17** (v62) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1690,6 +1690,39 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v62** — THE REMINDER SAID "USD 34,33", WHICH IS NEITHER FIGURE (2026-08-17).
+  **No migration.** Found by reading the first reminder this app ever delivered.
+  **The reminder fired for real at 16:30 UTC on 2026-08-17** — cron → secret gate →
+  `send-reminders` → Resend → inbox, with `last_reminded_for_date` set to
+  `2026-08-19` afterwards, which is the marker written only once the provider accepts.
+  Item #3 of the polish list is verified end to end. The mail was also **wrong**.
+  **It stated `USD 34,33`.** Production stores that charge as **USD 6.45** with
+  `amount_in_account_currency` **34.33 BRL** (v26's dual amounts — Steam bills in
+  dollars, the Nubank card settles in reais). The query coalesced the *amount* to the
+  account-currency figure and read the *currency* straight off the charge: half of each
+  pair, so the email named a number that exists in neither currency. It is a
+  cross-currency-only defect, which is why nothing caught it — and the single
+  subscription in production happens to be exactly that case.
+  **The app was right on the same row**, rendering "R$ 34,33", because
+  `ChargeRow.domain(accountCurrency:)` already implements the rule:
+  `amount_in_account_currency != null` IS the foreign test, and when it is set the
+  currency must come from the ACCOUNT, not the charge. So this was never a missing
+  rule — it was a second implementation of an existing one, which is the failure mode
+  `_shared/accounts.ts` was created to prevent (v53). The reminder query's own comment
+  claimed "an email and the screen cannot disagree about a price" while the code below
+  it did precisely that.
+  **`chargeMoney` now lives in `_shared/reminders.ts`**, mirroring the client's rule,
+  and the account currency is reached through `charge → transaction → bank_account`.
+  The embed is deliberately **not** `!inner`: a charge orphaned by v24 has
+  `transaction_id` null, and an inner join would silently drop it from the email
+  instead of stating its stored currency. Both PostgREST shapes —
+  `transaction: {bank_account: {currency}}` and `transaction: null` — were **verified
+  against the live API** rather than assumed, since an unresolvable embed fails at
+  runtime with a 400 the type system cannot see.
+  **Five tests**, the first of which is production's exact row asserting `R$ 34,33`.
+  The old code passed 92 tests because the wrong pairing happened in `index.ts`, which
+  has none; moving the rule into `_shared/` is what makes it testable at all.
 
 - **v61** — A CHARGE IS THE SAME ROW TOMORROW, AND THE SQL GETS ITS FIRST TESTS
   (2026-08-17). **Migration #15, additive** — one `create or replace function`; no

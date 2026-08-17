@@ -27,6 +27,8 @@
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 import {
+  chargeMoney,
+  type ChargeMoneyRow,
   type DueReminder,
   dueReminders,
   moneyText,
@@ -89,9 +91,16 @@ async function loadCandidates(db: SupabaseClient, userId: string): Promise<Remin
   // The amount shown is the latest charge of the run, already resolved into the
   // account's currency (v26) — the same figure the app renders, so an email and
   // the screen cannot disagree about a price.
+  // The account is reached through the transaction because that is a charge's
+  // only route to one, and the embed is deliberately NOT `!inner`: a charge whose
+  // raw backing was deleted has `transaction_id` null (v24's frozen region), and
+  // an inner join would drop it from the email entirely rather than show it with
+  // its stored currency.
   const { data: charges, error: cErr } = await db
     .from('charge')
-    .select('run_id, date, amount, currency, amount_in_account_currency')
+    .select(
+      'run_id, date, amount, currency, amount_in_account_currency, transaction(bank_account(currency))',
+    )
     .in('run_id', rows.map((r) => r.id))
     .order('date', { ascending: false })
   if (cErr) throw new Error(`select charge: ${cErr.message}`)
@@ -100,10 +109,10 @@ async function loadCandidates(db: SupabaseClient, userId: string): Promise<Remin
   for (const c of (charges ?? []) as Array<Record<string, unknown>>) {
     const runId = c.run_id as string
     if (latest.has(runId)) continue // ordered desc, so the first seen is the latest
-    latest.set(runId, {
-      amount: (c.amount_in_account_currency ?? c.amount) as number | string | null,
-      currency: c.currency as string | null,
-    })
+    // PostgREST nests both to-one embeds as objects, and `transaction` is null for
+    // an orphan -- both shapes verified against the live API, not assumed.
+    const tx = c.transaction as { bank_account?: { currency?: string | null } | null } | null
+    latest.set(runId, chargeMoney(c as unknown as ChargeMoneyRow, tx?.bank_account?.currency ?? null))
   }
 
   return rows.map((r) => ({

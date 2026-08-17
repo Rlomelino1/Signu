@@ -1,5 +1,12 @@
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
-import { dueReminders, moneyText, type ReminderRow, wantsEmail, whenText } from './reminders.ts'
+import {
+  chargeMoney,
+  dueReminders,
+  moneyText,
+  type ReminderRow,
+  wantsEmail,
+  whenText,
+} from './reminders.ts'
 
 const TODAY = '2026-08-11'
 
@@ -145,4 +152,63 @@ Deno.test('money renders Brazilian, with a thousands separator', () => {
   assertEquals(moneyText(6.45, 'USD'), 'USD 6,45')
   assertEquals(moneyText(null, 'BRL'), null)
   assertEquals(moneyText(44.9, null), '44,90')
+})
+
+// The dual amounts (v26), and the email that got them half right.
+//
+// On 2026-08-17 a real reminder went out reading **"USD 34,33"**: a number that was
+// neither figure. The query coalesced the amount to `amount_in_account_currency`
+// (34.33 BRL) but read the currency straight off the charge (USD). The app rendered
+// "R$ 34,33" from the same row, so the email and the screen disagreed about a price
+// — which the query's own comment claimed could not happen.
+
+Deno.test('a foreign charge is stated in the account currency, not the bank\'s', () => {
+  // Production's exact row: Steam bills USD 6.45, the Nubank card settles R$ 34,33.
+  const m = chargeMoney(
+    { amount: 6.45, currency: 'USD', amount_in_account_currency: 34.33 },
+    'BRL',
+  )
+  assertEquals(m.amount, 34.33)
+  assertEquals(m.currency, 'BRL')
+  // The whole point: this is what the email must say, and what the app shows.
+  assertEquals(moneyText(m.amount, m.currency), 'R$ 34,33')
+})
+
+Deno.test('a domestic charge keeps its own currency', () => {
+  // `amount_in_account_currency` is null exactly when `currency` already IS the
+  // account currency, so there is nothing to resolve and nothing to second-guess.
+  const m = chargeMoney(
+    { amount: 44.9, currency: 'BRL', amount_in_account_currency: null },
+    'BRL',
+  )
+  assertEquals(m.amount, 44.9)
+  assertEquals(m.currency, 'BRL')
+  assertEquals(moneyText(m.amount, m.currency), 'R$ 44,90')
+})
+
+Deno.test('an orphaned charge keeps its stored currency rather than guessing', () => {
+  // `transaction_id` null (v24) means no account is reachable, so the embed yields
+  // no currency. Stating the stored one is honest; assuming BRL would not be.
+  const m = chargeMoney(
+    { amount: 6.45, currency: 'USD', amount_in_account_currency: 34.33 },
+    null,
+  )
+  assertEquals(m.amount, 34.33)
+  assertEquals(m.currency, 'USD')
+})
+
+Deno.test('a run with no charge yet still renders, without money', () => {
+  const m = chargeMoney({ amount: null, currency: null, amount_in_account_currency: null }, 'BRL')
+  assertEquals(m.amount, null)
+  assertEquals(moneyText(m.amount, m.currency), null)
+})
+
+Deno.test('string numerics from PostgREST survive the resolution', () => {
+  // numeric columns arrive as strings often enough that the formatter already
+  // handles them; the resolver must not turn them into NaN on the way.
+  const m = chargeMoney(
+    { amount: '6.45', currency: 'USD', amount_in_account_currency: '34.33' },
+    'BRL',
+  )
+  assertEquals(moneyText(m.amount, m.currency), 'R$ 34,33')
 })
