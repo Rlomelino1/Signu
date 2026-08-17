@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-17** (v63) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-17** (v64) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1694,6 +1694,48 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v64** — THE SUGGESTION HOME COUNTED AND REVIEW HID (2026-08-17). **No migration.**
+  Found by Rafael, in production, minutes after R4 shipped: Home said
+  **"1 Possible subscriptions detected → Review"**, the Subs tab listed it under
+  **"SUGGESTED · 1"**, and tapping through said **"You're all caught up."** Two
+  independent bugs stacked, and neither is R4-specific.
+  **Bug 1 — a silent `nil` in a `compactMap`.** `makeReviewPayload` required a
+  `nextExpectedDate`:
+  `guard let sub = …, let last = …, let next = run.nextExpectedDate else { return nil }`.
+  An **ended** run has none. Home's `suggestionCount` and the Subs "SUGGESTED" row
+  required nothing of the kind, so three surfaces disagreed about one run — and the only
+  surface that can act on a suggestion was the one that hid it. `renewsDate` is now
+  `Date?`, rendered as "no renewal expected" rather than dropped, and the amount goes
+  with the date: a tilde figure beside no date would be inventing a renewal. An R3
+  suggestion whose charges were all old would have vanished identically, so this was
+  never about R4.
+  **The invariant is now a test, stated as a comparison**: whatever Home counts, Review
+  renders — checked in both shapes, and in the other direction too (a dismissed
+  suggestion is counted by nobody). Falsified before being trusted: with the old guard
+  restored, it fails `(review.suggestions.count → 0) == 1`.
+  **A charge is still required, and that is not the same bug**: a run with no charge has
+  no evidence, and 9a's rule is that every confirm/dismiss happens with the charges
+  visible.
+  **Bug 2 — R4 proposed a subscription that was already over.** Its first live firing
+  caught `Claude.Ai Subscription` from a **single charge dated 2026-03-05** — the only
+  Claude row in all 334 production transactions, five months old. The derived lifecycle
+  had already ended that run, so it carried an `end_date`, no `next_expected_date`, and
+  an invitation to track something finished. With a year of replayed history, every
+  long-dead single charge from a catalog merchant becomes a standing suggestion, and a
+  `possible` run is re-derived forever — it never ages out on its own.
+  **The gate is on CREATION, never continuation**, and that distinction is the whole
+  design. A **confirmed** R4 run that never receives a second charge must die *through*
+  the lifecycle — active, overdue, ended — which the spec requires and a test pins.
+  Declining to regenerate it would **delete** the run instead of ending it, taking the
+  user's confirmation with it. So: an assertion is always continued (`confirmedR4Exists`,
+  which cancellation satisfies too); a suggestion nobody has acted on is only created
+  while it could still be alive. A stale `possible` run left from before this rule is not
+  regenerated and therefore leaves through `delete_run_ids` — **suggestions clean
+  themselves up, assertions never do.**
+  **Both halves were needed.** The engine fix alone would leave the silent-drop trap for
+  the next dateless run; the client fix alone would render dead suggestions politely
+  forever. **57 engine tests, 4 new Swift tests**, all green.
 
 - **v63** — R4 FIRES (2026-08-17). **Migration #16, data only** — three `patterns`
   arrays narrowed, three rows added; no table, column, constraint, index, policy or

@@ -864,3 +864,104 @@ Deno.test('both rows carry the same domain, so no charge loses its logo', () => 
   assertEquals(store?.brand_name, 'PlayStation')
   assertEquals(sub?.brand_name, 'PlayStation Plus')
 })
+
+// --------------------------------------------------- R4 freshness (v64)
+//
+// R4's first firing in production proposed "Claude.Ai Subscription" from a single
+// charge dated 2026-03-05 -- five months old. The derived lifecycle had already ended
+// that run, so it carried an end_date and NO next_expected_date, and the client
+// dropped it from Review while Home and Subs both counted it. Two bugs stacked; this
+// is the engine half.
+
+function claudeCase(today: string, stored?: { status: string }) {
+  const tx = row({
+    id: 'tx-claude',
+    date: '2026-03-05',
+    amount: 20.97,
+    currency: 'USD',
+    raw_description: 'Claude.Ai Subscription',
+    normalized_merchant: 'Claude.Ai Subscription',
+  })
+  const catalog = [catalogRow({ brand_name: 'Claude', patterns: ['claude.ai', 'claude'] })]
+  if (!stored) return { today, rows: [tx], ...EMPTY, catalog }
+  return {
+    today,
+    rows: [tx],
+    subscriptions: [{
+      id: 'sub-c',
+      dedupe_key: 'claude.ai subscription',
+      merchant_key: 'CLAUDE.AI SUBSCRIPTION',
+      service_name: 'Claude.Ai Subscription',
+      identification: 'auto',
+      ignored: false,
+    }],
+    runs: [{
+      id: 'run-c',
+      subscription_id: 'sub-c',
+      start_date: '2026-03-05',
+      end_date: null,
+      billing_interval: 'monthly' as const,
+      status: stored.status,
+      detected_by: 'R4',
+      cancelled_date: null,
+      next_expected_date: '2026-04-05',
+    }],
+    charges: [{
+      id: 'ch-c',
+      run_id: 'run-c',
+      transaction_id: 'tx-claude',
+      date: '2026-03-05',
+      amount: 20.97,
+      currency: 'USD',
+      amount_in_account_currency: null,
+      card_label: null,
+    }],
+    catalog,
+  }
+}
+
+Deno.test('PRODUCTION CASE: R4 does not suggest a subscription that is already over', () => {
+  // 2026-08-17 against a single 2026-03-05 charge: expected 2026-04-05, overdue
+  // window gone, grace gone. There is nothing to renew, so there is nothing to offer.
+  const out = detect(claudeCase('2026-08-17'))
+  assertEquals(out.subscriptions.length, 0)
+  assertEquals(out.diagnostics.r4_runs, 0)
+})
+
+Deno.test('R4 still fires while the run could plausibly be alive', () => {
+  // Same charge, read one month later: expected 2026-04-05 is still inside the
+  // window, so this is a live subscription with one charge -- exactly R4's case.
+  const out = detect(claudeCase('2026-04-06'))
+  assertEquals(out.subscriptions.length, 1)
+  assertEquals(out.subscriptions[0].runs[0].detected_by, 'R4')
+  assertEquals(out.subscriptions[0].runs[0].status, 'possible')
+  assertEquals(out.subscriptions[0].runs[0].next_expected_date, '2026-04-05')
+})
+
+Deno.test('a stale suggestion nobody acted on cleans itself up', () => {
+  // The run already in production. Not regenerated, so it leaves through
+  // delete_run_ids -- suggestions expire, which is the point of gating creation
+  // rather than filtering the output.
+  const out = detect(claudeCase('2026-08-17', { status: 'possible' }))
+  assertEquals(out.subscriptions.length, 0)
+  assertEquals(out.delete_run_ids, ['run-c'])
+})
+
+Deno.test('but a CONFIRMED R4 is continued, never deleted by the freshness gate', () => {
+  // The user said yes. That is an assertion, and it must die through the lifecycle
+  // rather than vanish -- the distinction the whole gate turns on.
+  const out = detect(claudeCase('2026-08-17', { status: 'active' }))
+  assertEquals(out.delete_run_ids, [], 'a confirmed run is never deleted for being old')
+  const run = out.subscriptions[0].runs[0]
+  assertEquals(run.stored_run_id, 'run-c')
+  assertEquals(run.detected_by, 'R4')
+  assertEquals(run.status, 'ended')
+  assertEquals(run.end_date, '2026-04-05')
+})
+
+Deno.test('a cancelled R4 is likewise continued', () => {
+  // Cancellation is an assertion too, and `cancelled` is not `possible`.
+  const out = detect(claudeCase('2026-08-17', { status: 'cancelled' }))
+  assertEquals(out.delete_run_ids, [])
+  assertEquals(out.subscriptions[0].runs[0].status, 'cancelled')
+})
