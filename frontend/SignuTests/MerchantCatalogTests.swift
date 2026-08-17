@@ -19,7 +19,12 @@ struct MerchantCatalogTests {
         MerchantCatalogEntry(id: UUID(), serviceName: "Estadão", domain: "estadao.com.br",
                              category: "News", subscriptionOnly: true, patterns: ["estadao"]),
         MerchantCatalogEntry(id: UUID(), serviceName: "Some Local Gym", domain: nil,
-                             category: "Fitness", subscriptionOnly: true, patterns: ["local gym"])
+                             category: "Fitness", subscriptionOnly: true, patterns: ["local gym"]),
+        // Migration #13, verbatim. subscriptionOnly is FALSE here where the rest are
+        // true, because Steam mostly sells one-off games — see the migration header.
+        MerchantCatalogEntry(id: UUID(), serviceName: "Steam", domain: "steampowered.com",
+                             category: "Games", subscriptionOnly: false,
+                             patterns: ["steam", "valve", "trueline valve"])
     ]
 
     // MARK: - Matching
@@ -75,7 +80,9 @@ struct MerchantCatalogTests {
         // ever narrows to "the user's merchants", the third party learns the
         // subscription list one request at a time.
         let domains = MerchantCatalog.allDomains(in: catalog)
-        #expect(domains == ["amazon.com", "amazon.com.br", "estadao.com.br", "netflix.com"])
+        #expect(domains == [
+            "amazon.com", "amazon.com.br", "estadao.com.br", "netflix.com", "steampowered.com",
+        ])
     }
 
     @Test("a merchant with no domain is simply not fetched")
@@ -83,7 +90,8 @@ struct MerchantCatalogTests {
         // And renders the monogram, which is tier 3 of the chain rather than a
         // failure: nothing to fetch, nothing to leak.
         #expect(!MerchantCatalog.allDomains(in: catalog).contains(""))
-        #expect(MerchantCatalog.allDomains(in: catalog).count == 4)
+        // Six entries, five domains: the gym's is nil.
+        #expect(MerchantCatalog.allDomains(in: catalog).count == 5)
     }
 
     @Test("the mock catalog lists services the fixtures do not subscribe to")
@@ -96,5 +104,38 @@ struct MerchantCatalogTests {
         let subscribed = Set(try await p.subscriptions().map { MerchantCatalog.normalise($0.serviceName) })
         let unsubscribed = entries.filter { !subscribed.contains(MerchantCatalog.normalise($0.serviceName)) }
         #expect(!unsubscribed.isEmpty, "the catalog must describe the world, not the account")
+    }
+
+    // MARK: - The descriptor a bank actually sends (v56)
+
+    @Test("Steam is found through Valve's billing descriptor, not its name")
+    func steamViaTruelineValve() throws {
+        // The real string on the statement, and the first subscription this app ever
+        // detected: 'TRUELINE VALVE CORPORATION'. A name-only entry cannot match it —
+        // 'steam' is not a substring — which is what the patterns column is for.
+        let entry = try #require(
+            MerchantCatalog.entry(for: "TRUELINE VALVE CORPORATION", in: catalog)
+        )
+        #expect(entry.serviceName == "Steam")
+        #expect(entry.domain == "steampowered.com")
+    }
+
+    @Test("the plain name and a lowercase descriptor both resolve")
+    func steamByNameAndCase() throws {
+        for name in ["Steam", "steam", "STEAM WALLET", "valve corp"] {
+            let entry = try #require(MerchantCatalog.entry(for: name, in: catalog), "\(name)")
+            #expect(entry.serviceName == "Steam")
+        }
+    }
+
+    @Test("Steam is not marked subscription-only, unlike most of the catalog")
+    func steamIsNotSubscriptionOnly() throws {
+        // R4's trigger. True here would eventually promote every game bought to a
+        // subscription, since subscription_only says "a charge from this merchant is
+        // ALWAYS a subscription" — a claim about the merchant, not about one charge.
+        let steam = try #require(MerchantCatalog.entry(for: "Steam", in: catalog))
+        #expect(steam.subscriptionOnly == false)
+        let netflix = try #require(MerchantCatalog.entry(for: "Netflix", in: catalog))
+        #expect(netflix.subscriptionOnly)
     }
 }

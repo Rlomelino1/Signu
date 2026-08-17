@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-17** (v55) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-17** (v56) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,32 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v56** — STEAM IN THE CATALOG, VIA THE DESCRIPTOR A BANK ACTUALLY SENDS
+  (2026-08-17). **Migration #13, additive** — one row of reference data.
+  The first real subscription this app ever detected rendered with a monogram. Not a
+  logo-fetch failure: the catalog seeded in Migration #8 has **61 rows and no Steam or
+  Valve entry at all** — zero matches for steam, valve or trueline in production.
+  **A name-only entry would not have fixed it either.** The descriptor is
+  `TRUELINE VALVE CORPORATION` — Valve's Brazilian billing entity — and matching is
+  canonical name first, then pattern containment. 'steam' is not a substring of that,
+  so the patterns carry the work, which is exactly what the column was added for:
+  Disney already ships `array['disney', 'disneyplus', 'disney plus']`.
+  `'trueline valve'` is listed alongside `'valve'` even though the broad pattern
+  already matches. Deliberate: it is the string actually observed, so if `'valve'`
+  ever has to narrow, the evidence survives the change.
+  **`subscription_only` is false, against most of the catalog.** Netflix is true
+  because every Netflix charge IS a subscription; Steam mostly sells one-off games.
+  That column is R4's trigger — "a charge from this merchant is always a
+  subscription" — so true here would, once R4 is wired, promote every game bought.
+  This account's R$34,33 recurs because of what was bought, not because of what the
+  merchant sells, and the catalog describes the merchant.
+  **`steampowered.com`, not `valvesoftware.com`.** Both resolve at logo.dev (checked:
+  200, image/png, 10,496 and 3,838 bytes — and the mark was rendered before choosing),
+  so this is recognition rather than availability. The charge says Valve; the product
+  is Steam; the row is read in a list of the user's own subscriptions.
+  3 tests, including the verbatim descriptor. Two existing assertions were updated
+  rather than worked around — the privacy tests pin the fixture's exact domain set on
+  purpose, so a new row is meant to change them.
 - **v55** — THE CONNECT FLOW COMPLETES, AND A FIRST SYNC STOPS LOOKING LIKE A
   FAILURE (2026-08-17). **No migration.** With v53 deployed the widget still
   dead-ended: the user finished at the bank, Pluggy showed its own "Pronto! Você pode
