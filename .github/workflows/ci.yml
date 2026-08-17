@@ -137,6 +137,29 @@ jobs:
             exit 1
           fi
 
+      # pgTAP, against the stack the step above just built. Until v61 this job
+      # proved only that migrations APPLY -- nothing asserted what the SQL DOES,
+      # and `apply_detection` is the most consequential function in the product:
+      # it is the only writer of detection's results and it holds v24's frozen
+      # region. Its first test file immediately found a latent
+      # `23505 duplicate key` that could abort an entire sync on a re-parented
+      # charge, which is the argument for this step in one sentence.
+      #
+      # A SEPARATE step on purpose, and its output is NOT teed into cli.log: the
+      # warning gate greps that file, and pgTAP failure diagnostics are free text
+      # that can contain the word "warning". Keeping them apart leaves the gate
+      # scoped to the CLI's own output, and a failing test still fails the job on
+      # its exit code.
+      #
+      # `supabase test db` needs no file list -- it runs everything in
+      # supabase/tests -- so a new suite is picked up with no edit here, unlike
+      # the `deno check` below.
+      - name: Database tests
+        working-directory: backend
+        env:
+          SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET: ci-placeholder-never-used
+        run: supabase test db
+
   detection:
     name: Detection tests
     runs-on: ubuntu-latest

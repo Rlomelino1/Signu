@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-17** (v60) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-17** (v61) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1691,6 +1691,53 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v61** — A CHARGE IS THE SAME ROW TOMORROW, AND THE SQL GETS ITS FIRST TESTS
+  (2026-08-17). **Migration #15, additive** — one `create or replace function`; no
+  table, column, constraint, index, policy or grant is touched.
+  **`apply_detection` deleted and re-inserted every charge with raw backing on every
+  pass, so every charge got a NEW `id` on every sync.** Noticed as waste, which is the
+  least of it: the write cost is negligible and always will be (thirty subscriptions
+  over ten years is ~3,600 rows a day). The defect is that **nothing can ever reference
+  a charge** — not a user note, not a receipt, not "hide this one", not an export with
+  stable ids. The calendar already keys its entries by charge id (v46) and so churned
+  daily for no reason, and an id seen yesterday did not exist today.
+  **It was also a latent `23505`.** When detection moves a transaction between runs — a
+  split, a correction — and the *receiving* run is processed first, its insert lands
+  while the losing run still holds that charge, and `unique (transaction_id)` rejects it;
+  the losing run's delete had not happened yet. The whole call rolls back, so an affected
+  user gets **no sync at all** until the payload order happens to change. Order-dependent,
+  silent, and invisible to code review. **The first test written against this function
+  found it** — not the reasoning that motivated the change.
+  **The fix is an upsert on the natural key.** `charge` already carried
+  `unique (transaction_id)` from Migration #1, so a charge has an identity the applier
+  can converge onto. `run_id` is in the update list, which is what makes a re-parent a
+  **move** rather than a delete and a recreate. The pure-core doctrine is untouched:
+  detection computes desired state, the applier makes stored state match, re-runs repair.
+  **The prune's scope is the load-bearing decision, and the obvious version is wrong.**
+  A global "delete any charge whose transaction is not in the desired set" would erase a
+  user's entire charge history on one bad pass — a transient read failure, a bug, rows
+  that had not loaded. The old per-run delete could not do that, and that safety was
+  accidental but real. So the prune stays **scoped to runs the payload mentions**, while
+  the still-wanted test uses the **union of desired transaction ids across the whole
+  payload**: per-run scope keeps the failure mode safe, the global set makes the outcome
+  independent of run order. Both halves are pinned by tests, including an empty payload
+  that must delete nothing.
+  **v24's frozen region is unchanged.** `transaction_id is not null` still guards every
+  write and the prune, and Postgres permits many nulls under a unique constraint, so
+  orphans cannot collide with the upsert either.
+  **`charges_written` now means what it says**: a no-op guard listing every value column
+  skips unchanged rows, so an agreeing pass reports **zero** and leaves no dead tuples.
+  `charges_pruned` is added alongside it. A steady-state count of zero is an assertion in
+  the suite, which is how a guard that silently stops covering a column gets caught.
+  **The SQL had no tests at all.** `Schema applies` proved migrations APPLY; nothing
+  asserted what they DO, for the one function that is the sole writer of detection's
+  results. `backend/supabase/tests/apply_detection_test.sql` is 22 pgTAP assertions run
+  by `supabase test db` in that same CI job — convergence, id stability across two
+  passes, the frozen region, pruning, re-parenting, and the empty-payload fail-safe.
+  **Verified in both directions**: 22/22 against the new function, and with the old
+  definition reloaded into the same database, **5 fail** — so the suite discriminates
+  rather than merely passing.
+
 - **v59/v60** — THE CARD LABEL GETS A WRITER, AND THE INK HERO LOSES ITS OUTLINE
   (2026-08-17). **No migration.**
   **`charge.card_label` had a reader and no writer.** It is documented as a snapshot at
@@ -1711,9 +1758,10 @@ implementations back to the 21-series rendering.*
   compared raw labels, so with every value null it compared `"" != ""` and never fired.
   It would have started lying the moment the engine wrote its first label; both cards
   must now be nameable before a change is claimed.
-  **No backfill, confirmed by reading the applier**: `apply_detection` deletes and
-  reinserts every charge with a non-null `transaction_id` on each pass, so the next
-  detection run labels all history. Orphaned charges are never recomputed — immutable
+  **No backfill, confirmed by reading the applier**: `apply_detection` rewrites every
+  charge with a non-null `transaction_id` on each pass, so the next detection run labels
+  all history. (It did so by delete-and-reinsert until **v61** made it an upsert; the
+  conclusion holds either way — the label is now rewritten in place.) Orphaned charges are never recomputed — immutable
   records by v24 — which is the other reason the client keeps deriving.
   `cardLabel` lives in `_shared/accounts.ts`, the module that exists so the two sides
   cannot disagree about accounts (v53). `accounts` is **optional** on `EngineInput`, so
