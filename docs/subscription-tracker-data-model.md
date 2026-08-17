@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-14** (v51) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-14** (v52) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,29 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v52** — "NO NAME" IS STORED AS THE EMAIL, NOT AS NULL (2026-08-14). **No
+  migration.** v47 set out to stop Home greeting the user with their own email
+  address. **It did not work in production**, and the build handed over for testing
+  proved it: "Good afternoon, <the account's address>", exactly the string v47 was
+  written to remove, with every test passing.
+  **The cause is Migration #1's signup trigger, which is behaving as designed.** It
+  coalesces Google's `full_name` → 17b's `name` → **`new.email`** (v11, so the row
+  records which provider supplied the value). So `display_name` is **never null** for
+  a real account: "no name" is stored as the address itself. v47 keyed
+  `displayNameIsFallback` on `display_name == nil`, which is true only for fixtures —
+  the mock had null, production had an address, and the tests agreed with the mock.
+  **The rule now compares against the email**, in `ProfileName.resolve`, shared by
+  the live provider and the mock so the two cannot disagree about what "no name"
+  means. Nil, blank and the address are three ways of saying it; the address is still
+  *displayed* (a blank identity row is worse) while the greeting declines to use it.
+  Case-insensitive, and equality rather than containment — a name that happens to
+  contain an address has still been chosen.
+  **The lesson is about where the test looked.** Everything was verified against a
+  fixture whose shape did not match the database's, and no amount of unit testing
+  would have caught it: the only thing that did was launching the app against
+  production and reading the screen. 5 tests (129 total), including the end-to-end
+  payload assertion that Home returns no first name when the stored value is the
+  address.
 - **v51** — THE BRAND MARK IN THE AUTH EMAILS (2026-08-14). **Migration #12,
   additive** — one storage bucket, nothing else. v49 drew the mark as a styled
   letter "S" under a blanket "no images" rule. **The mark is not a letter**: it is

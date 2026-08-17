@@ -95,10 +95,12 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     private var avatarObjects: [String: Data] = [:]
 
     func setDisplayName(_ name: String?) async throws {
-        // Mirrors the live read, including the fallback: clearing the name puts the
-        // email back, and marks it as standing in rather than chosen.
-        profileValue.displayName = name ?? profileValue.email
-        profileValue.displayNameIsFallback = name == nil
+        // Mirrors the live read through the same resolver, so the mock cannot
+        // disagree with production about what counts as "no name" — which is
+        // exactly how v47's null-check passed every test and failed in the app.
+        let resolved = ProfileName.resolve(stored: name, email: profileValue.email)
+        profileValue.displayName = resolved.display
+        profileValue.displayNameIsFallback = resolved.isFallback
     }
 
     func setAvatar(jpeg: Data) async throws {

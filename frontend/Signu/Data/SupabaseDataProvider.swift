@@ -293,14 +293,19 @@ final class SupabaseDataProvider: SignuDataProviding, SignuPayloadSource {
             throw ProviderError.noProfile
         }
 
+        // The signup trigger stores the EMAIL when no name was given (v11), so
+        // "no name" is never null here — v48 learned that from production, where
+        // Home was still greeting the account by its own address. See `ProfileName`.
+        let name = ProfileName.resolve(stored: row.displayName, email: user?.email ?? "")
+
         profileValue = Profile(
             id: row.id,
-            displayName: row.displayName ?? user?.email ?? "",
+            displayName: name.display,
             // Recorded rather than re-derived: a screen that wants to avoid
             // greeting someone by their email address cannot tell the two apart
             // from the string alone, and comparing it back against the email at
             // each call site would be the same rule written four times.
-            displayNameIsFallback: row.displayName == nil,
+            displayNameIsFallback: name.isFallback,
             // Email and identity providers live in auth.users, never in profiles
             // — the schema says the reminder address is derived, not stored.
             email: user?.email ?? "",
