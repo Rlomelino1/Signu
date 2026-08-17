@@ -142,10 +142,13 @@ struct ConnectBankFlow: View {
             Text("Couldn't connect")
                 .font(.signuTitle)
                 .foregroundStyle(SignuColor.textPrimary)
-            // The provider's own words — Pluggy names the actual problem (a
-            // connector outage, wrong credentials), and paraphrasing it into
-            // "something went wrong" would delete the only useful part.
-            Text(message)
+            // Signu's own functions write sentences and those pass through
+            // untouched — v30's rule that the server's own words beat a generic
+            // apology. Pluggy writes ENUMS, and `ITEM_USER_ALREADY_EXISTS` reached a
+            // user verbatim (v53), so the codes we can defend are translated and
+            // anything unrecognised is kept rather than replaced. See
+            // `ConnectErrorCopy`.
+            Text(ConnectErrorCopy.message(for: message))
                 .font(.signuBody)
                 .foregroundStyle(SignuColor.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

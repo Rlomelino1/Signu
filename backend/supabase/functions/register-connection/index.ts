@@ -19,7 +19,65 @@
 // duplicate.
 
 import { json, resolveCaller, serviceClient } from '../_shared/auth.ts'
+import { accountKey, accountLabel, pluggyAccountKey } from '../_shared/accounts.ts'
 import { pluggy, pluggyApiKey, PluggyError, type PluggyItem } from '../_shared/pluggy.ts'
+
+/** An account of the new item that this user already holds through another
+ *  connection, or null when nothing collides.
+ *
+ *  Returns the STORED side of the collision, not the incoming one: the user
+ *  recognises "Nu Pagamentos S.A. ···· 0381 through Nu Pagamentos S.A." from their
+ *  own Settings screen, where the incoming account is something they have never
+ *  seen named.
+ *
+ *  Fails OPEN, deliberately. If Pluggy will not list the accounts, or the read of
+ *  our own rows errors, the connection is allowed rather than refused: the cost of
+ *  a wrongly-allowed duplicate is double-counted transactions the user can see and
+ *  remove, and the cost of a wrongly-refused connection is an app that cannot add
+ *  the bank at all with no way for the user to override it. The daily sync would
+ *  surface the former; nothing surfaces the latter. */
+async function findClashingAccount(
+  db: ReturnType<typeof serviceClient>,
+  userId: string,
+  itemId: string,
+): Promise<{ label: string; institution: string } | null> {
+  let incoming: { subtype?: unknown; number?: unknown }[]
+  try {
+    const apiKey = await pluggyApiKey()
+    const payload = await pluggy<{ results?: { subtype?: unknown; number?: unknown }[] }>(
+      `/accounts?itemId=${encodeURIComponent(itemId)}`,
+      apiKey,
+    )
+    incoming = payload?.results ?? []
+  } catch {
+    return null
+  }
+
+  const incomingKeys = new Set(
+    incoming.map(pluggyAccountKey).filter((key): key is string => key !== null),
+  )
+  if (incomingKeys.size === 0) return null
+
+  // Every account this user already holds, with the connection that carries it.
+  // RLS is bypassed here (service role), so the `user_id` filter is the scoping —
+  // unlike the client's reads, where the policy does it.
+  const { data: existing, error } = await db
+    .from('bank_account')
+    .select('type, last4, official_name, connection!inner(user_id, institution_name)')
+    .eq('connection.user_id', userId)
+  if (error || !existing) return null
+
+  for (const row of existing) {
+    const key = accountKey(row.type as string | null, row.last4 as string | null)
+    if (!key || !incomingKeys.has(key)) continue
+    const connection = row.connection as unknown as { institution_name?: string } | null
+    return {
+      label: accountLabel(row.official_name as string | null, row.last4 as string | null),
+      institution: connection?.institution_name ?? 'another connection',
+    }
+  }
+  return null
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
@@ -53,6 +111,57 @@ Deno.serve(async (req: Request) => {
   }
 
   const db = serviceClient()
+
+  // THE DUPLICATE CHECK (v53), and why it lives here rather than in Pluggy.
+  //
+  // `connect-token` used to send `avoidDuplicates: true`, which asks Pluggy to
+  // refuse a second item for the same connector and credentials. That is right for
+  // a real bank connector and WRONG for an aggregator: through connector 200
+  // (MeuPluggy) the credentials are one `meu.pluggy.ai` login fronting every bank,
+  // so the second bank a user adds reads as a duplicate of the first and the app
+  // could not add one at all. It could not be scoped by connector either, because
+  // the token is minted before the user picks a bank inside the widget.
+  //
+  // So the flag is gone and the question is asked where it can be answered
+  // accurately: against the ACCOUNTS this item exposes, compared with the accounts
+  // already stored for this user. Two items from one aggregator holding different
+  // banks pass; the same bank connected twice does not.
+  //
+  // ORDER MATTERS. This runs after the ownership check — so only an item proven to
+  // belong to the caller is ever inspected or deleted — and before the upsert, so a
+  // refused item leaves no row behind. A re-registration of an item the user already
+  // holds skips the check entirely: it is idempotent by `UNIQUE (user_id,
+  // provider_connection_id)`, and comparing an item against its own stored accounts
+  // would refuse every retry.
+  const { data: already } = await db
+    .from('connection')
+    .select('id')
+    .eq('user_id', who.caller.id)
+    .eq('provider_connection_id', itemId)
+    .maybeSingle()
+
+  if (!already) {
+    const clash = await findClashingAccount(db, who.caller.id, itemId)
+    if (clash) {
+      // The item is unusable and ours: we minted the token, the user just created
+      // it, and nothing references it. Leaving it would keep an orphan syncing at
+      // Pluggy against an account we already read through another connection.
+      //
+      // Best effort, and the failure is deliberately swallowed: the registration is
+      // refused either way, and reporting "could not delete" would replace an
+      // actionable sentence with an operational one the user cannot act on.
+      try {
+        const apiKey = await pluggyApiKey()
+        await pluggy(`/items/${itemId}`, apiKey, { method: 'DELETE' })
+      } catch { /* orphan at Pluggy; the refusal below is still the truth */ }
+
+      return json({
+        error: `${clash.label} is already connected through ${clash.institution}. `
+          + `Remove that bank first if you meant to reconnect it.`,
+        code: 'duplicate_accounts',
+      }, 409)
+    }
+  }
 
   const { data, error } = await db
     .from('connection')
