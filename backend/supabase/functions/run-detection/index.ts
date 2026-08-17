@@ -96,12 +96,20 @@ Deno.serve(async (req: Request) => {
     try {
       const rows = await loadUser(db, p.id)
 
-      const [{ data: subs, error: sErr }, { data: runs, error: rErr }] = await Promise.all([
+      const [
+        { data: subs, error: sErr },
+        { data: runs, error: rErr },
+        { data: accounts, error: aErrAcc },
+      ] = await Promise.all([
         db.from('subscription').select('id, dedupe_key, merchant_key, service_name, identification, ignored').eq('user_id', p.id),
         db.from('subscription_run').select('id, subscription_id, start_date, end_date, billing_interval, status, detected_by, cancelled_date, next_expected_date, subscription!inner(user_id)').eq('subscription.user_id', p.id),
+        // For `charge.card_label` (v60). Scoped through the connection like every other
+        // read here; the service role bypasses RLS, so this filter IS the scoping.
+        db.from('bank_account').select('id, brand, last4, connection!inner(user_id)').eq('connection.user_id', p.id),
       ])
       if (sErr) throw new Error(`select subscription: ${sErr.message}`)
       if (rErr) throw new Error(`select subscription_run: ${rErr.message}`)
+      if (aErrAcc) throw new Error(`select bank_account: ${aErrAcc.message}`)
 
       const runIds = (runs ?? []).map((r: { id: string }) => r.id)
       let charges: unknown[] = []
@@ -120,6 +128,7 @@ Deno.serve(async (req: Request) => {
         subscriptions: (subs ?? []) as EngineInput['subscriptions'],
         runs: (runs ?? []) as unknown as EngineInput['runs'],
         charges: charges as EngineInput['charges'],
+        accounts: (accounts ?? []) as unknown as EngineInput['accounts'],
       })
 
       // Single transactional write. Everything above is a read; everything the

@@ -455,3 +455,58 @@ Deno.test('v25: R3 counts cross-currency amounts as distinct', () => {
   const d = detect({ today: '2026-03-20', rows, ...EMPTY })
   assertEquals(d.diagnostics.r3_runs, 1, 'varying money, so R3 has something to suggest')
 })
+
+// ------------------------------------------------- card_label snapshot (v60)
+
+Deno.test('v60: a charge carries the card it was billed to', () => {
+  // The column has been documented as a snapshot at billing time since Migration #1
+  // and the engine hardcoded null, so every subscription row in the app rendered
+  // "Monthly · " — a separator around an absence. The label comes from the account the
+  // transaction sits on; TxRow already carries account_id.
+  const rows = [
+    row({ date: '2026-01-10', amount: 39.9 }),
+    row({ date: '2026-02-10', amount: 39.9 }),
+  ]
+  const d = detect({
+    today: '2026-02-20',
+    rows,
+    ...EMPTY,
+    accounts: [{ id: 'acct-card', brand: 'MASTERCARD', last4: '2049' }],
+  })
+  const charges = d.subscriptions[0].runs[0].charges
+  assertEquals(charges.length, 2)
+  assertEquals(charges.every((c) => c.card_label === 'Master 2049'), true)
+})
+
+Deno.test('v60: an account the engine was not told about yields null, not a guess', () => {
+  // `accounts` is optional so the 86 tests that predate it still compile, and an
+  // absent map reproduces exactly the old behaviour rather than inventing a label.
+  const rows = [
+    row({ date: '2026-01-10', amount: 39.9 }),
+    row({ date: '2026-02-10', amount: 39.9 }),
+  ]
+  const withoutAccounts = detect({ today: '2026-02-20', rows, ...EMPTY })
+  assertEquals(withoutAccounts.subscriptions[0].runs[0].charges[0].card_label, null)
+
+  const otherAccount = detect({
+    today: '2026-02-20',
+    rows,
+    ...EMPTY,
+    accounts: [{ id: 'acct-somewhere-else', brand: 'VISA', last4: '4821' }],
+  })
+  assertEquals(otherAccount.subscriptions[0].runs[0].charges[0].card_label, null)
+})
+
+Deno.test('v60: a charge on a checking account is not given an invented card', () => {
+  const rows = [
+    row({ account_id: 'acct-checking', date: '2026-01-10', amount: 39.9 }),
+    row({ account_id: 'acct-checking', date: '2026-02-10', amount: 39.9 }),
+  ]
+  const d = detect({
+    today: '2026-02-20',
+    rows,
+    ...EMPTY,
+    accounts: [{ id: 'acct-checking', brand: null, last4: '3816' }],
+  })
+  assertEquals(d.subscriptions[0].runs[0].charges[0].card_label, null)
+})

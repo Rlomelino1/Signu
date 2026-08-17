@@ -9,6 +9,7 @@
 // written, and charges whose transaction_id is NULL are a frozen region that is
 // never recomputed, never deleted and never re-parented.
 
+import { cardLabel } from './accounts.ts'
 import { moneyKey, sameMoney } from './money.ts'
 import { addInterval, circularDomDistance, daysBetween, type Interval } from './dates.ts'
 
@@ -66,12 +67,23 @@ export interface StoredSubscription {
   ignored: boolean
 }
 
+/** An account as the engine needs it: only enough to label a charge (v60). */
+export interface AccountRow {
+  id: string
+  brand: string | null
+  last4: string | null
+}
+
 export interface EngineInput {
   today: string
   rows: TxRow[]
   subscriptions: StoredSubscription[]
   runs: StoredRun[]
   charges: StoredCharge[]
+  /** For `card_label`. Optional so every existing caller and the 86 tests that
+   *  predate this keep compiling; an absent map simply yields null labels, which is
+   *  exactly the old behaviour. */
+  accounts?: AccountRow[]
 }
 
 // ---------------------------------------------------------------------- output
@@ -469,6 +481,16 @@ function dedupeKeys(merchant: string, runs: ProtoRun[]): string[] {
 export function detect(input: EngineInput): DesiredState {
   const { candidates, diagnostics } = filterCandidates(input.rows)
 
+  // Account id -> 'Master 2049', for the charge snapshot (v60). Built once: a charge
+  // is labelled by the account its transaction sits on, and `TxRow` already carries
+  // `account_id`, so nothing new has to be threaded through the pass itself.
+  const labels = new Map<string, string>()
+  for (const a of input.accounts ?? []) {
+    const label = cardLabel(a.brand, a.last4)
+    if (label) labels.set(a.id, label)
+  }
+  const labelFor = (accountId: string): string | null => labels.get(accountId) ?? null
+
   const groups = new Map<string, TxRow[]>()
   for (const r of candidates) {
     const k = merchantKey(r)
@@ -539,7 +561,10 @@ export function detect(input: EngineInput): DesiredState {
           currency: c.currency,
           amount_in_account_currency:
             c.amount_in_account_currency === null ? null : num(c.amount_in_account_currency),
-          card_label: null,
+          // The snapshot, taken from the account this transaction actually sits on
+          // (v60). Was hardcoded null since the engine was written, which left a
+          // column with a reader and no writer.
+          card_label: labelFor(c.account_id),
         })),
       }
       run = applyAssertions(run, stored)

@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-17** (v58) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-17** (v60) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1691,6 +1691,40 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v59/v60** — THE CARD LABEL GETS A WRITER, AND THE INK HERO LOSES ITS OUTLINE
+  (2026-08-17). **No migration.**
+  **`charge.card_label` had a reader and no writer.** It is documented as a snapshot at
+  billing time, three surfaces interpolate it, and `detection.ts` hardcoded
+  **`card_label: null`** — so every charge in production carried null and the
+  subscription rows rendered **"Monthly · "**, punctuation drawn around an absence. The
+  applier was faithful: it stores the null it is handed.
+  **v59 fixed the rendering; v60 fixed the data**, and they answer different questions.
+  The client derives the label from `transactionAccountMap` → `bank_account` (brand +
+  last4), which says which card the transaction sits behind **now**. The engine's
+  snapshot says which card was charged **then** — and a card replaced next year must not
+  rewrite this year's history, which is the entire reason the column exists. So the
+  stored value wins and the derivation is the fallback.
+  **The separator lives inside the label**, so an unnameable card yields "Monthly" and
+  never "Monthly · ". That case is real rather than defensive: `transaction_id` goes
+  null by design once raw data is deleted.
+  **The timeline had the same bug, inert by luck.** Its "card changed to …" annotation
+  compared raw labels, so with every value null it compared `"" != ""` and never fired.
+  It would have started lying the moment the engine wrote its first label; both cards
+  must now be nameable before a change is claimed.
+  **No backfill, confirmed by reading the applier**: `apply_detection` deletes and
+  reinserts every charge with a non-null `transaction_id` on each pass, so the next
+  detection run labels all history. Orphaned charges are never recomputed — immutable
+  records by v24 — which is the other reason the client keeps deriving.
+  `cardLabel` lives in `_shared/accounts.ts`, the module that exists so the two sides
+  cannot disagree about accounts (v53). `accounts` is **optional** on `EngineInput`, so
+  the 86 tests predating it compile unchanged and an absent map reproduces the old
+  behaviour exactly rather than inventing labels. 92 Deno tests, 156 Swift.
+  **And the ink hero lost its white outline**, which closes v12's own open check
+  ("white tiles vs. the ink-dark detail hero"). The hairline exists so a pale tile does
+  not dissolve into the paper ground; on ink it IS the thing you see. `ServiceAvatar`
+  takes `onInk`, and both ink surfaces pass it — the subscription hero and the
+  connection detail hero. On paper it stays, because a white-background logo there would
+  otherwise have no edge.
 - **v58** — BRAND_CATALOG, AND BANKS GET THEIR LOGOS (2026-08-17). **Migration #14** —
   one table renamed with its index, policy and constraints, one column renamed, one
   column added, nine rows inserted.

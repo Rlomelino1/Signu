@@ -55,7 +55,7 @@ struct SubscriptionHeroCard: View {
         InkHeroCard {
             // Chip centers against the name + subtitle block as a whole (21o).
             HStack(alignment: .center, spacing: 12) {
-                ServiceAvatar(name: serviceName, size: 46)
+                ServiceAvatar(name: serviceName, size: 46, onInk: true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(serviceName)
                         .font(.signuHeadline)
