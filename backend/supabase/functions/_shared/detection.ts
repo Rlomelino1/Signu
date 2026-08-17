@@ -74,6 +74,19 @@ export interface AccountRow {
   last4: string | null
 }
 
+/** A `brand_catalog` row, as R4 reads it. `domain` and `category` are the client's
+ *  business (logos, display) and are deliberately absent: the engine has no use for
+ *  them and a field an engine does not need is a field that can drift. */
+export interface CatalogRow {
+  brand_name: string
+  patterns: string[] | null
+  /** "A charge from this merchant is ALWAYS a subscription" — a claim about the
+   *  MERCHANT, not about one charge. R4's entire trigger. */
+  subscription_only: boolean
+  /** 'service' | 'institution'. R4 considers services only — see `catalogEntryFor`. */
+  kind: string
+}
+
 export interface EngineInput {
   today: string
   rows: TxRow[]
@@ -84,6 +97,9 @@ export interface EngineInput {
    *  predate this keep compiling; an absent map simply yields null labels, which is
    *  exactly the old behaviour. */
   accounts?: AccountRow[]
+  /** R4's catalog. Optional for the same reason: absent means R4 cannot fire, which
+   *  is precisely the behaviour of every version of this engine before v63. */
+  catalog?: CatalogRow[]
 }
 
 // ---------------------------------------------------------------------- output
@@ -241,7 +257,7 @@ const R3_ALIGNED_FRACTION = 0.8
 
 interface ProtoRun {
   charges: TxRow[]
-  detected_by: 'R1' | 'R3'
+  detected_by: 'R1' | 'R3' | 'R4'
   interval: Interval
 }
 
@@ -303,6 +319,105 @@ function suggestR3(group: TxRow[]): ProtoRun | null {
   if (aligned / doms.length < R3_ALIGNED_FRACTION) return null
 
   return { charges: [...group], detected_by: 'R3', interval: 'monthly' }
+}
+
+// ------------------------------------------------------------------------- R4
+//
+// The catalog fast path, contract-only since the engine was written (v11) and
+// unwired through v62 because MERCHANT_CATALOG did not exist, then because nothing
+// taught the engine to read it. Both blockers are gone.
+//
+// R4 exists for the case R1 and R3 structurally cannot reach: a subscription with
+// ONE charge so far. R1 needs two charges a cadence apart; R3 needs three. A user
+// who subscribes to Netflix today waits two months to see it — unless something
+// already knows that a charge from Netflix is never a one-off. That knowledge is
+// `brand_catalog.subscription_only`, and it is a claim about the MERCHANT.
+
+/** Case- and accent-insensitive, trimmed. Mirrors `BrandCatalog.normalise` in the
+ *  client (`BrandCatalog.swift`), which folds case and diacritics and trims —
+ *  nothing more. Note its doc comment claims punctuation-insensitivity it does not
+ *  implement; this matches the CODE, because two implementations that disagree are
+ *  worse than one that is less clever than its comment. */
+export function normaliseBrand(text: string): string {
+  // \u0300-\u036f is the combining-marks block: NFD splits 'ã' into 'a' + a
+  // combining tilde, and this drops the tilde. Written as escapes on purpose --
+  // literal combining characters in a source file are invisible and unreviewable.
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+}
+
+/** Name first, patterns second, longest pattern wins — `BrandCatalog.entry`'s rule,
+ *  reimplemented because Swift and TypeScript cannot share it.
+ *
+ *  `kind` is scoped to 'service' by every caller here and that is load-bearing, not
+ *  tidiness: 'NU PAGAMENTOS' appears on Brazilian statements as the ACQUIRER, so an
+ *  unscoped lookup would match the Nubank institution row for a subscription merely
+ *  billed through Nubank. Institutions are seeded `subscription_only = false`, so
+ *  today that is belt and braces — but a single future edit to that column would
+ *  otherwise turn every Nubank-acquired charge into a suggested subscription. */
+export function catalogEntryFor(
+  name: string | null,
+  catalog: CatalogRow[],
+  kind = 'service',
+): CatalogRow | null {
+  const needle = normaliseBrand(name ?? '')
+  if (!needle) return null
+  const rows = catalog.filter((c) => c.kind === kind)
+
+  const exact = rows.find((c) => normaliseBrand(c.brand_name) === needle)
+  if (exact) return exact
+
+  // Longest pattern first, so 'amazon prime' beats 'amazon' when both are present.
+  // Without the ordering the answer depends on row order, which is a database
+  // detail rather than a rule.
+  let best: CatalogRow | null = null
+  let bestLength = 0
+  for (const row of rows) {
+    for (const raw of row.patterns ?? []) {
+      const pattern = normaliseBrand(raw)
+      if (!pattern || !needle.includes(pattern)) continue
+      if (pattern.length > bestLength) {
+        best = row
+        bestLength = pattern.length
+      }
+    }
+  }
+  return best
+}
+
+/** R4 — catalog fast path. One charge from a known subscription-only merchant is a
+ *  'possible' run immediately. Suggest-only: `applyAssertions` forces the status, so
+ *  nothing here can auto-activate a subscription.
+ *
+ *  THE INTERVAL IS PROVISIONAL AND THAT IS THE WHOLE DESIGN (spec, locked
+ *  2026-07-15). A single charge cannot measure cadence, so the engine writes
+ *  'monthly' to keep the column NOT NULL and `next_expected_date` renderable, and the
+ *  confirm flow asks the user monthly-or-annual and overwrites it. R3 confirmations
+ *  never ask, because three date-aligned charges already MEASURED the cadence.
+ *
+ *  Recognition is attempted against the merchant name first, then the normalized
+ *  descriptor, then the raw one — most trustworthy to least, since `patterns` exists
+ *  precisely to catch descriptors like 'trueline valve'. The FIRST string that
+ *  resolves to any entry decides, and if that entry is not subscription-only the rule
+ *  declines. It deliberately does NOT keep trying further strings hoping for a yes:
+ *  the strongest available signal has already said this merchant's charges are not
+ *  always subscriptions, and "ask every name until one agrees" is a false-positive
+ *  generator. */
+function suggestR4(group: TxRow[], catalog: CatalogRow[]): ProtoRun | null {
+  if (!group.length || !catalog.length) return null
+  const first = group[0]
+
+  let entry: CatalogRow | null = null
+  for (const needle of [first.provider_merchant_name, first.normalized_merchant, first.raw_description]) {
+    entry = catalogEntryFor(needle, catalog)
+    if (entry) break
+  }
+  if (!entry || !entry.subscription_only) return null
+
+  // Every charge in the group, not just the first. Usually there IS only one -- that
+  // is the case R4 exists for -- but when R1 and R3 have both declined a handful of
+  // charges from a merchant whose every charge is a subscription, they belong to one
+  // suggestion rather than being dropped on the floor. "Generous to extend."
+  return { charges: [...group], detected_by: 'R4', interval: 'monthly' }
 }
 
 /** R2 — backfill. On a confirmed run, claim an unclaimed same-merchant charge
@@ -514,6 +629,7 @@ export function detect(input: EngineInput): DesiredState {
   const keptRunIds = new Set<string>()
   let r1Runs = 0
   let r3Runs = 0
+  let r4Runs = 0
 
   // Deterministic group order, so output ordering is stable run to run.
   for (const merchant of [...groups.keys()].sort()) {
@@ -529,10 +645,22 @@ export function detect(input: EngineInput): DesiredState {
       const s = suggestR3(leftover)
       if (s) protos.push(s)
     }
+    // R4 last, and only when nothing else claimed anything for this merchant. The
+    // ordering is the rule's precedence: a measured cadence always beats a catalog
+    // assumption, so R4 never competes with R1 or R3 -- it fills the gap where
+    // neither CAN fire. Deliberately scoped to "no runs at all for this merchant"
+    // rather than "unclaimed charges remain": a stray charge alongside a real run is
+    // R1 continuation's business, and a second 'possible' run for a merchant the user
+    // already tracks is noise. "Strict to create."
+    if (protos.length === 0) {
+      const s = suggestR4(group, input.catalog ?? [])
+      if (s) protos.push(s)
+    }
     if (protos.length === 0) continue
 
     r1Runs += protos.filter((p) => p.detected_by === 'R1').length
     r3Runs += protos.filter((p) => p.detected_by === 'R3').length
+    r4Runs += protos.filter((p) => p.detected_by === 'R4').length
 
     const keys = dedupeKeys(merchant, protos)
     const storedSubs = storedByMerchant.get(merchant) ?? []
@@ -604,7 +732,7 @@ export function detect(input: EngineInput): DesiredState {
   return {
     subscriptions: mergeByDedupeKey(subscriptions),
     delete_run_ids,
-    diagnostics: { ...diagnostics, r1_runs: r1Runs, r3_runs: r3Runs },
+    diagnostics: { ...diagnostics, r1_runs: r1Runs, r3_runs: r3Runs, r4_runs: r4Runs },
   }
 }
 

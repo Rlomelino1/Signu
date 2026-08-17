@@ -14,12 +14,15 @@ import { assert, assertEquals, assertFalse } from 'https://deno.land/std@0.224.0
 import { cents, moneyKey, sameMoney } from './money.ts'
 import { addMonths, circularDomDistance, daysBetween } from './dates.ts'
 import {
+  catalogEntryFor,
+  type CatalogRow,
   detect,
   filterCandidates,
   isFee,
   isInstallment,
   isInternalTransfer,
   merchantKey,
+  normaliseBrand,
   type TxRow,
 } from './detection.ts'
 
@@ -509,4 +512,355 @@ Deno.test('v60: a charge on a checking account is not given an invented card', (
     accounts: [{ id: 'acct-checking', brand: null, last4: '3816' }],
   })
   assertEquals(d.subscriptions[0].runs[0].charges[0].card_label, null)
+})
+
+// ------------------------------------------------------------------------- R4
+//
+// The catalog fast path, wired in v63 after being contract-only since v11. R4 is
+// the only rule that can see a subscription from a SINGLE charge, because it is the
+// only one holding outside knowledge: `subscription_only` says a charge from this
+// merchant is never a one-off.
+
+function catalogRow(over: Partial<CatalogRow> = {}): CatalogRow {
+  return {
+    brand_name: 'Netflix',
+    patterns: ['netflix'],
+    subscription_only: true,
+    kind: 'service',
+    ...over,
+  }
+}
+
+const CATALOG: CatalogRow[] = [
+  catalogRow(),
+  catalogRow({ brand_name: 'Amazon Prime', patterns: ['amazon prime'] }),
+  catalogRow({ brand_name: 'Kindle Unlimited', patterns: ['amazon', 'kindle unlimited'] }),
+  catalogRow({ brand_name: 'Estadão', patterns: ['estadao'] }),
+  // Migration #13's real row: Steam mostly sells one-off games, so its charges are
+  // NOT always subscriptions. This is the entry that must never fire R4.
+  catalogRow({
+    brand_name: 'Steam',
+    patterns: ['steam', 'valve', 'trueline valve'],
+    subscription_only: false,
+  }),
+  // An institution, as Migration #14 seeds it. 'nu pagamentos' is the ACQUIRER on
+  // Brazilian statements, which is the trap `kind` exists to close.
+  catalogRow({
+    brand_name: 'Nubank',
+    patterns: ['nubank', 'nu pagamentos'],
+    subscription_only: false,
+    kind: 'institution',
+  }),
+]
+
+Deno.test('R4 matching mirrors the client: name first, then longest pattern', () => {
+  assertEquals(catalogEntryFor('Netflix', CATALOG)?.brand_name, 'Netflix')
+  assertEquals(catalogEntryFor('NETFLIX.COM BRASIL', CATALOG)?.brand_name, 'Netflix')
+  // 'Amazon Prime' contains 'amazon' too; the longer pattern must win, or the answer
+  // depends on row order, which is a database detail and not a rule.
+  assertEquals(catalogEntryFor('AMAZON PRIME BR', CATALOG)?.brand_name, 'Amazon Prime')
+  assertEquals(catalogEntryFor('AMAZON SERVICES', CATALOG)?.brand_name, 'Kindle Unlimited')
+  assertEquals(catalogEntryFor('Padaria do Zé', CATALOG), null)
+  assertEquals(catalogEntryFor('', CATALOG), null)
+  assertEquals(catalogEntryFor(null, CATALOG), null)
+})
+
+Deno.test('R4 matching folds case and accents like the client does', () => {
+  assertEquals(normaliseBrand('ESTADÃO'), 'estadao')
+  assertEquals(normaliseBrand('  Netflix '), 'netflix')
+  assertEquals(catalogEntryFor('estadao', CATALOG)?.brand_name, 'Estadão')
+  assertEquals(catalogEntryFor('ESTADÃO ASSINATURA', CATALOG)?.brand_name, 'Estadão')
+})
+
+Deno.test('R4 never reads an institution row', () => {
+  // A subscription billed THROUGH Nubank must not resolve to the bank. Scoped by
+  // kind rather than by careful patterns, so it holds by construction.
+  assertEquals(catalogEntryFor('NU PAGAMENTOS 12345 SOMESHOP', CATALOG), null)
+  assertEquals(catalogEntryFor('Nubank', CATALOG), null)
+  assertEquals(catalogEntryFor('Nubank', CATALOG, 'institution')?.brand_name, 'Nubank')
+})
+
+Deno.test('R4: one charge from a subscription-only merchant is a possible run', () => {
+  const out = detect({
+    today: '2026-01-20',
+    rows: [row({ date: '2026-01-10', raw_description: 'NETFLIX.COM', normalized_merchant: 'NETFLIX.COM' })],
+    ...EMPTY,
+    catalog: CATALOG,
+  })
+  assertEquals(out.subscriptions.length, 1)
+  const run = out.subscriptions[0].runs[0]
+  assertEquals(run.detected_by, 'R4')
+  // Suggest-only: the user promotes it, never the engine.
+  assertEquals(run.status, 'possible')
+  assertEquals(run.charges.length, 1)
+  // Provisional, and the whole reason the confirm flow asks (spec, locked
+  // 2026-07-15): a single charge cannot measure cadence.
+  assertEquals(run.billing_interval, 'monthly')
+  // Still renderable as "renews ~<date>" -- that is what the provisional buys.
+  assertEquals(run.next_expected_date, '2026-02-10')
+  assertEquals(out.diagnostics.r4_runs, 1)
+})
+
+Deno.test('R4 does not fire without a catalog, which was every version before v63', () => {
+  const rows = [row({ raw_description: 'NETFLIX.COM', normalized_merchant: 'NETFLIX.COM' })]
+  assertEquals(detect({ today: '2026-01-20', rows, ...EMPTY }).subscriptions.length, 0)
+  assertEquals(detect({ today: '2026-01-20', rows, ...EMPTY, catalog: [] }).subscriptions.length, 0)
+})
+
+Deno.test('R4 refuses a merchant whose charges are not always subscriptions', () => {
+  // R4's trigger is `subscription_only`, not "is in the catalog". Steam is in the
+  // catalog for its logo; firing on it would promote every game bought.
+  const out = detect({
+    today: '2026-01-20',
+    rows: [row({ raw_description: 'TRUELINE VALVE CORPORATION', normalized_merchant: 'TRUELINE VALVE CORPORATION' })],
+    ...EMPTY,
+    catalog: CATALOG,
+  })
+  assertEquals(out.subscriptions.length, 0)
+  assertEquals(out.diagnostics.r4_runs, 0)
+})
+
+Deno.test('a measured cadence beats the catalog: two Netflix charges are R1, not R4', () => {
+  const out = detect({
+    today: '2026-02-20',
+    rows: [
+      row({ date: '2026-01-10', raw_description: 'NETFLIX.COM', normalized_merchant: 'NETFLIX.COM' }),
+      row({ date: '2026-02-09', raw_description: 'NETFLIX.COM', normalized_merchant: 'NETFLIX.COM' }),
+    ],
+    ...EMPTY,
+    catalog: CATALOG,
+  })
+  const run = out.subscriptions[0].runs[0]
+  assertEquals(run.detected_by, 'R1')
+  // And R1 is auto, so it is active rather than a suggestion.
+  assertEquals(run.status, 'active')
+  assertEquals(out.diagnostics.r4_runs, 0)
+})
+
+Deno.test('R4 claims every leftover charge of the merchant, not just the first', () => {
+  // Two charges 40 days apart: too far for R1, too few for R3, and from a merchant
+  // whose every charge is a subscription. They are one suggestion.
+  const out = detect({
+    today: '2026-03-01',
+    rows: [
+      row({ date: '2026-01-10', raw_description: 'NETFLIX.COM', normalized_merchant: 'NETFLIX.COM' }),
+      row({ date: '2026-02-19', raw_description: 'NETFLIX.COM', normalized_merchant: 'NETFLIX.COM' }),
+    ],
+    ...EMPTY,
+    catalog: CATALOG,
+  })
+  const run = out.subscriptions[0].runs[0]
+  assertEquals(run.detected_by, 'R4')
+  assertEquals(run.charges.length, 2)
+  assertEquals(run.start_date, '2026-01-10')
+})
+
+Deno.test('R4 is recognised through the merchant NAME when the descriptor is opaque', () => {
+  // provider_merchant_name is the cleanest signal and is tried first; a descriptor
+  // like 'PAG*8829911' says nothing on its own.
+  const out = detect({
+    today: '2026-01-20',
+    rows: [row({
+      raw_description: 'PAG*8829911',
+      normalized_merchant: 'PAG*8829911',
+      provider_merchant_name: 'Netflix',
+    })],
+    ...EMPTY,
+    catalog: CATALOG,
+  })
+  assertEquals(out.subscriptions[0].runs[0].detected_by, 'R4')
+})
+
+Deno.test('the strongest name decides: a non-subscription merchant is not overruled', () => {
+  // The merchant name resolves to Steam (subscription_only false). The rule must NOT
+  // keep trying the descriptor hoping for a yes -- 'ask every name until one agrees'
+  // is a false-positive generator.
+  const out = detect({
+    today: '2026-01-20',
+    rows: [row({
+      provider_merchant_name: 'Steam',
+      raw_description: 'NETFLIX.COM',
+      normalized_merchant: 'NETFLIX.COM',
+    })],
+    ...EMPTY,
+    catalog: CATALOG,
+  })
+  assertEquals(out.subscriptions.length, 0)
+})
+
+Deno.test('R4 obeys the candidate filter like every other rule', () => {
+  // An installment from a catalog merchant is still an installment.
+  const out = detect({
+    today: '2026-01-20',
+    rows: [row({
+      raw_description: 'NETFLIX.COM 03/12',
+      normalized_merchant: 'NETFLIX.COM',
+      total_installments: 12,
+    })],
+    ...EMPTY,
+    catalog: CATALOG,
+  })
+  assertEquals(out.subscriptions.length, 0)
+})
+
+Deno.test('a confirmed R4 keeps the interval the user stated', () => {
+  // v11's authoritative write: the confirm flow asked, the user said annual, and a
+  // recompute must not overwrite it with the provisional monthly.
+  const out = detect({
+    today: '2026-01-20',
+    rows: [row({ id: 'tx-r4a', date: '2026-01-10', raw_description: 'NETFLIX.COM', normalized_merchant: 'NETFLIX.COM' })],
+    subscriptions: [{
+      id: 'sub-1',
+      dedupe_key: 'netflix.com',
+      merchant_key: 'NETFLIX.COM',
+      service_name: 'Netflix',
+      identification: 'user_confirmed',
+      ignored: false,
+    }],
+    runs: [{
+      id: 'run-1',
+      subscription_id: 'sub-1',
+      start_date: '2026-01-10',
+      end_date: null,
+      billing_interval: 'annual',
+      status: 'active',
+      detected_by: 'R4',
+      cancelled_date: null,
+      next_expected_date: '2027-01-10',
+    }],
+    charges: [{
+      id: 'ch-1',
+      run_id: 'run-1',
+      transaction_id: 'tx-r4a',
+      date: '2026-01-10',
+      amount: 39.9,
+      currency: 'BRL',
+      amount_in_account_currency: null,
+      card_label: null,
+    }],
+    catalog: CATALOG,
+  })
+  const run = out.subscriptions[0].runs[0]
+  assertEquals(run.stored_run_id, 'run-1')
+  assertEquals(run.billing_interval, 'annual', 'the user\'s answer is authoritative')
+  // Confirmed, so the derived lifecycle status is allowed to stand rather than being
+  // demoted back to a suggestion.
+  assertEquals(run.status, 'active')
+})
+
+Deno.test('THE SPEC-FLAGGED CASE: a confirmed R4 that never repeats dies quietly', () => {
+  // Flagged for implementation in the spec's R4 section: no special casing, the
+  // ordinary lifecycle must carry it. One charge, confirmed monthly, and no second
+  // charge ever arrives.
+  const storedFor = (today: string) => ({
+    today,
+    rows: [row({ id: 'tx-r4b', date: '2026-01-10', raw_description: 'NETFLIX.COM', normalized_merchant: 'NETFLIX.COM' })],
+    subscriptions: [{
+      id: 'sub-1',
+      dedupe_key: 'netflix.com',
+      merchant_key: 'NETFLIX.COM',
+      service_name: 'Netflix',
+      identification: 'user_confirmed',
+      ignored: false,
+    }],
+    runs: [{
+      id: 'run-1',
+      subscription_id: 'sub-1',
+      start_date: '2026-01-10',
+      end_date: null,
+      billing_interval: 'monthly' as const,
+      status: 'active',
+      detected_by: 'R4',
+      cancelled_date: null,
+      next_expected_date: '2026-02-10',
+    }],
+    charges: [{
+      id: 'ch-1',
+      run_id: 'run-1',
+      transaction_id: 'tx-r4b',
+      date: '2026-01-10',
+      amount: 39.9,
+      currency: 'BRL',
+      amount_in_account_currency: null,
+      card_label: null,
+    }],
+    catalog: CATALOG,
+  })
+
+  // Expected 2026-02-10. Inside the +/-3 day match window it is still active.
+  assertEquals(detect(storedFor('2026-02-12')).subscriptions[0].runs[0].status, 'active')
+  // Past the window: overdue, and still showing what it was waiting for.
+  const overdue = detect(storedFor('2026-02-20')).subscriptions[0].runs[0]
+  assertEquals(overdue.status, 'overdue')
+  assertEquals(overdue.next_expected_date, '2026-02-10')
+  // Past the grace period: ended, paid through the expected date, no prediction.
+  const ended = detect(storedFor('2026-04-01')).subscriptions[0].runs[0]
+  assertEquals(ended.status, 'ended')
+  assertEquals(ended.end_date, '2026-02-10')
+  assertEquals(ended.next_expected_date, null)
+  // It died through the normal machinery: still R4, never special-cased.
+  assertEquals(ended.detected_by, 'R4')
+})
+
+// ------------------------------------------- storefront vs subscription (v63)
+//
+// Migration #16. Three catalog rows named a STOREFRONT while claiming
+// `subscription_only = true`, so R4 would have proposed a subscription for every game
+// the user ever bought. The fix is two rows per brand, resolved by longest-pattern-
+// wins rather than by a new column: the broad patterns keep resolving logos, and only
+// the specific ones can fire R4.
+
+const GAMING: CatalogRow[] = [
+  catalogRow({ brand_name: 'PlayStation', patterns: ['playstation', 'psn', 'sony playstation'], subscription_only: false }),
+  catalogRow({ brand_name: 'PlayStation Plus', patterns: ['playstation plus', 'ps plus', 'psn plus'], subscription_only: true }),
+  catalogRow({ brand_name: 'Xbox', patterns: ['xbox', 'microsoft xbox'], subscription_only: false }),
+  catalogRow({ brand_name: 'Xbox Game Pass', patterns: ['xbox game pass', 'game pass'], subscription_only: true }),
+]
+
+Deno.test('a storefront descriptor resolves to the storefront, not the subscription', () => {
+  // Both rows match 'psn'/'playstation'; the storefront is the only one that matches
+  // at all, so there is nothing for R4 to fire on.
+  assertEquals(catalogEntryFor('PLAYSTATION NETWORK', GAMING)?.brand_name, 'PlayStation')
+  assertEquals(catalogEntryFor('PSN 4829112', GAMING)?.brand_name, 'PlayStation')
+  assertEquals(catalogEntryFor('XBOX 8829911', GAMING)?.brand_name, 'Xbox')
+  assertFalse(catalogEntryFor('XBOX 8829911', GAMING)!.subscription_only)
+})
+
+Deno.test('a descriptor that NAMES the subscription beats the storefront', () => {
+  // 'playstation plus' (16 chars) beats 'playstation' (11); 'game pass' (9) beats
+  // 'xbox' (4). This is why the split needs no new column.
+  assertEquals(catalogEntryFor('PLAYSTATION PLUS RENEWAL', GAMING)?.brand_name, 'PlayStation Plus')
+  assertEquals(catalogEntryFor('XBOX GAME PASS ULTIMATE', GAMING)?.brand_name, 'Xbox Game Pass')
+  assert(catalogEntryFor('XBOX GAME PASS ULTIMATE', GAMING)!.subscription_only)
+})
+
+Deno.test('R4 declines a game purchase and accepts the subscription', () => {
+  const one = (desc: string) =>
+    detect({
+      today: '2026-01-20',
+      rows: [row({ date: '2026-01-10', raw_description: desc, normalized_merchant: desc })],
+      ...EMPTY,
+      catalog: GAMING,
+    })
+
+  // The defect Migration #16 removes: a single game purchase manufacturing a
+  // subscription suggestion.
+  assertEquals(one('PLAYSTATION NETWORK').subscriptions.length, 0)
+  assertEquals(one('XBOX 8829911').subscriptions.length, 0)
+
+  // And the fast path still works where the descriptor is unambiguous.
+  const plus = one('PLAYSTATION PLUS RENEWAL')
+  assertEquals(plus.subscriptions.length, 1)
+  assertEquals(plus.subscriptions[0].runs[0].detected_by, 'R4')
+  assertEquals(plus.subscriptions[0].runs[0].status, 'possible')
+})
+
+Deno.test('both rows carry the same domain, so no charge loses its logo', () => {
+  // The reason the broad patterns were narrowed rather than deleted: the client
+  // resolves logos through these same patterns, and a game purchase should still
+  // show the PlayStation mark.
+  const store = catalogEntryFor('PSN 4829112', GAMING)
+  const sub = catalogEntryFor('PS PLUS', GAMING)
+  assertEquals(store?.brand_name, 'PlayStation')
+  assertEquals(sub?.brand_name, 'PlayStation Plus')
 })

@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-17** (v62) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-17** (v63) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -707,13 +707,17 @@ Detection cannot be sharded by account without silently disabling that filter.
 
 ### Scope limits, stated
 
-- **BRAND_CATALOG did not exist** (as MERCHANT_CATALOG), so **R4 could not fire.** The engine ships with
-  R1, R2, R3 and R5; R4 is contract-only until the catalog table exists. Said out
-  loud because a rule that silently never fires reads as a rule that works.
-  *Amended v38: the table exists and is seeded (Migration #8), so the blocker is
-  gone — but **R4 still does not fire**, because the engine has not been taught to
-  read it. The catalog currently feeds logo resolution only. The same sentence
-  applies for the same reason: a rule that never fires reads as a rule that works.*
+- **~~R4 does not fire~~ — CLOSED in v63.** All five rules are now live. Kept here
+  because the shape of the gap is worth remembering: R4 was contract-only from v11
+  because MERCHANT_CATALOG did not exist, and *still* did not fire after v38 created
+  and seeded the table, because nothing taught the engine to read it. Two different
+  blockers, eleven spec versions apart, behind one symptom — and the sentence this
+  entry existed to say held the whole time: **a rule that silently never fires reads
+  as a rule that works.**
+  *v63 wires it: `catalogEntryFor` mirrors the client's matcher, `suggestR4` fires
+  only on `subscription_only`, and `run-detection` loads `brand_catalog` once per
+  invocation as reference data. Wiring it immediately exposed three catalog rows that
+  were wrong — see Migration #16.*
 - **R1's positive path has fired on exactly one anchor** in real data, and that
   anchor only exists because v21 switched `merchant_key` to CNPJ. Zero false
   positives across 163 POSTED rows is evidence about the filters, not about the
@@ -1690,6 +1694,70 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v63** — R4 FIRES (2026-08-17). **Migration #16, data only** — three `patterns`
+  arrays narrowed, three rows added; no table, column, constraint, index, policy or
+  grant touched.
+  **The last unbuilt detection rule.** R4 was contract-only from **v11** because
+  MERCHANT_CATALOG did not exist, and still did not fire after **v38** created and
+  seeded it, because nothing taught the engine to read it — two different blockers,
+  eleven spec versions apart, behind one symptom.
+  **What R4 is for**: R1 needs two charges a cadence apart, R3 needs three, so neither
+  can *structurally* see a subscription with ONE charge. A user who subscribes today
+  waits two months — unless something already knows a charge from that merchant is
+  never a one-off. That knowledge is `brand_catalog.subscription_only`, and it is a
+  claim about the **merchant**, not about one charge.
+  **Precedence is the ordering**: R4 runs last and only when nothing else claimed
+  anything for that merchant, so a *measured* cadence always beats a catalog
+  assumption. Scoped to "no runs at all for this merchant" rather than "unclaimed
+  charges remain" — a stray charge beside a live run is R1 continuation's business, and
+  a second `possible` run for a merchant the user already tracks is noise.
+  **The interval stays provisional**, exactly as locked 2026-07-15: a single charge
+  cannot measure cadence, so the engine writes `monthly` to keep the column NOT NULL
+  and `next_expected_date` renderable, and the confirm flow's answer overwrites it.
+  **The spec-flagged test now exists**: a confirmed R4 run that never receives a second
+  charge dies through the ordinary lifecycle — active inside the window, overdue past
+  it, ended at +10 with `end_date` paid-through — with no special casing anywhere.
+  **`catalogEntryFor` mirrors `BrandCatalog.entry`** (name first, then longest pattern),
+  reimplemented because Swift and TypeScript cannot share it. Two notes on fidelity:
+  it matches the client's CODE rather than its comment, which claims a
+  punctuation-insensitivity `folding` does not implement; and `kind` is scoped to
+  `service`, which is load-bearing rather than tidy — 'NU PAGAMENTOS' is the ACQUIRER
+  on Brazilian statements, so an unscoped lookup would read the Nubank institution row
+  for a subscription merely billed through Nubank.
+  **Recognition tries merchant name, then normalized descriptor, then raw** — most
+  trustworthy first, since `patterns` exists to catch descriptors like
+  'trueline valve'. The first string that resolves decides; if that entry is not
+  subscription-only the rule **declines rather than trying the next string**, because
+  "ask every name until one agrees" is a false-positive generator.
+  **`run-detection` loads the catalog once per invocation, outside the per-user loop** —
+  it is reference data, the same user-independence the logo prefetch rests on (v38) —
+  and a failed read is **fatal, not degrading**: an empty catalog and an unreadable one
+  produce identical output and only one of them is correct.
+  **WIRING IT IMMEDIATELY EXPOSED THREE WRONG ROWS (Migration #16).**
+  `subscription_only` had sat unread since v38, so nothing had ever tested whether it
+  was TRUE of the rows carrying it. **PlayStation Plus** (`playstation`, `psn`),
+  **Xbox Game Pass** (`xbox`), and **Nintendo Switch Online** (`nintendo`) all claimed
+  true while their patterns named a **storefront** — the strings a one-off GAME purchase
+  wears on a statement. R4 would have proposed a subscription for every game the user
+  ever bought, which is verbatim the reasoning Migration #13 recorded for Steam, the row
+  that got it right.
+  **The fix needed no new column.** `subscription_only` is a property of a row, but the
+  truth here is a property of a *pattern*: `XBOX GAME PASS` is always a subscription,
+  `XBOX` is not. So each brand became two rows — a storefront with the broad patterns
+  (`false`) and the subscription with the specific ones (`true`) — resolved by the
+  longest-pattern-wins rule both matchers already implement. `PLAYSTATION PLUS RENEWAL`
+  hits 'playstation plus' (16) over 'playstation' (11); `PLAYSTATION NETWORK` hits only
+  the storefront.
+  **The broad patterns were narrowed, not deleted**, which is the smaller diff refused:
+  the client resolves logos through these same patterns, so deleting them would cost a
+  game purchase its mark. Both rows carry the same `domain`, `allDomains` deduplicates,
+  and the fetch set — with the privacy property resting on it — is unchanged.
+  **Accepted cost, stated**: a PS Plus renewal billing as the bare string
+  `PLAYSTATION NETWORK` gets no fast path. It is genuinely indistinguishable from a game
+  purchase, and R1 still catches it on the second charge. A missed fast path costs two
+  months; a false suggestion costs the user's trust in every suggestion after it.
+  **Twenty-one tests**, 114 in `_shared/` all green.
 
 - **v62** — THE REMINDER SAID "USD 34,33", WHICH IS NEITHER FIGURE (2026-08-17).
   **No migration.** Found by reading the first reminder this app ever delivered.

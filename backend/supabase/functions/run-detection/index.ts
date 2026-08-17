@@ -89,6 +89,21 @@ Deno.serve(async (req: Request) => {
   if (pErr) return json({ error: `select profiles: ${pErr.message}` }, 500)
   if (!profiles?.length) return json({ ok: true, note: 'no users', results: [] })
 
+  // R4's catalog (v63). Read ONCE, outside the per-user loop, because it is
+  // reference data: identical for every account, and the same user-independence the
+  // client's logo prefetch is built on (v38).
+  //
+  // A failed read is FATAL rather than degrading to "R4 off". Detection quietly
+  // losing a rule is the kind of silence this codebase keeps paying for -- an empty
+  // catalog and an unreadable one produce identical output, and only one of them is
+  // correct. The column list is minimal on purpose: `domain` and `category` are the
+  // client's business and the engine has no use for them.
+  const { data: catalogRows, error: catErr } = await db
+    .from('brand_catalog')
+    .select('brand_name, patterns, subscription_only, kind')
+  if (catErr) return json({ error: `select brand_catalog: ${catErr.message}` }, 500)
+  const catalog = (catalogRows ?? []) as unknown as EngineInput['catalog']
+
   const results: unknown[] = []
   const failures: unknown[] = []
 
@@ -129,6 +144,7 @@ Deno.serve(async (req: Request) => {
         runs: (runs ?? []) as unknown as EngineInput['runs'],
         charges: charges as EngineInput['charges'],
         accounts: (accounts ?? []) as unknown as EngineInput['accounts'],
+        catalog,
       })
 
       // Single transactional write. Everything above is a read; everything the
