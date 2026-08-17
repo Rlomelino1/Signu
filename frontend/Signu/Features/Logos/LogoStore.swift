@@ -32,7 +32,7 @@ final class LogoStore {
     private var images: [String: Image] = [:]
     private var missing: Set<String> = []
     private var inFlight: Set<String> = []
-    private(set) var catalog: [MerchantCatalogEntry] = []
+    private(set) var catalog: [BrandCatalogEntry] = []
 
     private let session: URLSession
     private let directory: URL
@@ -54,12 +54,13 @@ final class LogoStore {
     /// pass owns every request, which is also what keeps the request set
     /// independent of what the user is looking at. A cache miss here is simply a
     /// monogram, this launch.
-    func image(forName name: String) -> Image? {
-        guard let domain = MerchantCatalog.entry(for: name, in: catalog)?.domain else { return nil }
+    func image(forName name: String, kind: BrandKind) -> Image? {
+        guard let domain = BrandCatalog.entry(for: name, in: catalog, kind: kind)?.domain
+        else { return nil }
         return images[domain]
     }
 
-    func adopt(catalog: [MerchantCatalogEntry]) {
+    func adopt(catalog: [BrandCatalogEntry]) {
         self.catalog = catalog
     }
 
@@ -70,7 +71,7 @@ final class LogoStore {
     /// an oversight.
     func prefetch() async {
         guard SupabaseConfig.logoDevKey.isEmpty == false else { return }
-        for domain in MerchantCatalog.allDomains(in: catalog) {
+        for domain in BrandCatalog.allDomains(in: catalog) {
             if images[domain] != nil || inFlight.contains(domain) { continue }
             if let cached = loadFromDisk(domain) {
                 images[domain] = cached

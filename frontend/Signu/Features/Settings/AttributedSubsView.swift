@@ -32,7 +32,7 @@ struct AttributedSubsView: View {
                     .padding(.top, 4)
 
                 HStack(spacing: 12) {
-                    ServiceAvatar(name: payload.institutionName, size: 40)
+                    ServiceAvatar(name: payload.institutionName, size: 40, kind: .institution)
                     Text("Via \(payload.institutionName)")
                         .font(.signuTitle)
                         .foregroundStyle(SignuColor.textPrimary)

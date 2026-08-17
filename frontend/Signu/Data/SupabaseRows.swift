@@ -177,27 +177,33 @@ struct BankAccountRow: Decodable {
 /// MERCHANT_CATALOG — shared reference data, the same rows for every user, which
 /// is why nothing here is scoped by `user_id` and the policy behind it reads
 /// `using (true)`.
-struct MerchantCatalogRow: Decodable {
+struct BrandCatalogRow: Decodable {
     let id: UUID
-    let serviceName: String
+    let brandName: String
     let domain: String?
     let category: String?
     let subscriptionOnly: Bool
+    let kind: String
     let patterns: [String]
 
     enum CodingKeys: String, CodingKey {
         case id, domain, category, patterns
-        case serviceName = "service_name"
+        case brandName = "brand_name"
         case subscriptionOnly = "subscription_only"
+        case kind
     }
 
-    var domainModel: MerchantCatalogEntry {
-        MerchantCatalogEntry(
+    var domainModel: BrandCatalogEntry {
+        BrandCatalogEntry(
             id: id,
-            serviceName: serviceName,
+            brandName: brandName,
             domain: domain,
             category: category,
             subscriptionOnly: subscriptionOnly,
+            // An unknown kind falls back to `.service`, which is the conservative
+            // direction: a mislabelled row shows a monogram instead of borrowing
+            // someone else's logo.
+            kind: BrandKind(rawValue: kind) ?? .service,
             patterns: patterns
         )
     }

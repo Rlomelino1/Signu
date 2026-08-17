@@ -264,24 +264,36 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     /// subscribe to. The catalog is reference data about the world, and a mock
     /// that only listed the user's own merchants would quietly model the one
     /// shape the real thing must never have.
-    func merchantCatalog() async throws -> [MerchantCatalogEntry] {
+    func brandCatalog() async throws -> [BrandCatalogEntry] {
         [
-            MerchantCatalogEntry(id: UUID(), serviceName: "Netflix", domain: "netflix.com",
-                                 category: "Streaming", subscriptionOnly: true, patterns: ["netflix"]),
-            MerchantCatalogEntry(id: UUID(), serviceName: "Spotify", domain: "spotify.com",
-                                 category: "Music", subscriptionOnly: true, patterns: ["spotify"]),
-            MerchantCatalogEntry(id: UUID(), serviceName: "ChatGPT Plus", domain: "openai.com",
-                                 category: "AI", subscriptionOnly: true, patterns: ["openai", "chatgpt"]),
-            MerchantCatalogEntry(id: UUID(), serviceName: "iCloud+", domain: "icloud.com",
-                                 category: "Storage", subscriptionOnly: true, patterns: ["icloud"]),
-            MerchantCatalogEntry(id: UUID(), serviceName: "Disney+", domain: "disneyplus.com",
-                                 category: "Streaming", subscriptionOnly: true, patterns: ["disney"]),
-            MerchantCatalogEntry(id: UUID(), serviceName: "Duolingo", domain: "duolingo.com",
-                                 category: "Learning", subscriptionOnly: true, patterns: ["duolingo"]),
-            MerchantCatalogEntry(id: UUID(), serviceName: "Amazon Prime", domain: "amazon.com.br",
-                                 category: "Shopping", subscriptionOnly: true, patterns: ["amazon prime"]),
-            MerchantCatalogEntry(id: UUID(), serviceName: "Twitch", domain: "twitch.tv",
-                                 category: "Gaming", subscriptionOnly: false, patterns: ["twitch"])
+            BrandCatalogEntry(id: UUID(), brandName: "Netflix", domain: "netflix.com",
+                                 category: "Streaming", subscriptionOnly: true, kind: .service, patterns: ["netflix"]),
+            BrandCatalogEntry(id: UUID(), brandName: "Spotify", domain: "spotify.com",
+                                 category: "Music", subscriptionOnly: true, kind: .service, patterns: ["spotify"]),
+            BrandCatalogEntry(id: UUID(), brandName: "ChatGPT Plus", domain: "openai.com",
+                                 category: "AI", subscriptionOnly: true, kind: .service, patterns: ["openai", "chatgpt"]),
+            BrandCatalogEntry(id: UUID(), brandName: "iCloud+", domain: "icloud.com",
+                                 category: "Storage", subscriptionOnly: true, kind: .service, patterns: ["icloud"]),
+            BrandCatalogEntry(id: UUID(), brandName: "Disney+", domain: "disneyplus.com",
+                                 category: "Streaming", subscriptionOnly: true, kind: .service, patterns: ["disney"]),
+            BrandCatalogEntry(id: UUID(), brandName: "Duolingo", domain: "duolingo.com",
+                                 category: "Learning", subscriptionOnly: true, kind: .service, patterns: ["duolingo"]),
+            BrandCatalogEntry(id: UUID(), brandName: "Amazon Prime", domain: "amazon.com.br",
+                                 category: "Shopping", subscriptionOnly: true, kind: .service, patterns: ["amazon prime"]),
+            BrandCatalogEntry(id: UUID(), brandName: "Twitch", domain: "twitch.tv",
+                                 category: "Gaming", subscriptionOnly: false, kind: .service,
+                                 patterns: ["twitch"]),
+            // Institutions (v58). The fixture banks, so a Debug run and every preview
+            // show real bank marks rather than monograms.
+            BrandCatalogEntry(id: UUID(), brandName: "Nubank", domain: "nubank.com.br",
+                              category: "Bank", subscriptionOnly: false, kind: .institution,
+                              patterns: ["nubank", "nu pagamentos"]),
+            BrandCatalogEntry(id: UUID(), brandName: "Itaú", domain: "itau.com.br",
+                              category: "Bank", subscriptionOnly: false, kind: .institution,
+                              patterns: ["itau"]),
+            BrandCatalogEntry(id: UUID(), brandName: "Bradesco", domain: "bradesco.com.br",
+                              category: "Bank", subscriptionOnly: false, kind: .institution,
+                              patterns: ["bradesco"]),
         ]
     }
 
