@@ -283,6 +283,9 @@ struct PluggyConnectWebView: UIViewRepresentable {
         private let onSuccess: (String) -> Void
         private let onFailure: (String) -> Void
         private let onClose: () -> Void
+        /// The bank's sign-in page while it is open, so `webViewDidClose` can tell
+        /// the child from the host and tear down only the child.
+        private weak var popup: WKWebView?
 
         init(onSuccess: @escaping (String) -> Void,
              onFailure: @escaping (String) -> Void,
@@ -324,21 +327,55 @@ struct PluggyConnectWebView: UIViewRepresentable {
             }
         }
 
-        /// `target="_blank"` in the same view. Returning nil — the default — drops
-        /// the navigation and the connector's sign-in never opens.
+        /// The popup the widget opens for a bank's sign-in page, in a web view of
+        /// its OWN (v55).
+        ///
+        /// This used to call `webView.load(...)` on the host, which is the version of
+        /// this that looks right and silently breaks the flow: loading the bank's URL
+        /// into the same view REPLACES the page holding the `PluggyConnect` instance,
+        /// and with it `onSuccess`. The user then completes the sign-in, Pluggy shows
+        /// its own "Pronto! Você pode fechar esta janela" page, and the app waits
+        /// forever for a callback whose JavaScript no longer exists. That is why the
+        /// connect flow had never produced a real item: every OAuth-style connector —
+        /// which includes MeuPluggy, the one this account uses — ended there.
+        ///
+        /// Returning a new web view is what this delegate method is FOR. The child
+        /// shares the host's `configuration`, so it shares the process pool and the
+        /// script-message handler, and the widget can talk to it the way it expects.
+        ///
+        /// Returning nil (the default) is not an option either: the sign-in page then
+        /// never opens at all.
         func webView(
             _ webView: WKWebView,
             createWebViewWith configuration: WKWebViewConfiguration,
             for navigationAction: WKNavigationAction,
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
-            if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
-                webView.load(URLRequest(url: url))
-            }
-            return nil
+            let popup = WKWebView(frame: webView.bounds, configuration: configuration)
+            popup.uiDelegate = self
+            popup.navigationDelegate = self
+            popup.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            popup.backgroundColor = .clear
+            popup.isOpaque = false
+            webView.addSubview(popup)
+            self.popup = popup
+            return popup
+        }
+
+        /// `window.close()` from the popup, which is how Pluggy's OAuth return page
+        /// ends. Only the child is torn down — the host page underneath is still the
+        /// live widget, which is the entire point of the change above.
+        func webViewDidClose(_ webView: WKWebView) {
+            guard webView === popup else { return }
+            popup?.removeFromSuperview()
+            popup = nil
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            // Scoped to the host. A navigation failure inside the bank's popup is
+            // the bank's page misbehaving, not the connect flow ending — the widget
+            // underneath is still live and can still report success or a real error.
+            guard webView !== popup else { return }
             onFailure(error.localizedDescription)
         }
 
@@ -349,7 +386,9 @@ struct PluggyConnectWebView: UIViewRepresentable {
         ) {
             // The widget script is a subresource of a page with no network origin,
             // so a failure here means the CDN or the network is unreachable — which
-            // is worth saying rather than leaving a blank screen.
+            // is worth saying rather than leaving a blank screen. Scoped to the host
+            // for the same reason as above.
+            guard webView !== popup else { return }
             onFailure(error.localizedDescription)
         }
     }

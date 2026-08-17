@@ -68,6 +68,19 @@ extension SignuPayloadSource {
         let cardCount = accountList.filter { $0.connectionId == connection.id }.count
         switch connection.status {
         case .needsAction, .expired:
+            // A bank that has NEVER synced is not a bank that needs reconnecting
+            // (v55). `register-connection` writes `needs_action` on purpose — nothing
+            // has been fetched yet, and claiming `active` would be a claim — and the
+            // first sync flips it seconds later. In that window this row used to say
+            // "Reconnect to resume syncing" about a connection that had just been
+            // made successfully and was working, which is the one reading of the
+            // state that is actively false.
+            //
+            // `lastSyncedAt == nil` is what separates the two: no sync has ever
+            // completed, so there is nothing to *resume*.
+            if connection.lastSyncedAt == nil {
+                return ("Setting up", .neutral, "First sync in progress — this takes a moment")
+            }
             return ("Needs action", .danger, "Reconnect to resume syncing")
         case .disconnected:
             return ("Disconnected", .neutral, "Reconnect to resume syncing")

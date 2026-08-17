@@ -101,4 +101,47 @@ struct SettingsPayloadTests {
         let earlier = sent.addingTimeInterval(-300)
         #expect(AuthCooldown.remaining(since: sent, now: earlier) == AuthCooldown.seconds)
     }
+
+    // MARK: - A bank mid-first-sync is not a bank needing attention (v55)
+
+    private static func connection(
+        status: ConnectionStatus, lastSyncedAt: Date?
+    ) -> Connection {
+        Connection(
+            id: UUID(), institutionId: "200", institutionName: "MeuPluggy",
+            status: status, consentExpiresAt: nil, lastSyncedAt: lastSyncedAt,
+            lastSyncError: nil, createdAt: Date(timeIntervalSince1970: 1_780_000_000)
+        )
+    }
+
+    @Test("a connection that has never synced reads as setting up, not as broken")
+    func firstSyncIsNotAFailure() throws {
+        // The state seen in the app on 2026-08-17, seconds after the first connection
+        // the app ever created: `register-connection` writes needs_action because
+        // nothing has been fetched yet, and the row told the user to RECONNECT a bank
+        // that had just been connected successfully.
+        let source = StubSource(
+            providers: ["email"],
+            connectionList: [Self.connection(status: .needsAction, lastSyncedAt: nil)]
+        )
+        let row = try #require(source.makeSettingsPayload().banks.first)
+        #expect(row.chipText == "Setting up")
+        #expect(row.subtitle.contains("First sync"))
+        #expect(row.subtitle.contains("Reconnect") == false, "nothing has synced, so there is nothing to resume")
+    }
+
+    @Test("a connection that HAS synced before still asks to be reconnected")
+    func genuineNeedsActionSurvives() throws {
+        // The distinction must not swallow the real case: a bank that worked and then
+        // stopped is exactly when the user needs to act.
+        let source = StubSource(
+            providers: ["email"],
+            connectionList: [
+                Self.connection(status: .needsAction, lastSyncedAt: Date(timeIntervalSince1970: 1_780_000_000)),
+            ]
+        )
+        let row = try #require(source.makeSettingsPayload().banks.first)
+        #expect(row.chipText == "Needs action")
+        #expect(row.subtitle.contains("Reconnect"))
+    }
 }
