@@ -136,6 +136,25 @@ struct BankLabelTests {
         #expect(source.bankLabel(connection) == "Nu Pagamentos S.A.")
     }
 
+    @Test("The second bank behind the same proxy gets its own name")
+    @MainActor
+    func aggregatorHoldingASecondBank() {
+        // Production, verbatim, after the first connection the app ever created
+        // (2026-08-17): a second MeuPluggy item holding C6's accounts. The connector
+        // says "MeuPluggy" for both banks, so the label can only come from here — and
+        // the card is excluded, which matters because 'C6 STANDARD' would otherwise
+        // win alphabetically.
+        let connection = Self.connection(institutionId: "200", name: "MeuPluggy")
+        let source = StubSource(
+            connectionList: [connection],
+            accountList: [
+                Self.account(connection.id, type: .creditCard, name: "C6 STANDARD"),
+                Self.account(connection.id, type: .checking, name: "C6 BANK"),
+            ]
+        )
+        #expect(source.bankLabel(connection) == "C6 BANK")
+    }
+
     @Test("A card-only proxy connection says what it actually knows")
     @MainActor
     func cardOnlyProxyKeepsConnectorName() {

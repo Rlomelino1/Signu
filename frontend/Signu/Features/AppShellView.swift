@@ -212,7 +212,16 @@ struct AppShellView: View {
         // change: launch, an upload from the sheet below, and the foreground
         // re-read finding a picture set on another device.
         .task(id: dataVersion) {
-            await avatars.load(path: try? await provider.profile().avatarPath, using: provider)
+            // `try?` used to collapse two different facts into one nil here — "the
+            // profile says there is no picture" and "reading the profile failed" —
+            // and `load(path: nil)` deletes the disk cache. So one transient read
+            // failure wiped a good photo and left the monogram until a download
+            // happened to succeed again (v54, seen in a Release build).
+            //
+            // A failure is now silence: the cache keeps what it has, and the next
+            // `dataVersion` bump tries again.
+            guard let profile = try? await provider.profile() else { return }
+            await avatars.load(path: profile.avatarPath, using: provider)
         }
         // Coming back to the app is the other moment the graph can have moved
         // without the app moving it: the sync runs at 15:30 UTC daily, and a

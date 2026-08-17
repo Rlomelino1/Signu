@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-17** (v53) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-17** (v55) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,60 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v55** — THE CONNECT FLOW COMPLETES, AND A FIRST SYNC STOPS LOOKING LIKE A
+  FAILURE (2026-08-17). **No migration.** With v53 deployed the widget still
+  dead-ended: the user finished at the bank, Pluggy showed its own "Pronto! Você pode
+  fechar esta janela" page, and the app waited forever. No `connection` row was
+  written, and `GET /items` answers **401** in every form, so the app could not
+  recover an id it was never handed.
+  **The cause was one line in the popup delegate.** `createWebViewWith` did
+  `webView.load(URLRequest(url:))` — loading the bank's page into the HOST web view,
+  which replaces the page holding the `PluggyConnect` instance and with it
+  `onSuccess`. The comment above it said "the widget opens bank OAuth pages; without
+  this they are blocked", and it was right about the symptom it fixed while severing
+  the result. **Every OAuth-style connector ended there, MeuPluggy included, which is
+  why the flow had never once produced a real item.**
+  The popup now gets **its own web view**, layered over the host and sharing its
+  configuration — which is what that delegate method is for. The host page survives, so
+  the callback still exists when the bank returns, and `window.close()` from Pluggy's
+  return page tears down only the child. Both navigation-failure handlers are scoped to
+  the host: a hiccup inside the bank's page is not the connect flow ending.
+  **Proven in production**: the first item the app has ever created —
+  `bf96ae44…`, active, synced 12:34:38, with `C6 BANK` and `C6 STANDARD` stored.
+  **And the screen still lied for a few seconds.** `register-connection` writes
+  `needs_action` deliberately (nothing is fetched yet, and `active` would be a claim),
+  and Settings rendered that as **"Reconnect to resume syncing"** — about a bank that
+  had just connected successfully and was mid-first-sync. `lastSyncedAt == nil`
+  separates the two states: nothing has ever synced, so there is nothing to *resume*.
+  It now reads "Setting up · First sync in progress" in neutral, and a connection that
+  worked and then stopped still says "Needs action" in red. Two tests hold both halves,
+  because a fix that swallowed the genuine case would be worse than the bug.
+  The bank NAME was not missing, only unearned: the connector says "MeuPluggy" for both
+  banks, so `BankLabel` derives from the accounts, and the accounts arrive with the
+  first sync. The real C6 rows are now a test case — it must pick `C6 BANK` and not the
+  card `C6 STANDARD`, which would win alphabetically.
+  143 tests. **Three defects sat in this one path** — v53's duplicate guard misreading
+  an aggregator, the popup destroying its own callback, and the first-sync window
+  misdescribing itself — and only the first was findable by reading code.
+- **v54** — A FAILED READ MUST NOT DELETE THE CACHED PHOTO (2026-08-17). **No
+  migration.** The profile picture rendered one day and showed the monogram the next,
+  with an **empty** `Caches/Avatars` directory — the fingerprint of a cache that
+  deletes on failure.
+  **Introduced by v47's own call site:**
+  `avatars.load(path: try? await provider.profile().avatarPath, using: provider)`.
+  That `try?` collapses two different facts into one nil — "the profile says there is
+  no picture" and "reading the profile failed" — and `load(path: nil)` wipes memory
+  AND disk, correctly, for the deletion case. So one transient read failure destroyed a
+  good cached photo permanently. A failed read is now silence: the cache keeps what it
+  has and the next `dataVersion` bump tries again.
+  **Second half: a failed DOWNLOAD was remembered for the whole process.** `failed`
+  existed to stop render-time retry storms, but nothing calls this at render time —
+  only the shell, on an explicit refresh — so "never again this launch" was strictly
+  worse than "try on the next refresh". The set is gone.
+  Confirmed by the cache repopulating (`f775bfee…_1786733822.jpg`), which also proved
+  the DOWNLOAD path had been fine all along and only the deletion was wrong. 4 tests:
+  loads what was uploaded, clears on genuine removal, retries after a failure, and
+  answers only for the path it holds.
 - **v53** — THE DUPLICATE CHECK MOVES TO WHERE IT CAN BE ANSWERED (2026-08-17).
   **No migration.** The app could not add a **second bank at all**: the widget
   refused with `ITEM_USER_ALREADY_EXISTS` while the Pluggy dashboard created as many

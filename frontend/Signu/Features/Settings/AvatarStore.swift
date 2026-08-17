@@ -22,9 +22,6 @@ final class AvatarStore {
     /// there is exactly one profile.
     private(set) var image: Image?
     private var loadedPath: String?
-    /// Paths that failed, so a missing object is not re-requested on every rebuild.
-    /// Cleared by a path change, since that is a different object.
-    private var failed: Set<String> = []
 
     private let directory: URL
 
@@ -49,14 +46,17 @@ final class AvatarStore {
         guard let path else {
             // Removed. Drop it from memory AND disk — a cache that outlives the
             // deletion would render a picture the user has just deleted.
+            //
+            // ONLY ever called with nil when the profile SAYS there is no picture.
+            // A caller that cannot read the profile must stay silent instead: this
+            // branch deletes, and v54 was one transient failure being mistaken for
+            // a deletion.
             image = nil
             loadedPath = nil
-            failed.removeAll()
             clearDisk()
             return
         }
         guard path != loadedPath else { return }
-        guard !failed.contains(path) else { return }
 
         if let onDisk = UIImage(contentsOfFile: fileURL(for: path).path) {
             adopt(onDisk, path: path)
@@ -65,27 +65,25 @@ final class AvatarStore {
 
         do {
             let data = try await provider.avatarData(path: path)
-            guard let decoded = UIImage(data: data) else {
-                failed.insert(path)
-                return
-            }
+            guard let decoded = UIImage(data: data) else { return }
             // Disk first, then memory: if the write fails the next launch simply
             // downloads again, which is the harmless direction.
             clearDisk()
             try? data.write(to: fileURL(for: path), options: .atomic)
             adopt(decoded, path: path)
         } catch {
-            // A private bucket answers a deleted object with an error, and a row
-            // can legitimately point at one for a moment. The monogram is the
-            // honest fallback; it is not retried until the path changes.
-            failed.insert(path)
+            // The monogram is the honest fallback, and the failure is NOT
+            // remembered (v54). A remembered failure was permanent for the process:
+            // nothing calls this at render time — only the shell, on an explicit
+            // refresh — so there is no retry storm to protect against, and
+            // "never again this launch" was strictly worse than "try on the next
+            // refresh".
         }
     }
 
     private func adopt(_ uiImage: UIImage, path: String) {
         image = Image(uiImage: uiImage)
         loadedPath = path
-        failed.remove(path)
     }
 
     /// One file at a time. The path contains a `/` (`<uid>/<epoch>.jpg`), which
