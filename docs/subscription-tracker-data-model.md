@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-17** (v56) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-17** (v57) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,25 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v57** — LOGOS FILL THEIR TILE (2026-08-17). **No migration.** `ServiceAvatar`
+  drew the fetched mark inside `.padding(size * 0.18)`, so the Steam logo arrived as a
+  small icon floating in a near-white square.
+  **v12 put that padding there on purpose** — real logos arrive at full brand
+  saturation, and it argued a row of naked marks reads as competing billboards. The
+  concern was real and it lost to a plainer one: **logo.dev's images already carry
+  their own padding and background**, so ours stacked on top of theirs and the tile
+  read as unfinished rather than calm. Rafael asked for every logo to fill the space,
+  and that is the right call for a 44pt tile whose whole purpose is recognition.
+  `scaledToFill` with an explicit frame and a clip to the tile's own shape, **not**
+  `scaledToFit` with the padding deleted. Every image logo.dev serves here is square
+  (verified 128×128 across the cached catalog), so for real data the two are identical —
+  but a future non-square source should fill and be clipped rather than letterbox
+  inside the tile, which is what "fill" was asked for. The `surfaceBright` fill and the
+  hairline stay: a transparent or white-background mark still needs both.
+  **Verified on Home and Subs** with the real Steam logo. **NOT verified on the ink
+  detail hero**, which is the surface v12 flagged as an open check: the `--detail=`
+  harness renders outside `AppShellView` and so has no `LogoStore`, giving the monogram
+  regardless. Stated rather than implied.
 - **v56** — STEAM IN THE CATALOG, VIA THE DESCRIPTOR A BANK ACTUALLY SENDS
   (2026-08-17). **Migration #13, additive** — one row of reference data.
   The first real subscription this app ever detected rendered with a monogram. Not a
