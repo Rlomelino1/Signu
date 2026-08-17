@@ -63,9 +63,24 @@ Deno.serve(async (req: Request) => {
         ...(itemId ? { itemId } : {}),
         options: {
           clientUserId: who.caller.id,
-          // Create only. On an update the item already exists and this would be
-          // asking Pluggy to avoid duplicating the thing we are re-authenticating.
-          ...(itemId ? {} : { avoidDuplicates: true }),
+          // `avoidDuplicates` was here and is deliberately gone (v53).
+          //
+          // It asks Pluggy to refuse a second item for the same connector and
+          // credentials. Correct for a real bank connector — a second Nubank item
+          // would double-count every transaction — and WRONG for an aggregator:
+          // through connector 200 (MeuPluggy) the credentials are one
+          // `meu.pluggy.ai` login fronting every bank, so the second bank a user
+          // adds reads as a duplicate of the first. The app could not add one at
+          // all, and the widget surfaced `ITEM_USER_ALREADY_EXISTS` as its own
+          // error, four steps from the cause.
+          //
+          // It could not be narrowed to real connectors either: this token is
+          // minted BEFORE the user picks a bank inside the widget, so the connector
+          // is unknowable here.
+          //
+          // The question is now asked in `register-connection`, against the
+          // ACCOUNTS the finished item exposes — where "the same bank twice" is
+          // answerable and "two banks behind one login" is not mistaken for it.
         },
       }),
     })

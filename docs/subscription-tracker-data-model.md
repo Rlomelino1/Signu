@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-14** (v52) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-17** (v53) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1688,6 +1688,68 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v53** — THE DUPLICATE CHECK MOVES TO WHERE IT CAN BE ANSWERED (2026-08-17).
+  **No migration.** The app could not add a **second bank at all**: the widget
+  refused with `ITEM_USER_ALREADY_EXISTS` while the Pluggy dashboard created as many
+  items as asked.
+  **Cause: `connect-token` sent `avoidDuplicates: true`.** Pluggy's guard means "one
+  item per connector + credentials", which is correct for a real bank connector — a
+  second Nubank item would double-count every transaction — and **wrong for an
+  aggregator**. Through connector 200 (MeuPluggy) the credentials are one
+  `meu.pluggy.ai` login fronting *every* bank, so the second bank a user adds reads
+  as a duplicate of the first. **It could not be narrowed either**: the token is
+  minted before the user picks a bank inside the widget, so the connector is
+  unknowable at that point.
+  **So the question moved to `register-connection`, where it is answerable** — against
+  the ACCOUNTS the finished item exposes, compared with the accounts already stored
+  for this user. Two aggregator items holding different banks pass; the same bank
+  twice does not.
+  **The key is `type:last4`, and what it excludes is the point.** Not the provider's
+  account id — Pluggy issues those per ITEM, so the same account through two items
+  has two ids and a check keyed on them would match nothing, the one outcome worse
+  than no check. Not the account name either: `official_name` is
+  `marketingName ?? name` and Pluggy has changed marketing names before, so a
+  renamed account would stop matching itself.
+  **The trade-off is deliberate and asymmetric.** `type:last4` can collide across
+  banks, producing a **false positive** — a legitimate bank refused, loudly, with a
+  message naming the account it collided with, which the user can dispute. The
+  alternative is a **false negative**, which double-counts every transaction on that
+  account and says nothing. Visible over silent, the same call v40 made.
+  **It fails OPEN.** If Pluggy will not list the accounts, or the read of our own
+  rows errors, the connection is allowed. A wrongly-allowed duplicate is visible in
+  the app and removable; a wrongly-refused connection leaves the user unable to add
+  their bank with no override. Ordering is also load-bearing: the check runs **after**
+  the ownership check (so only an item proven to belong to the caller is inspected or
+  deleted) and **before** the upsert (so a refusal leaves no row), and it is skipped
+  entirely when re-registering an item the user already holds — otherwise every retry
+  would compare an item against its own stored accounts and refuse itself.
+  On a true duplicate the orphan item is **deleted at Pluggy**, best effort: we minted
+  the token, nothing references the item, and leaving it would keep syncing an account
+  already read through another connection. A failed delete is swallowed, because the
+  refusal is the truth the user needs, not our housekeeping.
+  **`_shared/accounts.ts` is shared against this codebase's own precedent**, and the
+  reason is specific. `_shared/pluggy.ts` records a tolerated duplication —
+  `pluggy-sync` keeps private request helpers because drifting copies of "call
+  Pluggy" fail loudly. These two mappings are the opposite: the check compares a new
+  item's accounts against rows `pluggy-sync` wrote, so if the mappings drift the
+  comparison stops matching and **the safety check fails open in silence**. Shared
+  precisely because drift here is invisible. `pluggy-sync` now imports them, and the
+  CI type-check list — which names files, unlike `deno test` — gained the module.
+  **Error copy (`ConnectErrorCopy`).** Signu's own functions write sentences and pass
+  through untouched (v30's rule). Pluggy writes enums, and one reached a user
+  verbatim. Codes whose meaning is established are translated; an unrecognised code
+  is **kept and annotated**, never replaced with "something went wrong" — v40 already
+  cost an hour to a message four steps from its cause. The mapped list is deliberately
+  short: inventing copy for a code whose trigger is unverified swaps an accurate enum
+  for a confident sentence that may be wrong.
+  **Verified beyond the type-checker, because a wrong query here fails open and
+  silently.** The PostgREST embedded-filter query was run against a real local
+  PostgREST — first empty (proving the syntax and relationship name, since a wrong
+  one 400s rather than returning `[]`) and then with fixture rows, proving it returns
+  `connection` as an object and matches on `checking:3816`. 86 Deno tests (11 new),
+  136 Swift tests, `deno check` and `deno lint` clean. One test expectation was wrong
+  and the code was right: `lastFour('88120381-6')` is **3816**, not '0381' — the
+  hyphen precedes a check digit, and production's stored `last4` says 3816.
 - **v52** — "NO NAME" IS STORED AS THE EMAIL, NOT AS NULL (2026-08-14). **No
   migration.** v47 set out to stop Home greeting the user with their own email
   address. **It did not work in production**, and the build handed over for testing

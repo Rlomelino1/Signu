@@ -162,6 +162,7 @@ jobs:
             backend/supabase/functions/_shared/actions.ts \
             backend/supabase/functions/_shared/auth.ts \
             backend/supabase/functions/_shared/pluggy.ts \
+            backend/supabase/functions/_shared/accounts.ts \
             backend/supabase/functions/run-detection/index.ts \
             backend/supabase/functions/pluggy-sync/index.ts \
             backend/supabase/functions/send-reminders/index.ts \

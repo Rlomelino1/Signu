@@ -19,6 +19,7 @@ import {
   createClient,
   type SupabaseClient,
 } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
+import { accountType, lastFour } from '../_shared/accounts.ts'
 
 const PLUGGY = 'https://api.pluggy.ai'
 
@@ -183,15 +184,6 @@ async function secretsMatch(given: string, expected: string): Promise<boolean> {
   return diff === 0
 }
 
-/** Pluggy's `number` is already 4 digits on cards ('2049') but a full hyphenated
- *  account number on checking ('88120381-6'), where slicing the last 4
- *  CHARACTERS yields '81-6'. Digits only, then last 4. */
-function lastFour(number: unknown): string | null {
-  if (number == null) return null
-  const digits = String(number).replace(/\D/g, '')
-  return digits.length ? digits.slice(-4) : null
-}
-
 class SyncError extends Error {}
 
 async function pluggy<T>(
@@ -237,15 +229,11 @@ function mapTxType(t: unknown): string {
   throw new SyncError(`unmapped Pluggy transaction type: ${JSON.stringify(t)}`)
 }
 
-/** bank_account.type CHECK is ('credit_card','checking'). The mapping is off
- *  Pluggy's `subtype` (CREDIT_CARD / CHECKING_ACCOUNT), NOT its `type`
- *  (CREDIT / BANK) — different vocabularies at the same field name. */
-function mapAccountType(acct: PluggyAccount): string | null {
-  const sub = String(acct?.subtype ?? '').toUpperCase()
-  if (sub === 'CREDIT_CARD') return 'credit_card'
-  if (sub === 'CHECKING_ACCOUNT') return 'checking'
-  return null // savings, investment, … : not modelled, skipped not guessed
-}
+/** Both mappings now live in `_shared/accounts.ts` (v53), against this file's own
+ *  precedent of keeping private copies. The reason is specific: the duplicate check
+ *  in `register-connection` compares the accounts of a new item against the rows
+ *  THIS function wrote, so the two must agree about `type` and `last4`. A drifting
+ *  copy there fails open and silently — the check would simply stop matching. */
 
 /** Pluggy item status -> connection.status
  *  CHECK ('active','needs_action','expired','disconnected').
@@ -434,7 +422,7 @@ async function syncConnection(db: SupabaseClient, conn: ConnectionRow, apiKey: s
   const skipped: { providerAccountId: string; subtype?: string }[] = []
 
   for (const acct of accounts.results ?? []) {
-    const type = mapAccountType(acct)
+    const type = accountType(acct.subtype)
     if (!type) {
       // Not modelled by bank_account's CHECK. Reported, never invented.
       skipped.push({ providerAccountId: acct.id, subtype: acct.subtype })
