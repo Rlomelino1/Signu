@@ -212,3 +212,156 @@ jobs:
       # gap v18 closed for the schema.
       - name: Test
         run: deno test backend/supabase/functions/_shared/
+
+  # ---------------------------------------------------------------- deployment
+  #
+  # Production deploy, gated on the build and nothing else, by request.
+  #
+  # A JOB in this workflow rather than a separate `workflow_run` one, because
+  # `needs` is the gate. A second workflow triggered on completion would have to
+  # infer which run it was reacting to and could fire on a run for another branch;
+  # `needs: [ios, schema, detection]` is the condition stated directly, in one
+  # place, and it fails closed -- if a required job is skipped or cancelled, this
+  # never starts.
+  #
+  # WHAT THIS REPLACES: two manual steps that had to happen in the right order and
+  # sometimes did not happen at all. It also removes the Migration #9 failure mode
+  # by construction: `db push` records a version and compares only that, so a file
+  # edited AFTER it was applied silently never reaches production. Pushing at merge
+  # time leaves a much smaller window in which to edit an applied migration.
+  #
+  # WHAT IT DELIBERATELY DOES NOT DO: `supabase config push`. The 74 auth settings
+  # in config.toml have never been reconciled against production, and
+  # `max_frequency` is the CLI's local default of "1s" against production's 60s --
+  # so a push would silently relax the reset-email rate limit to one second. Auth
+  # config stays a dashboard operation until that reconciliation is done. Do not
+  # add it to this job without doing that first.
+  deploy:
+    name: Deploy to production
+    needs: [ios, schema, detection]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Serialised, and NOT cancel-in-progress: cancelling mid-`db push` would leave
+    # production half-migrated with no record of which half. Two merges in quick
+    # succession queue instead.
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_ID }}
+      # config.toml interpolates this; an unset env() makes the CLI warn, and a
+      # warning here is noise that trains people to ignore warnings. This job
+      # never performs an OAuth exchange -- the value only has to exist.
+      SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET: ci-placeholder-never-used
+
+    steps:
+      # `fetch-depth: 0` because the function-scoping step below diffs against the
+      # previous commit, which a shallow clone does not have.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.1
+
+      - name: Link
+        working-directory: backend
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+
+      # Printed BEFORE anything is applied, because `Schema applies` proves only
+      # that migrations apply to an EMPTY database. It says nothing about applying
+      # them to production data -- a migration that locks a populated table, or
+      # violates a constraint only real rows can violate, passes that gate. This
+      # step puts the list in the log so a post-mortem starts with what ran.
+      - name: What would be pushed
+        working-directory: backend
+        run: supabase db push --linked --dry-run
+
+      - name: Push migrations
+        working-directory: backend
+        run: supabase db push --linked
+
+      # Migrations BEFORE functions, and the job fails fast between them. v63 is
+      # the reason it is written down: deploying `run-detection` before Migration
+      # #16 would have let R4 fire against three catalog rows that were still
+      # wrong. A writer must never ship ahead of the column or data it depends on.
+      - name: Which functions to deploy
+        id: scope
+        run: |
+          set -eo pipefail
+          BEFORE='${{ github.event.before }}'
+          # A merge commit's first parent is main's previous tip. `github.event.before`
+          # is normally the same thing, but it is all-zeroes on a branch's first push
+          # and unreliable after a force-push -- in either case deploy everything
+          # rather than guessing narrowly and shipping a stale bundle.
+          if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "no usable base commit; deploying every function"
+            echo "all=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only "$BEFORE" '${{ github.sha }}' -- backend/supabase/functions/ || true)
+          echo "changed under functions/:"; echo "${CHANGED:-<none>}"
+
+          # `_shared/` is BUNDLED INTO EVERY FUNCTION at deploy time, so a change
+          # there means every deployed bundle is stale -- not just the function whose
+          # directory changed. Narrow scoping here would silently leave old copies of
+          # detection.ts, accounts.ts or reminders.ts running in production.
+          if echo "$CHANGED" | grep -q 'backend/supabase/functions/_shared/'; then
+            echo "_shared changed; every function bundles it, so deploying all"
+            echo "all=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # `|| true` is load-bearing: with `set -eo pipefail`, `grep -v` exits 1 on
+          # empty input, so a merge touching no function at all would FAIL this step
+          # rather than deploying nothing.
+          SLUGS=$(echo "$CHANGED" \
+            | sed -n 's#^backend/supabase/functions/\([^/]*\)/.*#\1#p' \
+            | grep -v '^_shared$' | sort -u | tr '\n' ' ' || true)
+          echo "all=false" >> "$GITHUB_OUTPUT"
+          echo "slugs=$SLUGS" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy functions
+        working-directory: backend
+        run: |
+          set -eo pipefail
+          if [ '${{ steps.scope.outputs.all }}' = 'true' ]; then
+            # No slug list = every function in supabase/functions. verify_jwt comes
+            # from config.toml per function, so a blanket deploy cannot silently
+            # turn JWT verification on for the cron-called ones -- which would 401
+            # every firing (the shape of the item #11 outage).
+            supabase functions deploy
+          elif [ -n '${{ steps.scope.outputs.slugs }}' ]; then
+            for slug in ${{ steps.scope.outputs.slugs }}; do
+              echo "::group::deploy $slug"
+              supabase functions deploy "$slug"
+              echo "::endgroup::"
+            done
+          else
+            echo "no function changed; nothing to deploy"
+          fi
+
+      # Trust the ledger less than the database. `migration list` prints local and
+      # remote side by side; any local version without a remote counterpart means
+      # the push did not do what the step above claimed, and a green deploy that
+      # applied nothing is the failure this project has already paid for once.
+      - name: Verify every migration is applied remotely
+        working-directory: backend
+        run: |
+          set -eo pipefail
+          supabase migration list --linked --output-format json | tee /tmp/migrations.json
+          python3 - <<'PY'
+          import json, sys
+          rows = json.load(open('/tmp/migrations.json'))['migrations']
+          pending = [m['local'] for m in rows if not m.get('remote')]
+          if pending:
+              print(f"::error::migrations still not applied remotely: {', '.join(pending)}")
+              sys.exit(1)
+          print(f"all {len(rows)} migrations present remotely")
+          PY
