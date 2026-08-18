@@ -1695,6 +1695,38 @@ implementations back to the 21-series rendering.*
 
 ## Changelog
 
+- **v68** — THE DEAD "TRY AGAIN" BUTTON (2026-08-18). **No migration.** One entry in
+  `ConnectErrorCopy.known`, two tests.
+  **Hit for real** while trying to connect a bank directly: the widget returned
+  `TRIAL_CLIENT_ITEM_CREATE_NOT_ALLOWED`, and the generic fallback appended *"your bank
+  reported this … Trying again often clears it"* over a **Try again** button that could
+  never succeed. Two things wrong at once — it blamed the bank for something the bank
+  had no part in, and it prescribed the one action guaranteed to fail.
+  **The code is undocumented.** It appears nowhere in Pluggy's errors page and their
+  docs describe no trial limits at all, so the meaning was established by probe rather
+  than by reading: creating a **sandbox** item returned HTTP 200 on the same credentials
+  that produced the failure, which rules out an account-wide block; and the dashboard
+  showed the trial **live with 7 days left**, which rules out expiry. What remains is a
+  plan boundary — trial clients may create items for sandbox connectors and for
+  MeuPluggy (connector 200, "your own accounts"), while real third-party bank connectors
+  need production access. Consistent with every existing connection having been made
+  through connector 200 without ever meeting this code.
+  **The copy says what is still possible**, because a dead end with no alternative is
+  half an answer: direct connection needs production access, retrying will not help,
+  MeuPluggy still works.
+  **The fallback itself is unchanged and still shows unknown codes** — v40's lesson
+  stands (never delete the only diagnostic the screen has). The distinction this makes
+  visible is between *cannot interpret* and *interpreted*: a code in the table has
+  earned a sentence, and the enum disappears from the screen only then.
+  **Consequence recorded for the Open Finance question**: a direct bank connection is
+  not reachable on this plan at all, so `register-connection`'s duplicate check — which
+  would refuse a direct Nubank item because MeuPluggy already exposes those same cards —
+  never gets a chance to matter. The migration question is moot until the plan changes.
+  **Open and undocumented**: what happens to EXISTING items when the trial lapses.
+  Pluggy does not say, and the two possibilities differ sharply — items that keep
+  syncing while creation is blocked, versus items that stop and an app that goes dark.
+  Worth asking them directly rather than discovering it.
+
 - **v66** — DEPLOY ON GREEN (2026-08-18). **No migration.** CI gains a `deploy` job:
   on a push to `main`, gated on `needs: [ios, schema, detection]` and nothing else, it
   pushes migrations and deploys the functions that changed.

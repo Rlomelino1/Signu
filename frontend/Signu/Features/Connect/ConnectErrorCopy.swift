@@ -42,6 +42,22 @@ enum ConnectErrorCopy {
             "Your bank couldn't be reached. This is usually temporary; try again shortly.",
         "SITE_NOT_AVAILABLE":
             "Your bank's systems are unavailable right now. Try again later.",
+        // Not the bank's doing, and the ONLY code here where retrying is guaranteed
+        // to fail. Pluggy refuses item creation for real bank connectors on a trial
+        // plan; MeuPluggy (connector 200) and sandbox connectors are exempt, which is
+        // why every existing connection was made without hitting this. Verified on
+        // 2026-08-18: sandbox item creation returned 200 on the same credentials that
+        // produced this code in the widget, and the dashboard showed the trial live
+        // with 7 days left -- so this is a plan boundary, not an expiry.
+        //
+        // It is in this table precisely because the generic fallback said "trying
+        // again often clears it" and offered a Try again button that could never
+        // work. An accurate enum beats a confident wrong sentence (see below), but a
+        // sentence that sends the user to press a dead button is worse than either.
+        "TRIAL_CLIENT_ITEM_CREATE_NOT_ALLOWED":
+            "Connecting this bank directly needs Pluggy production access, which this "
+            + "project doesn't have yet. Retrying won't help — connecting through "
+            + "MeuPluggy still works.",
     ]
 
     /// - Parameter raw: whatever the widget or the function produced — a code, a
