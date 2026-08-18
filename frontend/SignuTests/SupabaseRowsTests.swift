@@ -121,7 +121,8 @@ struct SupabaseRowsTests {
         let row = ConnectionRow(
             id: UUID(), institutionId: "200", institutionName: "MeuPluggy",
             status: "something_new_from_the_backend",
-            consentExpiresAt: nil, lastSyncedAt: nil, lastSyncError: nil,
+            consentExpiresAt: nil, lastSyncedAt: nil, providerUpdatedAt: nil,
+            lastSyncError: nil,
             createdAt: "2026-08-10T18:37:13.499725+00:00"
         )
         // Presenting an unrecognised state as healthy is the failure that matters.

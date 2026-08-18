@@ -109,6 +109,9 @@ struct ConnectionRow: Decodable {
     let status: String
     let consentExpiresAt: String?
     let lastSyncedAt: String?
+    /// Pluggy's own `item.lastUpdatedAt` (v65). Null on rows not synced since
+    /// Migration #17, which is why the domain falls back rather than assuming.
+    let providerUpdatedAt: String?
     let lastSyncError: String?
     let createdAt: String
 
@@ -119,6 +122,7 @@ struct ConnectionRow: Decodable {
         case status
         case consentExpiresAt = "consent_expires_at"
         case lastSyncedAt = "last_synced_at"
+        case providerUpdatedAt = "provider_updated_at"
         case lastSyncError = "last_sync_error"
         case createdAt = "created_at"
     }
@@ -134,6 +138,7 @@ struct ConnectionRow: Decodable {
             status: ConnectionStatus(rawValue: status) ?? .needsAction,
             consentExpiresAt: consentExpiresAt?.asPostgresDate,
             lastSyncedAt: lastSyncedAt?.asPostgresTimestamp,
+            providerUpdatedAt: providerUpdatedAt?.asPostgresTimestamp,
             lastSyncError: lastSyncError,
             createdAt: createdAt.asPostgresTimestamp ?? .distantPast
         )

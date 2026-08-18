@@ -79,9 +79,30 @@ struct Connection: Identifiable, Hashable {
     var institutionName: String
     var status: ConnectionStatus
     var consentExpiresAt: Date?
+    /// When **we** last finished reading Pluggy. Answers "is Signu's polling
+    /// working", which is not the same question as "how old is this data".
     var lastSyncedAt: Date?
+    /// When **Pluggy** last refreshed this item from the institution — its own
+    /// `item.lastUpdatedAt` (v65). Nil on connections not synced since Migration
+    /// #17, and nil whenever the provider omits it.
+    var providerUpdatedAt: Date? = nil
     var lastSyncError: String?
     var createdAt: Date
+
+    /// The oldest moment this connection's data can honestly be claimed to reflect.
+    ///
+    /// Bounded by BOTH hops, so it is the earlier of the two: our copy shows the
+    /// provider's state as of our last read, and the provider's state is itself as
+    /// old as its last refresh. Taking the later of them is how "Updated 5m ago"
+    /// ended up describing data that Pluggy had frozen a day earlier.
+    ///
+    /// Nil when no sync has ever completed — there is no freshness to claim, and the
+    /// "Setting up" copy (v55) covers that state instead.
+    var dataFreshAsOf: Date? {
+        guard let synced = lastSyncedAt else { return nil }
+        guard let provider = providerUpdatedAt else { return synced }
+        return min(provider, synced)
+    }
 }
 
 struct BankAccount: Identifiable, Hashable {

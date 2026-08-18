@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-17** (v64) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-18** (v65) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1694,6 +1694,52 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v65** — "UPDATED 3H AGO" NOW MEANS THE DATA, NOT OUR POLLING (2026-08-18).
+  **Migration #17, additive** — one nullable column, `connection.provider_updated_at`.
+  **The label measured the wrong thing.** `last_synced_at` is `new Date()` written when
+  a sync finishes: our clock, at the moment WE stopped reading Pluggy. Home rendered it
+  as "Updated 3h ago", which reads as a claim about the data. The two diverge exactly
+  when it matters — Pluggy auto-syncs an item roughly every 24h, so on 2026-08-18 the
+  item's data was last refreshed at 15:01Z while our read ran at 15:30Z, and on a day
+  Pluggy's own sync fails the old label would keep saying "Updated 5m ago" about data
+  frozen a day earlier. **A freshness label that cannot express staleness is worse than
+  none**: it argues against the user's own suspicion that something is behind.
+  **The fix cost one assignment.** `pluggy-sync` already fetched `GET /items/{id}` for
+  `consentExpiresAt` and `connector.name`; `lastUpdatedAt` sat in the same response and
+  was discarded. It is now stored, sync-owned, and the client reports
+  **`min(provider_updated_at, last_synced_at)`**.
+  **Both halves of that min are load-bearing.** The provider's stamp bounds freshness
+  because our copy shows the provider's state as of our read; our own stamp bounds it
+  because a stalled cron means we do not HAVE the provider's newer state. Using the
+  provider alone would describe data we never fetched; using ours alone is the bug.
+  **Null is a real answer, not a gap to fill.** Every row is null until its next sync,
+  and any provider response omitting the field stays null — the client falls back to
+  `last_synced_at` rather than inventing a freshness, and the column is deliberately
+  **not backfilled**, because a value copied from `last_synced_at` would be exactly the
+  false claim being retired.
+  **Across banks the label reports the OLDEST connection, not the newest.** One line
+  speaks for the whole screen, and `max()` — the previous behaviour — let a freshly
+  added second bank paper over a first one that stopped updating days ago. A connection
+  that has never synced contributes nothing rather than dragging the label to nil: a
+  bank still setting up is not evidence about the data already rendered, and v55's
+  "Setting up" copy covers it.
+  **Settings deliberately still says "Synced …"** from `last_synced_at`. There the
+  question genuinely is *when did Signu last look*, which is the number that exposes a
+  stalled cron rather than stale data. Two labels, two meanings, each worded for what
+  it measures.
+  **Six tests**, 166 in the app all green. The mock fixtures were given the production
+  shape — a provider stamp older than our read on one connection, a provider stamp
+  older by seven hours on another, and one connection with none at all so the fallback
+  path stays exercised.
+  **Documented in the new root `README.md`** alongside the three stacked schedules
+  (bank → aggregator → Pluggy → us) and two Open Finance failure shapes this traced
+  out: a revoked consent returns **empty data rather than an error**, which today would
+  mark every in-window row withdrawn, empty the candidate set, and let
+  `delete_run_ids` delete every non-frozen run — losing run-level assertions while
+  subscription-level ones survive. The guard that would prevent it (an empty response
+  for an account that had rows yesterday is *suspicious*, not *true*) does not exist
+  yet, and is the same reasoning v61 applied to the applier's prune.
 
 - **v64** — THE SUGGESTION HOME COUNTED AND REVIEW HID (2026-08-17). **No migration.**
   Found by Rafael, in production, minutes after R4 shipped: Home said
