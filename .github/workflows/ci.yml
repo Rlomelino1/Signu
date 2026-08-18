@@ -9,12 +9,38 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Third-party actions are pinned to COMMIT SHAs, not tags (v69).
+#
+# `@v4` and `@v1` are mutable: `actions/checkout@v4` is a tag the owner can move and
+# `supabase/setup-cli@v1` is a BRANCH, so both can gain new code without this file
+# changing. That matters because the `deploy` job runs them with
+# SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD in its environment, and a Supabase
+# PAT carries the same privileges as the account. Pinning removes the only path by
+# which those secrets can leak without anyone here doing anything wrong.
+#
+# The trailing comment is the human-readable version each hash resolved to when it
+# was pinned. To upgrade: resolve the new tag to a commit and change both together --
+#   gh api repos/<owner>/<repo>/git/ref/tags/<version> --jq .object.sha
+# Never "fix" a pin by reverting to a tag; that silently restores the mutability.
+# Third-party actions are pinned to COMMIT SHAs, not tags (v69).
+#
+# `@v4` and `@v1` are mutable: `actions/checkout@v4` is a tag the owner can move and
+# `supabase/setup-cli@v1` is a BRANCH, so both can gain new code without this file
+# changing. That matters because the `deploy` job runs them with
+# SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD in its environment, and a Supabase
+# PAT carries the same privileges as the account. Pinning removes the only path by
+# which those secrets can leak without anyone here doing anything wrong.
+#
+# The trailing comment is the human-readable version each hash resolved to when it
+# was pinned. To upgrade: resolve the new tag to a commit and change both together --
+#   gh api repos/<owner>/<repo>/git/ref/tags/<version> --jq .object.sha
+# Never "fix" a pin by reverting to a tag; that silently restores the mutability.
 jobs:
   ios:
     name: iOS build
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262       # v4.4.0
 
       # Explicit, ahead of the builds. `xcodebuild build` resolves packages
       # implicitly, but then a resolution failure surfaces buried in compiler
@@ -81,8 +107,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - uses: actions/checkout@v4
-      - uses: supabase/setup-cli@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262       # v4.4.0
+      - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1     # v1.7.1
         with:
           version: 2.109.1
       - name: Apply migrations from scratch
@@ -165,8 +191,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: denoland/setup-deno@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262       # v4.4.0
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed    # v2.0.5
         with:
           deno-version: v2.x
 
@@ -262,11 +288,11 @@ jobs:
     steps:
       # `fetch-depth: 0` because the function-scoping step below diffs against the
       # previous commit, which a shallow clone does not have.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262       # v4.4.0
         with:
           fetch-depth: 0
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1     # v1.7.1
         with:
           version: 2.109.1
 
