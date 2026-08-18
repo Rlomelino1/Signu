@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-18** (v65) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-18** (v66) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1694,6 +1694,53 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v66** — DEPLOY ON GREEN (2026-08-18). **No migration.** CI gains a `deploy` job:
+  on a push to `main`, gated on `needs: [ios, schema, detection]` and nothing else, it
+  pushes migrations and deploys the functions that changed.
+  **What it replaces**: two manual steps that had to happen in the right order and
+  sometimes did not happen at all — v65 sat merged and green with Migration #17
+  unpushed, so the app kept measuring the wrong thing while the code that fixed it was
+  already on `main`.
+  **It also retires the Migration #9 failure mode by construction.** `db push` records
+  a version and compares only that, so a file edited AFTER it was applied silently
+  never reaches production and no command says so. Pushing at merge time leaves a much
+  smaller window in which to edit an applied migration.
+  **A job in the existing workflow, not a second `workflow_run` workflow**, because
+  `needs` states the gate directly and fails closed: a skipped or cancelled required
+  job means the deploy never starts. A completion-triggered workflow would have to infer
+  which run it was reacting to and can fire for other branches.
+  **`concurrency` is serialised with `cancel-in-progress: false`.** Cancelling mid-`db
+  push` would leave production half-migrated with no record of which half; two merges in
+  quick succession queue instead.
+  **Migrations before functions, failing fast between them.** v63 is why it is written
+  into the job: deploying `run-detection` before Migration #16 would have let R4 fire
+  against three catalog rows that were still wrong. A writer must never ship ahead of
+  the column or data it depends on.
+  **`_shared/` forces a full function deploy.** Every function BUNDLES `_shared` at
+  deploy time, so a change to `detection.ts` makes every deployed bundle stale — not
+  just the function whose directory changed. Narrow scoping there would leave old copies
+  of the engine running in production. Verified against four real commit ranges from
+  today: pluggy-sync-only → one slug; the R4 merge → all; README-only → nothing, and no
+  failure; an all-zeroes base (first push, force-push) → all, fail-safe.
+  **`supabase config push` is deliberately absent**, and the job says so in place. The
+  74 auth settings in `config.toml` have never been reconciled against production, and
+  `max_frequency` is the CLI default `"1s"` against production's 60s — a push would
+  silently relax the reset-email rate limit to one second.
+  **A `--dry-run` precedes the push**, because `Schema applies` proves only that
+  migrations apply to an EMPTY database. It says nothing about applying them to
+  production data: a migration that locks a populated table, or violates a constraint
+  only real rows can violate, passes that gate. The dry run puts the list in the log so
+  a post-mortem starts from what ran.
+  **The job verifies the ledger afterwards** rather than trusting the push's own exit
+  code — `migration list --linked` must show a remote counterpart for every local
+  version, since a green deploy that applied nothing is a failure this project has
+  already paid for.
+  **No required reviewer, by request**: the build passing is the only condition. Two
+  secrets (`SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`) plus a visible
+  `SUPABASE_PROJECT_ID` variable. Worth restating where it will be read: a Supabase PAT
+  *"carries the same privileges as your user account"*, so merge access to `main` is now
+  production access.
 
 - **v65** — "UPDATED 3H AGO" NOW MEANS THE DATA, NOT OUR POLLING (2026-08-18).
   **Migration #17, additive** — one nullable column, `connection.provider_updated_at`.
