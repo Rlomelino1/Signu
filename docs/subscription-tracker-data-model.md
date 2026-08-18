@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-18** (v66) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-18** (v67) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -93,7 +93,7 @@ Managed entirely by Supabase Auth — not part of our schema.
 | `withdrawn_at` | timestamptz | Soft-delete. Set when Pluggy stops returning the row; **never hard-delete**. Detection reads only `withdrawn_at is null` — see [Pluggy reality contract](#pluggy-reality-contract) |
 | `installment_number` | integer | Parcel number. **Presence disqualifies the row from R1** |
 | `total_installments` | integer | Parcels in the purchase. Same R1 disqualification |
-| `purchase_date` | date | Original purchase date, preserved across every parcel while `date` shifts. `(merchant, purchase_date)` groups one purchase |
+| `purchase_date` | date | Original purchase date, preserved across every parcel while `date` shifts. `(merchant, purchase_date)` groups one purchase. **Populated only on instalment rows** — 7 of 334 production rows (2026-08-18), correlating exactly with `installment_number`/`total_installments`. **Written by sync, read by nothing** as of v67 |
 | `fee_type_additional_info` | string | Raw fee descriptor (`IOF_COMPRA_INTERNACIONAL`, …). Fee exclusion keys off **this**, not `feeType`. Never stored as a derived `is_fee` boolean |
 | `provider_merchant_name` | string | Pluggy-enriched merchant name; ~40% coverage. Stored, **not yet adopted** |
 | `provider_merchant_cnpj` | string | Pluggy-enriched CNPJ; ~40% coverage. Stored, **not yet adopted** |
@@ -704,6 +704,42 @@ transaction does to its charge: nothing is patched, because charges are derived.
 The internal-transfer filter compares a `DEBIT` against `CREDIT`s on *other*
 accounts of the same user, so the candidate pass is **per-user, not per-account**.
 Detection cannot be sharded by account without silently disabling that filter.
+
+### What reads `purchase_date`
+
+**Nothing, today.** Written by `pluggy-sync` as
+`purchase_date: toSaoPauloDate(ccm.purchaseDate)`; read by no Edge Function and no
+client code. Stated here for the same reason R4's silence was: a column that is
+written and never read is not a bug, but it *is* a trap — the next reader will
+reasonably assume it is populated, and on 327 of 334 production rows it is not.
+
+**It is populated only on instalment rows**, measured rather than assumed
+(production, 2026-08-18): 7 rows carry `purchase_date`, 7 rows carry
+`installment_number`/`total_installments`, and the two sets are **identical** — zero
+populated non-instalment rows. Pluggy sends `creditCardMetadata.purchaseDate` only
+for parcelled purchases. The clearest case in the set is a Gol ticket at parcel 5/5:
+`date = 2025-11-03` against `purchase_date = 2025-07-02`, four months earlier. That
+gap is the column's whole justification, and the reason `date` alone cannot group
+parcels.
+
+**Its purpose is unreachable for now, by design.** `(merchant_key, purchase_date)`
+groups one purchase across its instalments — the key Pluggy's docs say Open Finance
+does not provide — but installments are excluded from detection outright by candidate
+filter 3. So sync stays faithful to the feed and stores it anyway, because the day
+instalments become interpretable the key has to be *already historical*; a column
+added then would be null for every past purchase.
+
+**The calendar does not use it, and neither does any prediction.** A landed charge
+sits on `transaction.date` — Pluggy's purchase instant converted to a São Paulo
+calendar date (`pluggy-sync:305`) — and forward entries use `next_expected_date`,
+derived from the last charge's `date` plus the interval. Pluggy's `billForecastDate`
+is likewise ignored: a subscription tracker wants the day the money was committed,
+not the statement it lands on. Billing-date grouping would have collapsed the June
+and July renewals into two statement months, and R1 would never have measured a
+monthly cadence.
+
+Documented in the database itself by **Migration #18** (comment only), because
+`\d+ transaction` is where someone meets this column first.
 
 ### Scope limits, stated
 
@@ -1694,6 +1730,31 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v67** — `purchase_date` SAYS WHAT IT IS DOING (2026-08-18). **Migration #18,
+  comment only** — no table, column, constraint, index, policy, grant or row touched.
+  **A writer with no reader**, the mirror of the `card_label` state v60 fixed (a reader
+  with no writer, so every row carried null and a subtitle rendered "Monthly · " around
+  an absence). Not a bug either way, but a trap: the next person to find the column will
+  reasonably assume it is populated.
+  **Measured, not assumed** (production, 334 transactions): `purchase_date` is set on
+  **7** rows, instalment rows number **7**, and the two sets are **identical** — zero
+  populated non-instalment rows. Pluggy sends `creditCardMetadata.purchaseDate` only for
+  parcelled purchases. A Gol ticket at parcel 5/5 shows the point: `date` 2025-11-03
+  against `purchase_date` 2025-07-02, four months apart, which is exactly why `date`
+  alone cannot group parcels.
+  **Unreachable on purpose.** `(merchant_key, purchase_date)` is the parcel grouping key
+  Pluggy's docs say Open Finance does not provide, and installments are excluded from
+  detection by candidate filter 3 — so the grouping has no caller. Kept anyway, because
+  the key must be *already historical* the day instalments become interpretable; a
+  column added at that point would be null for every past purchase.
+  **Also recorded: the calendar uses `date`.** Asked directly and traced end to end —
+  `pluggy-sync:305` converts Pluggy's purchase instant to a São Paulo calendar date, the
+  engine copies it to `charge.date`, and the calendar renders that; forward entries use
+  `next_expected_date` derived from the same field. Neither `purchase_date` nor Pluggy's
+  `billForecastDate` is read, and the second one matters: billing-date grouping would
+  have collapsed the June and July renewals into two statement months and R1 would never
+  have measured a monthly cadence at all.
 
 - **v66** — DEPLOY ON GREEN (2026-08-18). **No migration.** CI gains a `deploy` job:
   on a push to `main`, gated on `needs: [ios, schema, detection]` and nothing else, it
