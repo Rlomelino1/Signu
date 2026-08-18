@@ -144,17 +144,10 @@ app fresher, and might make card data worse:
   days from the last sync."* **[documented]** Signu re-scans 365 days every run,
   so this changes nothing for us — noted because it would matter to an
   incremental design.
-- **Consent replaces credentials.** Open Finance consents *"have no expiration"*
-  by default but are revocable from the bank's app, and once revoked *"all its
-  data endpoints (accounts, transactions, etc) will return empty data"* —
-  empty, not an error. **[documented]** The schema already has
-  `connection.consent_expires_at` for this.
-- **Regulated rate limits appear.** Normal usage (one CPF per institution, one
-  item) is documented as safe *"even if you had automatic updates enabled on all
-  your items updating up to 4 times per day"*, but duplicate items burn the
-  quota: after **240** requests new transactions stop appearing until the next
-  month, and after **420** the balance stops updating. **[documented]** This
-  interacts directly with `register-connection`'s duplicate check (v53).
+- **Consent replaces credentials**, and revocation is silent — see
+  [Two failure shapes](#two-open-finance-failure-shapes-worth-designing-against).
+- **Regulated rate limits appear**, and they interact with the duplicate check —
+  same section.
 
 **Net:** a direct connector is a plausible improvement to *attribution* (a real
 bank name, no aggregator hop) and an unproven one to *freshness*. It should be
@@ -188,17 +181,119 @@ public endpoint would rest on a bearer header that does not bind to the payload
 plus a hard-coded IP. See "Sync shape: poll-only, no webhook endpoint" in the
 spec.
 
-## Known gaps in how freshness is *reported*
+## What the "Updated …" label actually measures
 
-Both are real and both are unfixed:
+Fixed in **v65**; recorded here because the old behaviour is the kind of thing that
+gets reintroduced by someone reaching for the nearest timestamp.
 
-- **`connection.last_synced_at` is our own clock** (`new Date()` at the end of a
-  sync), not Pluggy's `lastUpdatedAt`. So "Updated 3h ago" means *we read Pluggy
-  3h ago*, not *the data is 3h old* — and the two diverge exactly when the data
-  is stale, which is when the label matters. **[observed]**
-- **`item.lastUpdatedAt` is fetched and discarded.** `pluggy-sync` already calls
-  `GET /items/{id}`; nothing reads its freshness. The honest label is one
-  assignment away. **[observed]**
+`connection.last_synced_at` is our own clock — `new Date()` at the moment a sync
+finishes. Rendering it as "Updated 3h ago" reads as a claim about the data and is in
+fact a claim about our polling, and the two diverge exactly when it matters: on a day
+Pluggy's own auto-sync fails, the old label would keep saying "Updated 5m ago" about
+data frozen a day earlier. A freshness label that cannot express staleness argues
+against the user's own suspicion that something is behind.
+
+So the sync now also stores Pluggy's `item.lastUpdatedAt` as
+`connection.provider_updated_at` (Migration #17) — it was already fetching
+`GET /items/{id}` and discarding the field — and the app reports the **older of the
+two**:
+
+```
+dataFreshAsOf = min(provider_updated_at, last_synced_at)
+```
+
+Both halves are load-bearing. The provider's stamp bounds it because our copy shows
+the provider's state as of our read; our own stamp bounds it because a stalled cron
+means we do not *have* the provider's newer state. Null `provider_updated_at` — every
+row until its next sync, and any response omitting the field — falls back to
+`last_synced_at` rather than inventing a freshness.
+
+Across several banks the label reports the **oldest** connection's freshness, not the
+newest: one line speaks for the whole screen, and `max()` would let a freshly added
+second bank paper over a first one that stopped updating days ago. A connection that
+has never synced contributes nothing — it has no data on screen to be stale about,
+and "Setting up" (v55) covers it.
+
+Settings deliberately keeps saying "Synced …" from `last_synced_at`, because there the
+question really is *when did Signu last look* — the number you want when diagnosing a
+stalled cron rather than stale data.
+
+## Two Open Finance failure shapes worth designing against
+
+Neither applies to the current MeuPluggy connection. Both would arrive with a direct
+regulated connector, and the first one is dangerous in a way that is easy to miss.
+
+### 1. A revoked consent returns empty data, not an error
+
+Open Finance consents *"have no expiration"* by default but the user can revoke them
+from the bank's app, and once revoked *"all its data endpoints (accounts,
+transactions, etc) will return empty data"*. **[documented]** Empty. Not `403`, not an
+error status — the shape of a healthy response describing an account with no activity.
+
+Traced through this codebase as it stands today, that is **not** currently safe:
+**[observed]**
+
+1. `pluggy-sync`'s withdrawn detection compares the ids Pluggy returned against every
+   stored row inside the 365-day window. An empty response means `seen` is empty, so
+   **every** row in the window is marked `withdrawn_at`. Nothing is hard-deleted —
+   deliberately, since raw rows are the evidence a replayable chain rests on.
+2. Detection filters `withdrawn_at is null`, so it now sees **zero** candidates.
+3. With no candidates there are no proto-runs, so `keptRunIds` is empty and
+   `delete_run_ids` becomes *every stored run that is not frozen* — and the applier
+   deletes them, charges cascading.
+
+What survives: `subscription` rows and everything the user asserted on them —
+nickname, category, `remind_before_days`, `ignored` — plus any run holding a frozen
+charge (`transaction_id is null`), which is protected by design (v24). What is lost:
+**run-level assertions**, meaning confirmations of R3/R4 suggestions and user-marked
+cancellations. A later sync would un-withdraw the rows (*"a row present in the feed is
+by definition not withdrawn"*) and detection would re-anchor them, but the rebuilt
+runs are new rows with new ids, so those decisions do not come back.
+
+**The guard that does not exist yet:** treating "the provider returned nothing for an
+account that had hundreds of rows yesterday" as *suspicious* rather than as *truth*.
+This is the same reasoning v61 applied to the applier's prune — an empty desired state
+must not wipe a history — except the engine's `delete_run_ids` path bypasses that
+safety, because emptiness there arrives as a legitimate-looking absence of evidence.
+A minimum-viable version is a per-account floor: if the response is empty and stored
+non-withdrawn rows exist in the window, record a sync error and skip withdrawal.
+**[speculative]** — the failure has not been reproduced against a real revoked
+consent, and the numbers a floor should use are unmeasured.
+
+### 2. Regulated rate limits, and why the duplicate check matters more than it looks
+
+Documented ceilings: after **240** requests new transactions stop appearing until the
+next month, and after **420** the balance stops updating. Normal usage — *"one CPF and
+institution on only one item"* — is documented as safe *"even if you had automatic
+updates enabled on all your items updating up to 4 times per day"*, while connecting
+the same CPF/CNPJ to the same institution across multiple items *"will reach the
+limitation of Open Finance faster, meaning that some products won't be
+updating/returning their data until the limit is renewed on the next month"*.
+**[documented]**
+
+Two readings matter here and only one of them is comfortable:
+
+- **Most likely, the quota counts Pluggy → bank calls, not our reads.** Open Finance
+  limits govern the regulated interface, and our GETs hit Pluggy's stored copy. On
+  that reading Signu's design — a full 365-day re-scan every day, roughly one to six
+  transaction pages per account — costs nothing against the quota, and only *item
+  updates* (auto-sync, plus any `PATCH`) consume it. **[speculative]** — this is
+  inference from how the limits are described, not a documented statement about which
+  calls count.
+- **If reads did count**, the re-scan design would sit uncomfortably close: 30 days ×
+  up to 6 pages per account is 180 requests a month per account against a 240 ceiling,
+  before a second item exists. Worth knowing before assuming a migration is free.
+  **[speculative]**
+
+Either way the exposure multiplies per duplicate item, which promotes
+`register-connection`'s duplicate check (v53) from tidiness to a quota control. That
+check compares the **accounts** an incoming item exposes, keyed `type:last4`, and it
+**fails open** — it prefers a loud false positive to a silent double-count. Under
+regulated connectors a silent double-count would also mean products quietly stopping
+mid-month, which is a failure the app has no way to distinguish from a bank going
+quiet. Note the check was built for connector 200, where one aggregator login fronts
+every bank; whether `type:last4` is still the right key when each institution is its
+own item is an open question. **[speculative]**
 
 ## Sources
 

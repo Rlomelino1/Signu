@@ -114,7 +114,7 @@ extension SignuPayloadSource {
                 // user. Saying "none detected" while holding suggestions was the
                 // defect 22a exists to fix.
                 headline: names.isEmpty ? "No subscriptions detected yet" : "No confirmed subscriptions yet",
-                syncText: "Updated \(SignuFormat.ago(lastSynced ?? now, now: now)) · \(bank) connected",
+                syncText: "Updated \(SignuFormat.ago(dataFreshAsOf ?? now, now: now)) · \(bank) connected",
                 suggestionCount: names.count,
                 suggestionLine: HomePayload.suggestionLine(names)
             ))
@@ -183,7 +183,7 @@ extension SignuPayloadSource {
             overdueCount: overdueRuns.count,
             deltaVsPreviousMonth: delta == 0 ? nil : delta,
             previousMonthAbbrev: SignuFormat.monthAbbrev(previousMonthStart),
-            syncText: "Updated \(SignuFormat.ago(lastSynced ?? now, now: now))",
+            syncText: "Updated \(SignuFormat.ago(dataFreshAsOf ?? now, now: now))",
             overdue: overdue,
             comingUp: comingUp,
             suggestionCount: suggestionCount,
@@ -424,8 +424,18 @@ extension SignuPayloadSource {
         chargeList.filter { $0.runId == runId }.max { $0.date < $1.date }
     }
 
-    private var lastSynced: Date? {
-        connectionList.compactMap(\.lastSyncedAt).max()
+    /// What Home's "Updated …" line reports: the OLDEST freshness across
+    /// connections, because one label speaks for the whole picture and the picture
+    /// is only as current as its stalest bank. `max()` here would let a freshly
+    /// added second bank paper over a first one that stopped updating days ago —
+    /// which is the same overstatement `dataFreshAsOf` exists to remove, one level
+    /// up (v65).
+    ///
+    /// Connections that have never synced contribute nothing rather than dragging
+    /// the label to nil; a bank still setting up is not evidence about the data
+    /// already on screen.
+    private var dataFreshAsOf: Date? {
+        connectionList.compactMap(\.dataFreshAsOf).min()
     }
 
     private func days(from: Date, to: Date) -> Int {

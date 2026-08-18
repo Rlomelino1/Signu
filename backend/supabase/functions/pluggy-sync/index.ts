@@ -83,6 +83,9 @@ interface PluggyItem {
   status?: string
   executionStatus?: string
   consentExpiresAt?: string | null
+  /** When PLUGGY last refreshed this item from the institution. Not our clock, and
+   *  the honest half of a freshness claim (v65). */
+  lastUpdatedAt?: string | null
   nextAutoSyncAt?: string | null
   autoSyncDisabledAt?: string | null
   connector?: { name?: string | null } | null
@@ -474,7 +477,14 @@ async function syncConnection(db: SupabaseClient, conn: ConnectionRow, apiKey: s
       consent_expires_at: item.consentExpiresAt
         ? String(item.consentExpiresAt).slice(0, 10)
         : null,
+      // OUR clock: when this read finished. Kept as-is -- it is the honest answer
+      // to "when did Signu last look", which is a different question from "how old
+      // is the data" and is what a stalled cron shows up in.
       last_synced_at: new Date().toISOString(),
+      // PLUGGY's clock: when the provider last refreshed the item from the
+      // institution. Copied through, never computed, and null rather than
+      // substituted when the response omits it (v65).
+      provider_updated_at: item.lastUpdatedAt ?? null,
       last_sync_error: null,
       institution_name: item.connector?.name ?? conn.institution_name,
     })

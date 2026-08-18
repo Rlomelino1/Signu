@@ -375,7 +375,11 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         let nubank = Connection(
             id: UUID(), institutionId: "nubank", institutionName: "Nubank",
             status: .active, consentExpiresAt: Self.date(2026, 12, 10),
-            lastSyncedAt: Self.dateTime(2026, 7, 13, 13, 35), lastSyncError: nil,
+            lastSyncedAt: Self.dateTime(2026, 7, 13, 13, 35),
+            // Pluggy refreshed the item ~1.5h before our read, which is the ordinary
+            // shape: our sync is scheduled AFTER the provider's auto-sync (v65).
+            providerUpdatedAt: Self.dateTime(2026, 7, 13, 12, 1),
+            lastSyncError: nil,
             createdAt: Self.date(2025, 11, 2)
         )
         let itau = Connection(
@@ -388,7 +392,12 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         let bradesco = Connection(
             id: UUID(), institutionId: "bradesco", institutionName: "Bradesco",
             status: .active, consentExpiresAt: Self.date(2026, 8, 2),
-            lastSyncedAt: Self.dateTime(2026, 7, 13, 6, 0), lastSyncError: nil,
+            lastSyncedAt: Self.dateTime(2026, 7, 13, 6, 0),
+            // The case the label exists for: we read Pluggy this morning, but Pluggy
+            // itself had not refreshed since the previous evening, so this
+            // connection's data is ~7h older than "Synced 6:00" suggests.
+            providerUpdatedAt: Self.dateTime(2026, 7, 12, 22, 54),
+            lastSyncError: nil,
             createdAt: Self.date(2026, 1, 15)
         )
         connectionList = [nubank, itau, bradesco]
