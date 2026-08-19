@@ -10,6 +10,7 @@ import {
   wantsEmail,
   whenText,
 } from '../_shared/reminders.ts'
+import { writeApiKey } from '../_shared/auth.ts'
 
 async function secretsMatch(given: string, expected: string): Promise<boolean> {
   const enc = new TextEncoder()
@@ -167,7 +168,7 @@ Deno.serve(async (req: Request) => {
 
   const db = createClient(
     Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    writeApiKey(),
     { auth: { persistSession: false } },
   )
 

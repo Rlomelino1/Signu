@@ -1,6 +1,7 @@
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 import { detect, type EngineInput, type TxRow } from '../_shared/detection.ts'
+import { writeApiKey } from '../_shared/auth.ts'
 
 async function secretsMatch(given: string, expected: string): Promise<boolean> {
   const enc = new TextEncoder()
@@ -46,7 +47,7 @@ Deno.serve(async (req: Request) => {
 
   const db = createClient(
     Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    writeApiKey(),
     { auth: { persistSession: false } },
   )
 

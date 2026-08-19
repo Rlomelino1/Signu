@@ -397,6 +397,16 @@ source it used, once per instance, so that can be confirmed from the function lo
 the legacy key is switched off. A secret key can never be selected: the scan matches only
 the publishable prefix.
 
+**The write path is key-independent too.** `serviceClient()` and the three cron functions
+run on `writeApiKey()`, which prefers an injected **secret** key (`sb_secret_…` from
+`SUPABASE_SECRET_KEYS`) and falls back to `SUPABASE_SERVICE_ROLE_KEY`. Both selections are
+prefix scans, so a publishable key can never be used to write and a secret key can never
+be used to verify a caller — each is pinned by a test. This matters because the dashboard
+retires the legacy keys **together**: one *"Disable JWT-based API keys"* button kills `anon`
+and `service_role` at once, and `service_role` is what every write in the system runs on,
+including the daily sync, detection and reminders. Retiring the legacy pair needs both
+halves migrated, not just the caller-verification one.
+
 **`register-connection`'s duplicate check** deserves its own note. It compares the
 **accounts** an incoming item exposes, keyed `type:last4` — not the provider's account
 id (per-item, so it would match nothing) and not the display name (which the provider
