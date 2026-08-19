@@ -1,20 +1,17 @@
 import SwiftUI
 
-/// Capsule button styles from the mockups.
 struct SignuButtonStyle: ButtonStyle {
     enum Kind {
-        case primary            // ink fill, paper text (Create account, Sign in)
-        case secondary          // light surface, hairline stroke (Continue with Google, Not a subscription)
-        case success            // sage fill (Track it)
-        case destructiveOutline // light surface, red text (Mark cancelled, Remove this bank link)
-        case destructiveFilled  // brick fill (Remove link…, Delete my account)
-        case onInk              // translucent light on the ink hero (Reconnect)
+        case primary
+        case secondary
+        case success
+        case destructiveOutline
+        case destructiveFilled
+        case onInk
     }
 
     var kind: Kind = .primary
     var fullWidth = true
-    /// Slimmer pill for in-card action pairs (review Track it / Not a
-    /// subscription) — matches 21j's button height, not the full CTA.
     var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
@@ -85,7 +82,7 @@ extension ButtonStyle where Self == SignuButtonStyle {
         }
         Button("Mark cancelled") {}.buttonStyle(.signuDestructiveOutline)
         Button("Remove link, keep history") {}.buttonStyle(.signuDestructiveFilled)
-        Button("Reconnect Itaú") {}
+        Button("Reconnect Demo Bank") {}
             .buttonStyle(.signuOnInk)
             .padding(16)
             .background(SignuColor.ink, in: RoundedRectangle(cornerRadius: 20, style: .continuous))

@@ -8,16 +8,9 @@ import {
   pluggyAccountKey,
 } from './accounts.ts'
 
-// The identity two connections are compared on (v53). Worth pinning tightly,
-// because every way this can be wrong is a way the duplicate check fails SILENTLY:
-// a key that never matches allows every duplicate, and a key that matches too
-// eagerly refuses a legitimate bank.
 
-// ------------------------------------------------------------------ accountType
 
 Deno.test('accountType maps off subtype, not type', () => {
-  // The trap the mapping exists for: Pluggy's `type` is CREDIT / BANK and its
-  // `subtype` is CREDIT_CARD / CHECKING_ACCOUNT — two vocabularies, one field name.
   assertEquals(accountType('CREDIT_CARD'), 'credit_card')
   assertEquals(accountType('CHECKING_ACCOUNT'), 'checking')
   assertEquals(accountType('credit_card'), 'credit_card')

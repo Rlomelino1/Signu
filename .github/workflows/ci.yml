@@ -5,79 +5,17 @@ on:
   push:
     branches: [main]
 
-# Superseded PR runs are cancelled; runs on `main` are NOT (v74).
-#
-# `cancel-in-progress: true` for every ref cost a production deploy on 2026-08-19 and
-# did it silently. v71 merged, its run started, v72 merged eleven minutes later, and
-# the newer push cancelled the older run mid-`iOS build`. `deploy` declares
-# `needs: [ios, schema, detection]`, so it was cancelled with it -- and the deploy
-# job's own `cancel-in-progress: false` could not help, because that only serialises
-# runs already inside the `production-deploy` group and says nothing about the
-# workflow being cancelled out from under it.
-#
-# The second half is what made it silent. `db push` is unconditional and applies every
-# pending migration, so a skipped migration self-heals on the next deploy. The FUNCTION
-# deploy is scoped to what changed since the previous commit, so v72's run diffed only
-# v72's own commit, found no function changed, and correctly deployed nothing. v71's
-# `_shared/sync.ts` -- the guard that stops an empty provider response from deleting
-# every non-frozen run -- sat on `main`, undeployed, with three green checkmarks above
-# it. This is the exact failure the scoping step's own comment set out to prevent,
-# reached by a route that comment did not consider.
-#
-# So: keep cancelling on PR branches, where a superseded run is genuinely waste, and
-# never cancel on `main`, where a run is the only thing that puts a merge into
-# production. Two quick merges now cost two full runs. That is the intended trade --
-# CI minutes are cheap and this project has now paid twice for a deploy that reported
-# success while shipping nothing.
-#
-# Deploys still serialise: the `deploy` job's `production-deploy` group with
-# `cancel-in-progress: false` queues them rather than running two `db push`es at once.
-# Residual risk, accepted and named: GitHub does not document that group as FIFO, so
-# two deploys queued together could in principle land out of order and leave the older
-# bundle deployed. The next merge redeploys, and any `_shared/` change deploys every
-# function, so the window closes on its own rather than needing a lock.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# Third-party actions are pinned to COMMIT SHAs, not tags (v69).
-#
-# `@v4` and `@v1` are mutable: `actions/checkout@v4` is a tag the owner can move and
-# `supabase/setup-cli@v1` is a BRANCH, so both can gain new code without this file
-# changing. That matters because the `deploy` job runs them with
-# SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD in its environment, and a Supabase
-# PAT carries the same privileges as the account. Pinning removes the only path by
-# which those secrets can leak without anyone here doing anything wrong.
-#
-# The trailing comment is the human-readable version each hash resolved to when it
-# was pinned. To upgrade: resolve the new tag to a commit and change both together --
-#   gh api repos/<owner>/<repo>/git/ref/tags/<version> --jq .object.sha
-# Never "fix" a pin by reverting to a tag; that silently restores the mutability.
-# Third-party actions are pinned to COMMIT SHAs, not tags (v69).
-#
-# `@v4` and `@v1` are mutable: `actions/checkout@v4` is a tag the owner can move and
-# `supabase/setup-cli@v1` is a BRANCH, so both can gain new code without this file
-# changing. That matters because the `deploy` job runs them with
-# SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD in its environment, and a Supabase
-# PAT carries the same privileges as the account. Pinning removes the only path by
-# which those secrets can leak without anyone here doing anything wrong.
-#
-# The trailing comment is the human-readable version each hash resolved to when it
-# was pinned. To upgrade: resolve the new tag to a commit and change both together --
-#   gh api repos/<owner>/<repo>/git/ref/tags/<version> --jq .object.sha
-# Never "fix" a pin by reverting to a tag; that silently restores the mutability.
 jobs:
   ios:
     name: iOS build
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262       # v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      # Explicit, ahead of the builds. `xcodebuild build` resolves packages
-      # implicitly, but then a resolution failure surfaces buried in compiler
-      # output; as its own step it fails legibly. This is the project's first
-      # external dependency, so the failure mode is new: Package.resolved pins
-      # exact versions and is committed, so this step is a fetch, not a solve.
       - name: Resolve package dependencies
         run: |
           xcodebuild -resolvePackageDependencies \
@@ -93,19 +31,6 @@ jobs:
             -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO
 
-      # The tests exist now, so CI runs them. Until this step there was no Swift
-      # test target at all -- the same shape as the gap v27 closed for the Deno
-      # tests, where 32 tests encoding historical bugs sat in a file nothing
-      # executed on a PR.
-      #
-      # A simulator destination, not `generic/platform=iOS`: a unit-test bundle is
-      # loaded by a host app, and the generic destination cannot run one.
-      #
-      # The device is resolved at runtime rather than named. A literal
-      # 'name=iPhone 17 Pro' is really an assertion about which Xcode the runner
-      # image ships, and it fails as an unhelpful "Unable to find a destination"
-      # the week that image rolls forward. `-destination id=<udid>` asks the
-      # installed Xcode what it actually has.
       - name: Test
         run: |
           UDID=$(xcrun simctl list devices available \
@@ -138,79 +63,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262       # v4.4.0
-      - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1     # v1.7.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1
         with:
           version: 2.109.1
       - name: Apply migrations from scratch
         working-directory: backend
         env:
-          # config.toml references this for the Google provider, and an unset
-          # env() reference makes the CLI emit
-          #   WARN: environment variable is unset: …
-          # which the gate below correctly treats as a failure. A placeholder is
-          # the honest fix rather than exempting the warning: this job starts a
-          # LOCAL stack and never performs an OAuth exchange, so the CLI needs a
-          # value to interpolate and nothing more. Weakening the gate would have
-          # hidden the next genuinely-unset secret.
           SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET: ci-placeholder-never-used
         run: |
-          # pipefail is NOT set by the default `bash -e {0}` shell, and both
-          # commands below are piped into tee. Without it, a failing supabase
-          # command would exit 0 through tee and this step would pass while
-          # doing nothing.
           set -eo pipefail
 
-          # Container names, NOT the service names in `supabase start --help`.
-          # The help text lists storage/analytics; the runtime rejects both and
-          # accepts storage-api/logflare. An invalid name is only a WARNING, so a
-          # wrong list silently stops excluding and the job still goes green.
-          #
-          # `mailpit` is a second instance of the same trap, and the help text is
-          # wrong in a new way: it lists `inbucket`, the runtime REJECTS that, and
-          # the container is still named supabase_inbucket_backend. Only `mailpit`
-          # is accepted. Verified by running both -- `inbucket` warns and leaves
-          # the container up; `mailpit` is silent and port 54324 goes unbound.
-          #
-          # It is excluded because it caused a real red build: `db reset` restarts
-          # containers, mailpit raced itself for 54324, and the run died AFTER all
-          # six migrations had applied but BEFORE the gate below could run. A
-          # migrations job has no use for a mail catcher, so this removes a
-          # container and a port from the equation rather than papering over a
-          # flake with a retry.
           supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector,mailpit 2>&1 | tee cli.log
           supabase db reset 2>&1 | tee -a cli.log
 
-          # Warning gate. The CLI reports some real problems as warnings, not
-          # errors, so a passing step can be doing less than it claims: an
-          # invalid `-x` name sat in a green log for a full run before anyone
-          # read it. This makes that reading automatic. Scoped to the CLI's own
-          # output on purpose -- runner-level annotations (e.g. the Node 20
-          # deprecation notice on the actions themselves) are emitted outside
-          # this stream and cannot false-positive it.
           if grep -qiE "warn(ing)?:" cli.log; then
             echo "::error::Supabase CLI emitted a warning; a green step here would be dishonest. See the step log."
             grep -iE "warn(ing)?:" cli.log
             exit 1
           fi
 
-      # pgTAP, against the stack the step above just built. Until v61 this job
-      # proved only that migrations APPLY -- nothing asserted what the SQL DOES,
-      # and `apply_detection` is the most consequential function in the product:
-      # it is the only writer of detection's results and it holds v24's frozen
-      # region. Its first test file immediately found a latent
-      # `23505 duplicate key` that could abort an entire sync on a re-parented
-      # charge, which is the argument for this step in one sentence.
-      #
-      # A SEPARATE step on purpose, and its output is NOT teed into cli.log: the
-      # warning gate greps that file, and pgTAP failure diagnostics are free text
-      # that can contain the word "warning". Keeping them apart leaves the gate
-      # scoped to the CLI's own output, and a failing test still fails the job on
-      # its exit code.
-      #
-      # `supabase test db` needs no file list -- it runs everything in
-      # supabase/tests -- so a new suite is picked up with no edit here, unlike
-      # the `deno check` below.
       - name: Database tests
         working-directory: backend
         env:
@@ -222,18 +94,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262       # v4.4.0
-      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed    # v2.0.5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed
         with:
           deno-version: v2.x
 
-      # NO permission flags. The drafted version of this job passed
-      # `--allow-none`, which is NOT a valid Deno flag -- 2.9.5 rejects it with
-      # "tip: to pass '--allow-none' as a value, use '-- --allow-none'" and the
-      # job would have failed on its first run. Verified against a real Deno
-      # before committing, on a cold cache to match this runner: the tests are
-      # pure functions needing no permissions, and Deno 2 already allows imports
-      # from deno.land and esm.sh by default, so no flag is required at all.
       - name: Type-check
         run: |
           deno check \
@@ -257,43 +122,9 @@ jobs:
       - name: Lint
         run: deno lint backend/supabase/functions
 
-      # Seventy-five tests: thirty-two encoding every historical bug in
-      # detection, seventeen pinning the reminder rules (v28), twenty-six on the
-      # user-asserted writes (v30). `deno test _shared/` picks up a new suite in
-      # that directory with no edit here, unlike `deno check` above, which names
-      # files and does need one.
-      #
-      # The detection thirty-two encode: the v23 epsilon
-      # regression, the presence-based fee filter, the card-payment R3, the
-      # dedupe ordinal, the v25 cross-currency pairs. Before this job they lived
-      # in a file nothing executed on a PR -- the same shape as the correctness
-      # gap v18 closed for the schema.
       - name: Test
         run: deno test backend/supabase/functions/_shared/
 
-  # ---------------------------------------------------------------- deployment
-  #
-  # Production deploy, gated on the build and nothing else, by request.
-  #
-  # A JOB in this workflow rather than a separate `workflow_run` one, because
-  # `needs` is the gate. A second workflow triggered on completion would have to
-  # infer which run it was reacting to and could fire on a run for another branch;
-  # `needs: [ios, schema, detection]` is the condition stated directly, in one
-  # place, and it fails closed -- if a required job is skipped or cancelled, this
-  # never starts.
-  #
-  # WHAT THIS REPLACES: two manual steps that had to happen in the right order and
-  # sometimes did not happen at all. It also removes the Migration #9 failure mode
-  # by construction: `db push` records a version and compares only that, so a file
-  # edited AFTER it was applied silently never reaches production. Pushing at merge
-  # time leaves a much smaller window in which to edit an applied migration.
-  #
-  # WHAT IT DELIBERATELY DOES NOT DO: `supabase config push`. The 74 auth settings
-  # in config.toml have never been reconciled against production, and
-  # `max_frequency` is the CLI's local default of "1s" against production's 60s --
-  # so a push would silently relax the reset-email rate limit to one second. Auth
-  # config stays a dashboard operation until that reconciliation is done. Do not
-  # add it to this job without doing that first.
   deploy:
     name: Deploy to production
     needs: [ios, schema, detection]
@@ -301,9 +132,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    # Serialised, and NOT cancel-in-progress: cancelling mid-`db push` would leave
-    # production half-migrated with no record of which half. Two merges in quick
-    # succession queue instead.
     concurrency:
       group: production-deploy
       cancel-in-progress: false
@@ -312,19 +140,14 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_ID }}
-      # config.toml interpolates this; an unset env() makes the CLI warn, and a
-      # warning here is noise that trains people to ignore warnings. This job
-      # never performs an OAuth exchange -- the value only has to exist.
       SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET: ci-placeholder-never-used
 
     steps:
-      # `fetch-depth: 0` because the function-scoping step below diffs against the
-      # previous commit, which a shallow clone does not have.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262       # v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
 
-      - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1     # v1.7.1
+      - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1
         with:
           version: 2.109.1
 
@@ -332,11 +155,6 @@ jobs:
         working-directory: backend
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
 
-      # Printed BEFORE anything is applied, because `Schema applies` proves only
-      # that migrations apply to an EMPTY database. It says nothing about applying
-      # them to production data -- a migration that locks a populated table, or
-      # violates a constraint only real rows can violate, passes that gate. This
-      # step puts the list in the log so a post-mortem starts with what ran.
       - name: What would be pushed
         working-directory: backend
         run: supabase db push --linked --dry-run
@@ -345,19 +163,11 @@ jobs:
         working-directory: backend
         run: supabase db push --linked
 
-      # Migrations BEFORE functions, and the job fails fast between them. v63 is
-      # the reason it is written down: deploying `run-detection` before Migration
-      # #16 would have let R4 fire against three catalog rows that were still
-      # wrong. A writer must never ship ahead of the column or data it depends on.
       - name: Which functions to deploy
         id: scope
         run: |
           set -eo pipefail
           BEFORE='${{ github.event.before }}'
-          # A merge commit's first parent is main's previous tip. `github.event.before`
-          # is normally the same thing, but it is all-zeroes on a branch's first push
-          # and unreliable after a force-push -- in either case deploy everything
-          # rather than guessing narrowly and shipping a stale bundle.
           if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             echo "no usable base commit; deploying every function"
             echo "all=true" >> "$GITHUB_OUTPUT"
@@ -366,19 +176,12 @@ jobs:
           CHANGED=$(git diff --name-only "$BEFORE" '${{ github.sha }}' -- backend/supabase/functions/ || true)
           echo "changed under functions/:"; echo "${CHANGED:-<none>}"
 
-          # `_shared/` is BUNDLED INTO EVERY FUNCTION at deploy time, so a change
-          # there means every deployed bundle is stale -- not just the function whose
-          # directory changed. Narrow scoping here would silently leave old copies of
-          # detection.ts, accounts.ts or reminders.ts running in production.
           if echo "$CHANGED" | grep -q 'backend/supabase/functions/_shared/'; then
             echo "_shared changed; every function bundles it, so deploying all"
             echo "all=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # `|| true` is load-bearing: with `set -eo pipefail`, `grep -v` exits 1 on
-          # empty input, so a merge touching no function at all would FAIL this step
-          # rather than deploying nothing.
           SLUGS=$(echo "$CHANGED" \
             | sed -n 's#^backend/supabase/functions/\([^/]*\)/.*#\1#p' \
             | grep -v '^_shared$' | sort -u | tr '\n' ' ' || true)
@@ -390,10 +193,6 @@ jobs:
         run: |
           set -eo pipefail
           if [ '${{ steps.scope.outputs.all }}' = 'true' ]; then
-            # No slug list = every function in supabase/functions. verify_jwt comes
-            # from config.toml per function, so a blanket deploy cannot silently
-            # turn JWT verification on for the cron-called ones -- which would 401
-            # every firing (the shape of the item #11 outage).
             supabase functions deploy
           elif [ -n '${{ steps.scope.outputs.slugs }}' ]; then
             for slug in ${{ steps.scope.outputs.slugs }}; do
@@ -405,10 +204,6 @@ jobs:
             echo "no function changed; nothing to deploy"
           fi
 
-      # Trust the ledger less than the database. `migration list` prints local and
-      # remote side by side; any local version without a remote counterpart means
-      # the push did not do what the step above claimed, and a green deploy that
-      # applied nothing is the failure this project has already paid for once.
       - name: Verify every migration is applied remotely
         working-directory: backend
         run: |

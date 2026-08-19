@@ -1,38 +1,25 @@
 import Foundation
 
-/// In-memory provider with the mockups' dataset. "Today" is pinned to the
-/// mockups' Sunday, Jul 13 2026 so previews are deterministic.
-///
-/// Dataset: 10 subscriptions (8 active — 6 monthly incl. 1 overdue, 2 annual;
-/// 2 inactive — 1 ended, 1 cancelled), 2 possible-run suggestions, 2 dismissed,
-/// 3 connections (active / needs action / expiring consent).
 @MainActor
 final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
-    /// Preview scenarios: the same provider drives every home-screen state.
     enum Scenario {
-        case standard        // full dataset (21i-class)
-        case freshConnection // bank connected, nothing detected yet (21h)
-        case suggestionsOnly // connected, suggestions but nothing confirmed (22a)
-        case noBank          // nothing connected (21g)
+        case standard
+        case freshConnection
+        case suggestionsOnly
+        case noBank
     }
 
     let today = MockDataProvider.date(2026, 7, 13)
-    /// Wall-clock "now" for relative copy ("Updated 2h ago", greeting).
     let now = MockDataProvider.dateTime(2026, 7, 13, 15, 35)
 
     private(set) var profileValue: Profile!
     private(set) var connectionList: [Connection] = []
     private(set) var accountList: [BankAccount] = []
-    // Not `private(set)`: the write methods below mutate it.
     var subscriptionList: [Subscription] = []
     private(set) var runList: [SubscriptionRun] = []
     private(set) var chargeList: [Charge] = []
-    /// charge.transactionId → bank_account.id. Stands in for the raw
-    /// transaction chain the mock layer doesn't model; powers the card row
-    /// and the "found via this bank" attribution rule later.
     private(set) var transactionAccountMap: [UUID: UUID] = [:]
 
-    // MARK: - SignuDataProviding
 
     func profile() async throws -> Profile { profileValue }
     func connections() async throws -> [Connection] { connectionList }
@@ -46,11 +33,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     }
 
 
-    // MARK: - SignuDataProviding payloads
-    //
-    // Thin wrappers only. Every one delegates to the shared assembly in
-    // PayloadSource.swift, which the live provider uses too — so a screen contract
-    // is implemented exactly once.
 
     func homePayload() async throws -> HomePayload { makeHomePayload() }
     func subsPayload() async throws -> SubsPayload { makeSubsPayload() }
@@ -60,12 +42,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     }
     func settingsPayload() async throws -> SettingsPayload { makeSettingsPayload() }
 
-    // MARK: - Writes
-    //
-    // Mutates the in-memory fixtures rather than no-opping, so a preview or a
-    // screenshot run behaves like the real thing: dismiss a suggestion and it
-    // leaves review, restore it and it comes back. A mock that accepted writes and
-    // discarded them would make every UI test of a write vacuously pass.
 
     func setReminder(subscriptionId: UUID, remindBeforeDays: Int?) async throws {
         guard let i = subscriptionList.firstIndex(where: { $0.id == subscriptionId }) else { return }
@@ -87,17 +63,10 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         subscriptionList[i].category = category
     }
 
-    // MARK: - Profile (v47)
 
-    /// The avatar bytes the mock is standing in for storage with. Keyed by path so
-    /// the fixture behaves like the bucket does: a new upload is a new key, and the
-    /// old one stops being reachable.
     private var avatarObjects: [String: Data] = [:]
 
     func setDisplayName(_ name: String?) async throws {
-        // Mirrors the live read through the same resolver, so the mock cannot
-        // disagree with production about what counts as "no name" — which is
-        // exactly how v47's null-check passed every test and failed in the app.
         let resolved = ProfileName.resolve(stored: name, email: profileValue.email)
         profileValue.displayName = resolved.display
         profileValue.displayNameIsFallback = resolved.isFallback
@@ -117,26 +86,12 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     }
 
     func avatarData(path: String) async throws -> Data {
-        // Throws rather than returning empty for a path that is not there, because
-        // the real bucket 404s and a store that treats "missing" as "zero bytes"
-        // would cache the emptiness.
         guard let data = avatarObjects[path] else { throw MockError.noSuchAvatar }
         return data
     }
 
     enum MockError: Error { case noSuchAvatar }
 
-    // MARK: - Edge Function writes, simulated (v30)
-    //
-    // Each mirrors what the function on the other side actually does, including
-    // the parts that are easy to skip: confirmation leaves a `user_renamed`
-    // subscription's identification alone, cancellation derives paid-through from
-    // the last charge rather than from today, and removing a link with history
-    // kept NULLs the surviving charges' transaction ids instead of deleting them.
-    //
-    // A mock that accepted these and did nothing would make every UI test of them
-    // vacuously pass — the exact failure mode the write section above was written
-    // against.
 
     func confirmSuggestion(runId: UUID, billingInterval: BillingInterval?) async throws {
         guard let r = runList.firstIndex(where: { $0.id == runId }) else { return }
@@ -144,8 +99,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         if let billingInterval { runList[r].billingInterval = billingInterval }
 
         guard let s = subscriptionList.firstIndex(where: { $0.id == runList[r].subscriptionId }) else { return }
-        // `user_renamed` is the stronger assertion and freezes the name; only
-        // `auto` is promoted.
         if subscriptionList[s].identification == .auto {
             subscriptionList[s].identification = .userConfirmed
         }
@@ -169,8 +122,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     }
 
     func removeConnection(connectionId: UUID, deleteHistory: Bool) async throws {
-        // Attribution comes from the payload the screens render, so the mock
-        // cannot disagree with the count the sheet just showed the user.
         let payload = makeAttributedSubsPayload(connectionId: connectionId)
         let attributed = Set(
             (payload?.cardGroups.flatMap(\.rows).map(\.id) ?? []) + (payload?.dismissed.map(\.id) ?? [])
@@ -185,9 +136,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
             subscriptionList.removeAll { attributed.contains($0.id) }
         }
 
-        // ON DELETE SET NULL, by hand. Charges that outlive their transactions
-        // stay self-describing through the duplicated date, amount and card
-        // label — which is what makes "keep their history" mean anything.
         for i in chargeList.indices where chargeList[i].transactionId.map(transactions.contains) == true {
             chargeList[i].transactionId = nil
         }
@@ -197,21 +145,12 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         connectionList.removeAll { $0.id == connectionId }
     }
 
-    // MARK: - Connecting a bank, simulated
-    //
-    // There is no widget to run here — Pluggy Connect needs a real token and a
-    // real bank. So the session is flagged `simulated` and the flow renders a
-    // labelled stand-in with a "Simulate success" button. That keeps the wiring
-    // exercisable in previews and UI tests, and keeps the mock honest: it never
-    // pretends a link it invented is a real one.
 
     func connectSession(connectionId: UUID?) async throws -> ConnectSession {
         ConnectSession(accessToken: "mock-connect-token", simulated: true)
     }
 
     func registerConnection(itemId: String) async throws {
-        // Idempotent on the item id, like the UNIQUE (user_id,
-        // provider_connection_id) the real path relies on.
         guard !connectionList.contains(where: { $0.institutionName == "Simulated Bank" }) else { return }
         let connection = Connection(
             id: UUID(),
@@ -239,9 +178,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     }
 
     func deleteAccount() async throws {
-        // The cascade, locally: everything the account owns. `profileValue` is
-        // deliberately left standing — the sheet's caller signs out immediately
-        // after, and a nil profile would crash the screens on the way out.
         connectionList = []
         accountList = []
         subscriptionList = []
@@ -260,10 +196,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         makeCalendarPayload(monthContaining: date)
     }
 
-    /// A handful of entries, deliberately including services the fixtures do NOT
-    /// subscribe to. The catalog is reference data about the world, and a mock
-    /// that only listed the user's own merchants would quietly model the one
-    /// shape the real thing must never have.
     func brandCatalog() async throws -> [BrandCatalogEntry] {
         [
             BrandCatalogEntry(id: UUID(), brandName: "Netflix", domain: "netflix.com",
@@ -283,28 +215,21 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
             BrandCatalogEntry(id: UUID(), brandName: "Twitch", domain: "twitch.tv",
                                  category: "Gaming", subscriptionOnly: false, kind: .service,
                                  patterns: ["twitch"]),
-            // Institutions (v58). The fixture banks, so a Debug run and every preview
-            // show real bank marks rather than monograms.
-            BrandCatalogEntry(id: UUID(), brandName: "Nubank", domain: "nubank.com.br",
+            BrandCatalogEntry(id: UUID(), brandName: "Mock Bank", domain: "nubank.com.br",
                               category: "Bank", subscriptionOnly: false, kind: .institution,
-                              patterns: ["nubank", "nu pagamentos"]),
-            BrandCatalogEntry(id: UUID(), brandName: "Itaú", domain: "itau.com.br",
+                              patterns: ["mockbank", "nu pagamentos"]),
+            BrandCatalogEntry(id: UUID(), brandName: "Demo Bank", domain: "itau.com.br",
                               category: "Bank", subscriptionOnly: false, kind: .institution,
-                              patterns: ["itau"]),
-            BrandCatalogEntry(id: UUID(), brandName: "Bradesco", domain: "bradesco.com.br",
+                              patterns: ["demobank"]),
+            BrandCatalogEntry(id: UUID(), brandName: "Sample Bank", domain: "bradesco.com.br",
                               category: "Bank", subscriptionOnly: false, kind: .institution,
-                              patterns: ["bradesco"]),
+                              patterns: ["samplebank"]),
         ]
     }
 
-    /// Always false: the fixtures are the source of truth and nothing writes to
-    /// them from outside the app, so a refresh here genuinely finds nothing new.
-    /// Saying so is what lets a preview exercise pull-to-refresh without the
-    /// screen flickering through a rebuild it did not need.
     @discardableResult
     func refresh() async throws -> Bool { false }
 
-    // MARK: - Dataset
 
     convenience init(scenario: Scenario) {
         self.init()
@@ -312,7 +237,7 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         case .standard:
             break
         case .freshConnection:
-            connectionList = connectionList.filter { $0.institutionName == "Nubank" }
+            connectionList = connectionList.filter { $0.institutionName == "Mock Bank" }
             if var nubank = connectionList.first {
                 nubank.lastSyncedAt = Self.calendar.date(byAdding: .minute, value: -1, to: now)
                 connectionList = [nubank]
@@ -323,12 +248,7 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
             chargeList = []
             transactionAccountMap = [:]
         case .suggestionsOnly:
-            // The first-sync shape 22a is for: the engine found candidates and
-            // auto-confirmed none of them, so every run is `possible`. The
-            // fixtures already carry two such subscriptions; this drops
-            // everything else, including the dismissed ones, so the count on
-            // screen is the count under test.
-            connectionList = connectionList.filter { $0.institutionName == "Nubank" }
+            connectionList = connectionList.filter { $0.institutionName == "Mock Bank" }
             accountList = accountList.filter { account in connectionList.contains { $0.id == account.connectionId } }
             let suggested = Set(
                 subscriptionList
@@ -362,40 +282,31 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     init() {
         profileValue = Profile(
             id: UUID(),
-            displayName: "Rafael Souza",
+            displayName: "Alex Rivera",
             email: "rafael.souza@example.com",
-            // Google-only is the interesting half of v19's password row ("Set a
-            // password" plus its explanatory subtitle) and no scenario reaches it,
-            // so a flag does — same harness pattern as --subs-inactive.
             providers: Self.googleOnly ? ["google"] : ["google", "email"],
             createdAt: Self.date(2025, 10, 4)
         )
 
-        // Connections + cards
         let nubank = Connection(
-            id: UUID(), institutionId: "nubank", institutionName: "Nubank",
+            id: UUID(), institutionId: "mockbank", institutionName: "Mock Bank",
             status: .active, consentExpiresAt: Self.date(2026, 12, 10),
             lastSyncedAt: Self.dateTime(2026, 7, 13, 13, 35),
-            // Pluggy refreshed the item ~1.5h before our read, which is the ordinary
-            // shape: our sync is scheduled AFTER the provider's auto-sync (v65).
             providerUpdatedAt: Self.dateTime(2026, 7, 13, 12, 1),
             lastSyncError: nil,
             createdAt: Self.date(2025, 11, 2)
         )
         let itau = Connection(
-            id: UUID(), institutionId: "itau", institutionName: "Itaú",
+            id: UUID(), institutionId: "demobank", institutionName: "Demo Bank",
             status: .needsAction, consentExpiresAt: Self.date(2026, 9, 28),
             lastSyncedAt: Self.dateTime(2026, 7, 12, 8, 14),
             lastSyncError: "The bank paused this connection on Jul 12.",
             createdAt: Self.date(2025, 10, 4)
         )
         let bradesco = Connection(
-            id: UUID(), institutionId: "bradesco", institutionName: "Bradesco",
+            id: UUID(), institutionId: "samplebank", institutionName: "Sample Bank",
             status: .active, consentExpiresAt: Self.date(2026, 8, 2),
             lastSyncedAt: Self.dateTime(2026, 7, 13, 6, 0),
-            // The case the label exists for: we read Pluggy this morning, but Pluggy
-            // itself had not refreshed since the previous evening, so this
-            // connection's data is ~7h older than "Synced 6:00" suggests.
             providerUpdatedAt: Self.dateTime(2026, 7, 12, 22, 54),
             lastSyncError: nil,
             createdAt: Self.date(2026, 1, 15)
@@ -404,15 +315,15 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
 
         let visa4821 = BankAccount(
             id: UUID(), connectionId: itau.id, type: .creditCard, brand: "Visa",
-            last4: "4821", officialName: "Itaú Visa Platinum", nickname: nil, status: .active
+            last4: "4821", officialName: "Demo Bank Visa Platinum", nickname: nil, status: .active
         )
         let master7730 = BankAccount(
             id: UUID(), connectionId: itau.id, type: .creditCard, brand: "Mastercard",
-            last4: "7730", officialName: "Itaú Mastercard Black", nickname: nil, status: .active
+            last4: "7730", officialName: "Demo Bank Mastercard Black", nickname: nil, status: .active
         )
         let nubankVisa = BankAccount(
             id: UUID(), connectionId: nubank.id, type: .creditCard, brand: "Visa",
-            last4: "1029", officialName: "Nubank Visa", nickname: nil, status: .active
+            last4: "1029", officialName: "Mock Bank Visa", nickname: nil, status: .active
         )
         let nubankChecking = BankAccount(
             id: UUID(), connectionId: nubank.id, type: .checking, brand: nil,
@@ -420,11 +331,10 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         )
         let bradescoElo = BankAccount(
             id: UUID(), connectionId: bradesco.id, type: .creditCard, brand: "Elo",
-            last4: "3311", officialName: "Bradesco Elo Nanquim", nickname: nil, status: .active
+            last4: "3311", officialName: "Sample Bank Elo Nanquim", nickname: nil, status: .active
         )
         accountList = [visa4821, master7730, nubankVisa, nubankChecking, bradescoElo]
 
-        // Active monthly (R1 unless noted)
         addSubscription(
             name: "Netflix", merchantKey: "netflix", category: "Streaming",
             createdAt: Self.date(2023, 11, 18),
@@ -444,7 +354,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
                 interval: .monthly, status: .active, detectedBy: .r1,
                 start: Self.date(2024, 8, 15), nextExpected: Self.date(2026, 7, 15)
             ),
-            // Card hop: Visa 4821 through Apr 15, Master 7730 from May 15 (21n).
             charges: monthlySeries(
                 from: Self.date(2024, 8, 15), through: Self.date(2026, 6, 15),
                 account: { $0 >= Self.date(2026, 5, 15) ? master7730 : visa4821 },
@@ -470,7 +379,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
                 interval: .monthly, status: .active, detectedBy: .r1,
                 start: Self.date(2025, 2, 22), nextExpected: Self.date(2026, 7, 22)
             ),
-            // Billed on Nubank Visa (spreads subs across the 3 banks).
             charges: monthlySeries(
                 from: Self.date(2025, 2, 22), through: Self.date(2026, 6, 22),
                 account: nubankVisa, label: "Visa 1029"
@@ -501,7 +409,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
             ) { _ in Self.brl("119.90") }
         )
 
-        // Active annual
         addSubscription(
             name: "Google One", merchantKey: "google one", category: "Storage",
             createdAt: Self.date(2024, 11, 12),
@@ -509,7 +416,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
                 interval: .annual, status: .active, detectedBy: .r1,
                 start: Self.date(2024, 11, 12), nextExpected: Self.date(2026, 11, 12)
             ),
-            // Billed on Bradesco Elo.
             charges: [
                 ChargeSpec(date: Self.date(2024, 11, 12), amount: Self.brl("99.90"), account: bradescoElo, label: "Elo 3311"),
                 ChargeSpec(date: Self.date(2025, 11, 12), amount: Self.brl("99.90"), account: bradescoElo, label: "Elo 3311"),
@@ -528,7 +434,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
             ]
         )
 
-        // Inactive: engine-ended vs user-cancelled (8a's copy split)
         addSubscription(
             name: "Amazon Prime", merchantKey: "amazon prime", category: "Streaming",
             createdAt: Self.date(2024, 6, 18),
@@ -555,7 +460,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
             ) { _ in Self.brl("32.90") }
         )
 
-        // Suggestions (possible runs — 9a/9b)
         addSubscription(
             name: "ChatGPT Plus", merchantKey: "openai", category: "AI",
             createdAt: Self.date(2026, 5, 7),
@@ -581,7 +485,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
             ]
         )
 
-        // Dismissed suggestions (ignored = true — 12a's restore surface)
         addSubscription(
             name: "Uber One", merchantKey: "uber one", category: "Transport",
             createdAt: Self.date(2026, 6, 14), ignored: true,
@@ -609,7 +512,6 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     }
 
 
-    // MARK: - Builders
 
     private struct RunSpec {
         var interval: BillingInterval
@@ -689,10 +591,7 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
         monthlySeries(from: start, through: end, account: { _ in account }, label: { _ in label }, amount: amount)
     }
 
-    // MARK: - Date/decimal helpers
 
-    /// Defined once in `SignuCalendar` so the mock and the live provider cannot
-    /// drift onto different calendars.
     static let calendar: Calendar = SignuCalendar.saoPaulo
 
     static func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
@@ -708,12 +607,8 @@ final class MockDataProvider: SignuDataProviding, SignuPayloadSource {
     }
 }
 
-// MARK: - Detail-screen fixture (21q)
 
 extension MockDataProvider {
-    /// Max — the run-segmentation demo (2 runs with a NOT SUBSCRIBED gap).
-    /// Kept out of the main dataset so list counts stay at the mockups'
-    /// All·10 / Active·8 / Inactive·2; detail previews use it directly.
     static func demoMax() -> (subscription: Subscription, runs: [SubscriptionRun], charges: [Charge]) {
         let subscription = Subscription(
             id: UUID(), serviceName: "Max", nickname: nil, merchantKey: "max",

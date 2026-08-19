@@ -1,20 +1,16 @@
 import SwiftUI
 
-/// Capsule status chip. One component, two contexts: on light surfaces
-/// (rows, settings) and on the ink hero card.
 struct StatusChip: View {
     enum Tone {
-        case positive   // Active, FOUND
-        case warning    // Expiring, PRICE RAISED
-        case danger     // Overdue, Cancelled, Needs action
-        case neutral    // Ended
+        case positive
+        case warning
+        case danger
+        case neutral
     }
 
     let text: String
     var tone: Tone
     var onInk = false
-    /// Tighter vertical padding so the chip fits a list row's height without
-    /// growing it past the 44pt avatar (inactive subs rows, 21s/21t).
     var compact = false
 
     var body: some View {

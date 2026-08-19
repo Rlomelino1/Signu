@@ -1,29 +1,3 @@
-// send-reminders — the renewal reminder job (v28).
-//
-// Thin shell around a pure core, the same shape as run-detection: load rows,
-// call dueReminders(), send, record. Every rule lives in _shared/reminders.ts
-// where it is tested without a database (17 tests).
-//
-// WHY THE ADDRESS IS NOT READ FROM A TABLE
-//
-// The reminder address is `auth.users.email` and is never stored (v9): whatever
-// address the account was created with, Google identity or email+password, with
-// account linking resolving both to the same verified address. `profiles` has no
-// email column on purpose, so there is nothing here that could drift from the
-// address the user actually signs in with. It is read through the admin API,
-// which is the only reader of auth.users in this codebase.
-//
-// WHAT "SENT" MEANS, AND WHY IT IS RECORDED PER DATE
-//
-// `subscription_run.last_reminded_for_date` holds the `next_expected_date` a
-// reminder went out for. Not a boolean (last month's reminder would silence this
-// month's) and not a timestamp (a renewal that moves would need extra
-// bookkeeping to re-arm). Detection rewrites `next_expected_date` on every pass,
-// so a shifted renewal re-arms the reminder by itself.
-//
-// It is written ONLY after the provider accepts the send. The failure mode that
-// matters is a silent non-delivery that still marks itself done, which would
-// skip the renewal entirely; a send recorded as unsent at worst repeats.
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 import {
@@ -37,8 +11,6 @@ import {
   whenText,
 } from '../_shared/reminders.ts'
 
-/** Constant-time compare, so a wrong secret cannot be narrowed by timing.
- *  Same helper as pluggy-sync and run-detection. */
 async function secretsMatch(given: string, expected: string): Promise<boolean> {
   const enc = new TextEncoder()
   const [a, b] = await Promise.all([
@@ -53,14 +25,9 @@ async function secretsMatch(given: string, expected: string): Promise<boolean> {
 }
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
-/** Resend's shared sender, which works with no verified domain. Overridable so
- *  verifying a domain later needs a secret change and no deploy. */
 const DEFAULT_FROM = 'Signu <onboarding@resend.dev>'
 
 async function loadCandidates(db: SupabaseClient, userId: string): Promise<ReminderRow[]> {
-  // The join carries the user's assertions (nickname, remind_before_days,
-  // ignored) because the core needs them to decide, and the inner join is what
-  // scopes to this user — the same posture as run-detection's loaders.
   const { data, error } = await db
     .from('subscription_run')
     .select(

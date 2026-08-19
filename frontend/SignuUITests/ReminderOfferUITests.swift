@@ -1,15 +1,5 @@
 import XCTest
 
-/// The reminder offer after a first confirmation (22b).
-///
-/// The feature it introduces has been deployed and scheduled since v28 and has
-/// never sent an email, because `remind_before_days` starts null on every
-/// subscription and the only control was a button three taps deep on the detail
-/// screen. This is the discoverable entry point.
-///
-/// Every test passes `--fresh-reminder-offer`: the "no" half of the answer lives
-/// in `UserDefaults`, which survives between launches of one install, so without
-/// it the second run of a test would behave differently from the first.
 @MainActor
 final class ReminderOfferUITests: XCTestCase {
 
@@ -29,11 +19,8 @@ final class ReminderOfferUITests: XCTestCase {
         let app = XCUIApplication()
         review(app)
 
-        // The first card is the R3 one, which needs no interval sheet.
         app.buttons["Track it"].firstMatch.tap()
 
-        // The row is replaced in place, not animated away: the queue above it is
-        // untouched and the offer sits next to what was just confirmed.
         let confirmation = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS[c] %@", "is now tracked")
         ).firstMatch
@@ -51,7 +38,6 @@ final class ReminderOfferUITests: XCTestCase {
             NSPredicate(format: "label CONTAINS[c] %@", "Remind me")
         ).firstMatch.tap()
 
-        // Answering collapses the offer and leaves the confirmation standing.
         XCTAssertFalse(app.staticTexts["Want a heads-up before it renews?"].waitForExistence(timeout: 2),
                        "answering must end the offer")
         XCTAssertTrue(confirmation.exists, "the confirmation itself stays")
@@ -63,8 +49,6 @@ final class ReminderOfferUITests: XCTestCase {
     }
 
     func testDecliningEndsTheOfferToo() {
-        // "No thanks" writes nothing to the subscription — a decline is not a
-        // state a row should carry — so the only record of it is local.
         let app = XCUIApplication()
         review(app)
         app.buttons["Track it"].firstMatch.tap()
@@ -83,8 +67,6 @@ final class ReminderOfferUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Want a heads-up before it renews?"].waitForExistence(timeout: 5))
         app.buttons["No thanks"].tap()
 
-        // The second suggestion is the R4 one, so its confirmation goes through
-        // the monthly/annual sheet first — and the offer must not stack behind it.
         app.buttons["Track it"].firstMatch.tap()
         let monthly = app.buttons["Monthly"].firstMatch
         if monthly.waitForExistence(timeout: 3) { monthly.tap() }

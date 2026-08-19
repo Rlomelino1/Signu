@@ -1,14 +1,6 @@
 import PhotosUI
 import SwiftUI
 
-/// Loads the profile, then hands it to the sheet — the Screen/View split every
-/// other surface here uses, so the view stays a function of its input and the
-/// preview needs no provider.
-///
-/// `onChanged` bumps the shell's `dataVersion` after each successful write, which
-/// is what re-reads Home's greeting, the Settings row and the avatar cache. The
-/// sheet stays open: the user may want to set a name and then a picture, and a
-/// sheet that closes itself on the first success decides that for them.
 struct EditProfileSheet: View {
     let provider: SignuDataProviding
     var onChanged: () -> Void = {}
@@ -47,10 +39,6 @@ struct EditProfileSheet: View {
         return String(source.prefix(1)).uppercased()
     }
 
-    /// Runs a write, then re-reads the profile so this sheet shows the result it
-    /// just produced rather than the state it opened with. Returns false on failure
-    /// so the sheet can say so — the caller decides the wording, since "photo" and
-    /// "name" fail differently.
     private func write(_ body: () async throws -> Void) async -> Bool {
         do {
             try await body()
@@ -63,22 +51,8 @@ struct EditProfileSheet: View {
     }
 }
 
-/// Editing the name and the picture — the destination the Profile row's chevron
-/// promised and did not have (#4/#7 from the production run).
-///
-/// A sheet rather than a pushed screen, matching Rename and Change category: two
-/// fields, one save, and the row behind it visibly the thing being changed.
-///
-/// The name and the picture save INDEPENDENTLY, which is the one structural
-/// decision here. Pairing them would mean either a photo upload blocking a
-/// one-character name fix, or a failed upload discarding a typed name. They are two
-/// writes against two different systems — a column and a bucket — and the sheet
-/// reports on each.
 struct EditProfileView: View {
     let currentName: String
-    /// True when `currentName` is the email standing in for a name never set. The
-    /// field starts EMPTY in that case: pre-filling an address the user would only
-    /// delete is work handed to them for nothing.
     let nameIsFallback: Bool
     let avatarPath: String?
     let initial: String
@@ -96,8 +70,6 @@ struct EditProfileView: View {
 
     private enum Busy { case name, photo, removal }
 
-    /// Trimmed, and nil when empty — clearing the field is how the user goes back to
-    /// having no name, the same shape as clearing a nickname.
     private var trimmed: String? {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
@@ -141,7 +113,6 @@ struct EditProfileView: View {
         }
     }
 
-    // MARK: - Picture
 
     private var photoBlock: some View {
         HStack(spacing: 16) {
@@ -185,9 +156,6 @@ struct EditProfileView: View {
         failure = nil
         defer { busy = nil; photoItem = nil }
 
-        // Loaded as Data and re-encoded rather than requested as a `UIImage`
-        // transferable: the picker hands over whatever the camera wrote — HEIC, P3,
-        // 12 megapixels — and the bucket accepts exactly one downscaled JPEG.
         guard let raw = try? await item.loadTransferable(type: Data.self),
               let picked = UIImage(data: raw) else {
             failure = "That photo could not be read. Try another one."
@@ -211,7 +179,6 @@ struct EditProfileView: View {
         }
     }
 
-    // MARK: - Name
 
     private var nameBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -226,8 +193,6 @@ struct EditProfileView: View {
                 .background(SignuColor.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .onSubmit { Task { await saveName() } }
 
-            // States what clearing it does, because the field's empty state is a
-            // real choice rather than an invalid one.
             Text(nameIsFallback
                  ? "Without a name, Signu greets you by the time of day and shows your email address here."
                  : "Clearing this puts your email address back.")
@@ -247,9 +212,6 @@ struct EditProfileView: View {
                 .padding(.horizontal, 18).padding(.vertical, 11)
                 .background(SignuColor.ink, in: Capsule())
             }
-            // Disabled when nothing changed rather than hidden: a Save that is
-            // present and inert explains itself, where a Save that vanishes reads
-            // as a screen that lost a control.
             .disabled(!nameChanged || busy != nil)
             .opacity(nameChanged && busy == nil ? 1 : 0.45)
         }
@@ -282,7 +244,7 @@ struct EditProfileView: View {
 
 #Preview("Edit profile · named") {
     EditProfileView(
-        currentName: "Rafael Pastor",
+        currentName: "Alex Rivera",
         nameIsFallback: false,
         avatarPath: nil,
         initial: "R",

@@ -1,6 +1,3 @@
-// Rules for the sync-time decisions. The withdrawal one is here because it can
-// destroy user assertions if it is wrong, and until v71 it lived inline in
-// `pluggy-sync/index.ts` where no CI job could reach it.
 
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
 import { type Held, withdrawalDecision } from './sync.ts'

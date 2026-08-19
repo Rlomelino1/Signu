@@ -1,22 +1,3 @@
-// cancel-subscription — the detail screen's *Mark cancelled* (10a).
-//
-// "I cancelled this" is a user assertion, and a different fact from the engine
-// inferring death after ten silent days. The schema keeps them apart —
-// `cancelled` vs `ended`, the case that justified CHECK constraints over enums
-// (v5) — and the app's copy differs accordingly ("You cancelled this" vs
-// "Charges stopped"). Merging them would make the app claim knowledge it does
-// not have.
-//
-// `subscription_run.status` and `cancelled_date` are engine-owned columns with
-// no client grant, so this is a function rather than a PATCH.
-//
-// TAKES A SUBSCRIPTION, RESOLVES THE RUN
-//
-// The client names the subscription it is looking at, not the run. Run identity
-// is engine business — runs are created, deleted and re-identified by overlap on
-// every detection pass — and a client holding a run id across a refresh is
-// holding something that may no longer exist. So the id the user's screen is
-// built from is the id this takes, and the newest run is resolved here.
 
 import { cancellation, type CancelRun } from '../_shared/actions.ts'
 import { json, ownedSubscription, resolveCaller, serviceClient, todayInSaoPaulo } from '../_shared/auth.ts'
@@ -28,9 +9,6 @@ Deno.serve(async (req: Request) => {
   if (!who.ok) return json({ error: who.error }, who.status)
 
   let subscriptionId: string | null = null
-  // Overridable for the same reason run-detection's is: a fixed date makes a
-  // replay reproducible. Never a header — an override should be impossible to
-  // send by accident.
   let today = todayInSaoPaulo()
   try {
     const body = await req.json()
@@ -46,10 +24,6 @@ Deno.serve(async (req: Request) => {
   const owned = await ownedSubscription<{ id: string }>(db, who.caller, subscriptionId, 'id')
   if (!owned.ok) return json({ error: owned.error }, owned.status)
 
-  // Newest run, under a total order. `start_date` alone is not one — two runs of
-  // one subscription can in principle share it — and cancelling a
-  // nondeterministically chosen run is the kind of bug that reproduces once a
-  // year.
   const { data: runs, error: rErr } = await db
     .from('subscription_run')
     .select('id, status, billing_interval, start_date')

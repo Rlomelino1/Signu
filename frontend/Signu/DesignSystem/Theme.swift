@@ -1,48 +1,36 @@
 import SwiftUI
 
-/// Signu palette, sampled from the locked mockups (21a–21z).
-/// Warm off-white paper, ink-dark hero surfaces, muted sage/gold/brick accents.
 enum SignuColor {
-    // Surfaces
-    static let paper = Color(hex: 0xEFEDE6)          // screen background
-    static let surface = Color(hex: 0xFAF9F4)        // cards, rows, tab bar
-    static let surfaceBright = Color(hex: 0xFDFCF9)  // text fields, focused surfaces
-    static let sunken = Color(hex: 0xE7E4DA)         // inset tiles, chips, evidence lists
-    static let hairline = Color(hex: 0xE2DFD4)       // separators, outlines
+    static let paper = Color(hex: 0xEFEDE6)
+    static let surface = Color(hex: 0xFAF9F4)
+    static let surfaceBright = Color(hex: 0xFDFCF9)
+    static let sunken = Color(hex: 0xE7E4DA)
+    static let hairline = Color(hex: 0xE2DFD4)
 
-    // Ink (dark hero cards, primary buttons)
     static let ink = Color(hex: 0x2E2924)
-    static let inkTile = Color.white.opacity(0.07)   // stat tiles on ink
+    static let inkTile = Color.white.opacity(0.07)
     static let onInk = Color(hex: 0xF6F4EE)
     static let onInkSecondary = Color(hex: 0xF6F4EE).opacity(0.55)
 
-    // Text
     static let textPrimary = Color(hex: 0x27231C)
     static let textSecondary = Color(hex: 0x807C71)
     static let textTertiary = Color(hex: 0xADA99D)
 
-    // Sage green — suggestions, confirmations, "found" states
     static let green = Color(hex: 0x5B7647)
     static let greenFill = Color(hex: 0x6C8159)
     static let greenTint = Color(hex: 0xDFE4D0)
     static let greenOnInk = Color(hex: 0xA9BF8D)
 
-    // Gold — warnings, price raises, expiring consent
     static let gold = Color(hex: 0x91702A)
     static let goldTint = Color(hex: 0xECE2C6)
 
-    // Muted blue — card-change timeline events (21n)
     static let blue = Color(hex: 0x5E7A99)
 
-    // Brick red — overdue, cancellation, destructive
     static let red = Color(hex: 0xBE4B37)
     static let redFill = Color(hex: 0xC6553F)
     static let redTint = Color(hex: 0xF2DCD5)
     static let redOnInk = Color(hex: 0xE08A78)
 
-    // Tinted alert surfaces (banner / overdue row / suggestion pill),
-    // sampled from 21i. Shared rule: tint fill + 1px darker-tint stroke —
-    // see View.tintedSurface(fill:stroke:cornerRadius:).
     static let bannerFill = Color(hex: 0xEDE7DC)
     static let bannerStroke = Color(hex: 0xDACAB0)
     static let bannerText = Color(hex: 0x825E16)
@@ -52,7 +40,6 @@ enum SignuColor {
     static let greenTintStroke = Color(hex: 0xC9D1C4)
 }
 
-/// Spacing and radius tokens.
 enum SignuMetric {
     static let screenPadding: CGFloat = 20
     static let cardRadius: CGFloat = 24
@@ -61,10 +48,7 @@ enum SignuMetric {
     static let rowPaddingV: CGFloat = 11
     static let rowPaddingH: CGFloat = 16
     static let buttonHeight: CGFloat = 56
-    /// Floating tab bar: 62pt items + 6pt container padding each side.
     static let tabBarHeight: CGFloat = 74
-    /// Bottom content inset for scroll views under the floating bar:
-    /// bar height + its 8pt lift above the safe area + 12pt breathing room.
     static let scrollBottomInset: CGFloat = tabBarHeight + 8 + 12
 }
 
@@ -80,8 +64,6 @@ extension Color {
     }
 }
 
-/// Monogram tile colors (logo contract tier 3). Known services carry the
-/// mockups' muted brand hues; unknown merchants fall back deterministically.
 enum BrandPalette {
     private static let known: [String: UInt32] = [
         "netflix": 0xB0453C,

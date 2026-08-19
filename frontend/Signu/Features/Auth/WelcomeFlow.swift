@@ -1,13 +1,5 @@
 import SwiftUI
 
-/// The unauthenticated navigation stack: 16a → 17a–17d. Hosted by the gate's
-/// `.unauthenticated` state, which is the only way in — and, because the gate
-/// swaps roots rather than pushing, the only way out is a state change.
-///
-/// Every action here goes to the `SessionStore`; the screens themselves stay
-/// session-agnostic. Note what is *not* here: 17e. It is a deep-link
-/// destination with no back chevron, so it belongs to the gate
-/// (`.recovering`), not to this stack.
 struct WelcomeFlow: View {
     let session: SessionStore
 
@@ -20,8 +12,6 @@ struct WelcomeFlow: View {
                     session.clearError()
                     path.append(.createAccount)
                 },
-                // Google verified the address, so no confirmation
-                // interstitial: this lands straight in the shell.
                 onGoogle: { Task { await session.signInWithGoogle() } },
                 onSignIn: {
                     session.clearError()
@@ -33,12 +23,9 @@ struct WelcomeFlow: View {
                 destination(route).toolbar(.hidden, for: .navigationBar)
             }
         }
-        // An expired recovery link routes to 17d from wherever the user was —
-        // including a cold launch straight into this flow.
         .onChange(of: session.expiredRecoveryLink, initial: true) { _, expired in
             guard expired else { return }
             path = [.forgotPassword(expired: true)]
-            // The route carries the notice from here on, so the flag is done.
             session.consumeExpiredRecoveryLink()
         }
     }
@@ -63,8 +50,6 @@ struct WelcomeFlow: View {
                 onBack: pop,
                 onSubmit: { name, email, password in
                     Task {
-                        // Confirmation is ON, so a successful signup yields no
-                        // session — it always pushes to 17c, never to Home.
                         if await session.signUp(name: name, email: email, password: password) {
                             path.append(.confirmEmail(email))
                         }
@@ -77,8 +62,6 @@ struct WelcomeFlow: View {
                 email: email,
                 onCheck: { await session.checkConfirmation() },
                 onResend: { Task { await session.resendConfirmation(email: email) } },
-                // "Wrong address?" is a fresh signup, not an edit: the
-                // unverified account stays behind, inert (contract).
                 onGoBack: pop
             )
         case .forgotPassword(let expired):
@@ -90,15 +73,6 @@ struct WelcomeFlow: View {
         }
     }
 
-    /// `SessionAuthError` -> what 17a renders. The mapping lives here because
-    /// `WelcomeFlow` already owns the session; the screens take a plain value and
-    /// stay session-agnostic.
-    ///
-    /// `emailNotConfirmed` is the one failure with a remedy, so it gets the resend
-    /// action the auth flow contract asks for. Its copy is still the placeholder
-    /// that shipped with `signInMessage` -- the contract specifies
-    /// "verify-specific copy with a resend action" without writing the string, and
-    /// inventing locked copy here would be worse than surfacing the placeholder.
     private var signInError: AuthError? {
         guard let error = session.lastError else { return nil }
         switch error {
@@ -114,21 +88,15 @@ struct WelcomeFlow: View {
     }
 
     private func pop() {
-        // The error belongs to the attempt, not the session: leaving it set would
-        // show a failed sign-in on 17d after tapping "Forgot password?".
         session.clearError()
         if !path.isEmpty { path.removeLast() }
     }
 }
 
-/// Routes inside the unauthenticated stack. 17e is deliberately absent — it
-/// is a gate state, not a pushable screen.
 enum AuthRoute: Hashable {
     case signIn
     case createAccount
     case confirmEmail(String)
-    /// `expired` = arrived here from a dead recovery link, so the screen
-    /// renders its notice.
     case forgotPassword(expired: Bool)
 }
 

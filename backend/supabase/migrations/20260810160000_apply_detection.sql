@@ -1,30 +1,3 @@
--- Migration #4 — apply_detection, the atomic applier
--- Source of truth: subscription-tracker-data-model.md (v24, 2026-08-10)
---
--- ADDITIVE ONLY. Adds one function. No table, column, constraint, index or RLS
--- policy is touched.
---
--- WHY A DATABASE FUNCTION AT ALL
---
--- The rules live in TypeScript for testability (v24), but PostgREST has no
--- transaction across calls. A recompute applied as a sequence of REST writes can
--- fail halfway and leave the interpreted chain in a state no rule produced --
--- exactly the failure that chaining sync into detection was meant to prevent.
--- So the whole desired state is handed over in one call and applied inside one
--- transaction.
---
--- This function is a DUMB APPLIER. No rules, no arithmetic, no interpretation:
--- every value it writes was computed by the pure core and is written verbatim.
--- Decisions that look like they belong here are deliberately upstream --
--- service_name freezing on `user_renamed`, assertion preservation, and which
--- runs may be deleted are all resolved in TypeScript, so this function never has
--- to ask "why". Rule logic in SQL is what the v24 shape refuses; a transactional
--- write boundary is not rule logic.
---
--- NOTE ON THE DRAFTED DISPOSITION: v24 was drafted as "migration disposition: no
--- action", reasoning that "the atomic applier is a function, not schema". A
--- function IS a schema object, and an unversioned database function is precisely
--- the drift v17 exists to prevent. Corrected to Migration #4.
 
 create or replace function public.apply_detection(
   p_user_id uuid,
@@ -45,9 +18,6 @@ declare
   v_charges      int := 0;
   v_deleted      int := 0;
 begin
-  -- Runs the caller computed as no-longer-supported. The core has already
-  -- excluded any run holding a frozen charge, so this is an unconditional
-  -- delete; charges cascade.
   if p_desired ? 'delete_run_ids' then
     delete from public.subscription_run r
     using public.subscription s
@@ -61,10 +31,6 @@ begin
 
   for v_sub in select * from jsonb_array_elements(p_desired -> 'subscriptions')
   loop
-    -- Only ever writes the three engine-owned columns. nickname, category,
-    -- ignored, remind_before_days and identification are user assertions and are
-    -- absent from this statement on purpose -- they cannot be clobbered by a
-    -- column that is never named.
     insert into public.subscription (
       user_id, service_name, merchant_key, dedupe_key, identification, ignored
     ) values (
@@ -115,10 +81,6 @@ begin
         v_runs_created := v_runs_created + 1;
       end if;
 
-      -- THE FROZEN REGION. Only charges that still have raw backing are
-      -- replaced. `transaction_id is not null` is the whole guard: a charge
-      -- orphaned by the remove-bank-link flow is an immutable historical record
-      -- and is never recomputed, never deleted, never re-parented (v24).
       delete from public.charge
        where run_id = v_run_id
          and transaction_id is not null;
@@ -151,9 +113,6 @@ begin
 end;
 $$;
 
--- service_role only. The function is security definer so it can write the
--- interpreted chain in one transaction; nothing about it should be reachable
--- from a user session, which reads through RLS and writes nothing.
 revoke all on function public.apply_detection(uuid, jsonb) from public;
 revoke all on function public.apply_detection(uuid, jsonb) from anon, authenticated;
 grant execute on function public.apply_detection(uuid, jsonb) to service_role;

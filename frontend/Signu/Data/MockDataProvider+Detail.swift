@@ -1,11 +1,7 @@
 import Foundation
 
-// Detail-screen preview fixtures. The timeline synthesis itself moved to
-// PayloadSource+Detail.swift so the live provider shares it; what remains here
-// is mock-only sample data.
 
 extension MockDataProvider {
-    /// Cancelled run with an R5 trailing charge — matches 21o.
     static func demoCancelledTrailing() -> (Subscription, [SubscriptionRun], [Charge]) {
         let sub = Subscription(
             id: UUID(), serviceName: "Netflix", nickname: nil, merchantKey: "netflix",
@@ -26,7 +22,6 @@ extension MockDataProvider {
                                   amount: brl("44.90"), currency: "BRL", cardLabel: "Visa 4821"))
             d = calendar.date(byAdding: .month, value: 1, to: d)!
         }
-        // R5 trailing charge, after the Jul 2 cancellation.
         charges.append(Charge(id: UUID(), runId: runId, transactionId: nil, date: date(2026, 7, 18),
                               amount: brl("44.90"), currency: "BRL", cardLabel: "Visa 4821"))
         return (sub, [run], charges)

@@ -1,17 +1,5 @@
 import SwiftUI
 
-/// Search (the Subs tab's magnifier), which has had no destination since the tab
-/// was built.
-///
-/// A separate screen rather than a filter over the grouped list, and that is a
-/// contract decision rather than a layout preference: the /yr hero is **invariant
-/// under the filter chips** and the group subtotals are computed over whole
-/// groups. Filtering rows in place would leave a subtotal describing rows that
-/// are no longer on screen — a number that disagrees with the list above it, which
-/// is precisely what the tab's contract set out to prevent.
-///
-/// So this reads the same payload the tab renders and shows matches as a flat
-/// list, carrying each row's own numbers and none of the aggregates.
 struct SearchScreen: View {
     let provider: SignuDataProviding
     var onSelectSubscription: (UUID) -> Void = { _ in }
@@ -48,9 +36,6 @@ struct SearchScreen: View {
                 ScrollView {
                     SignuListCard(data: results) { row in
                         Button {
-                            // A suggestion is not a subscription yet, so it opens
-                            // the evidence screen rather than a detail screen it
-                            // does not have (9a decides, 9b informs).
                             if row.isSuggestion { onReviewSuggestion(row.id) }
                             else { onSelectSubscription(row.id) }
                         } label: {
@@ -107,9 +92,6 @@ struct SearchScreen: View {
     }
 }
 
-/// One flat row per subscription, whatever section it lives in on the tab.
-/// Inactive and dismissed-adjacent states carry their own subtitle so a result
-/// never implies a dead subscription is live.
 struct SearchRow: Identifiable {
     let id: UUID
     var name: String
@@ -138,8 +120,6 @@ struct SearchRow: Identifiable {
         }
         let suggested = payload.suggested.map { item in
             SearchRow(
-                // The subscription id, not the run id: the row's job is to reach
-                // the thing, and review is opened by subscription.
                 id: item.subscriptionId,
                 name: item.serviceName,
                 subtitle: "Suggested · not tracked yet",

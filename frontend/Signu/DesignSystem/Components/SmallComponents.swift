@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Section header: uppercase overline, optional trailing accessory.
 struct SectionHeader<Trailing: View>: View {
     let text: String
     var color: Color = SignuColor.textSecondary
@@ -21,7 +20,6 @@ struct SectionHeader<Trailing: View>: View {
     }
 }
 
-/// Calendar date badge on home rows — "JUL" over "15".
 struct DateBadge: View {
     let date: Date
     var overdue = false
@@ -44,7 +42,6 @@ struct DateBadge: View {
     }
 }
 
-/// Filter chip — "All · 10" / "Active · 8" / "Inactive · 2".
 struct FilterChip: View {
     let label: String
     var count: Int?
@@ -69,7 +66,6 @@ struct FilterChip: View {
     }
 }
 
-/// Two-segment sort toggle — "By date | By cost".
 struct SortToggle: View {
     let options: [String]
     @Binding var selection: Int
@@ -100,8 +96,6 @@ struct SortToggle: View {
     }
 }
 
-/// The tinted-alert-surface rule (21i): tint fill + 1px darker-tint stroke.
-/// One treatment for the banner, the overdue row and the suggestion pill.
 extension View {
     func tintedSurface(fill: Color, stroke: Color, cornerRadius: CGFloat = SignuMetric.tileRadius) -> some View {
         self
@@ -110,18 +104,10 @@ extension View {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(stroke, lineWidth: 1)
             }
-            // A drawn background is NOT a tap target. `.background(_, in:)` paints
-            // behind the content and does not extend a plain button's hit area —
-            // measured, not assumed: a UI test tapping the exact centre of Settings'
-            // Delete account row found nothing there, and that row's label is a card
-            // with a filled background. Every caller of this is a button's label.
             .contentShape(Rectangle())
     }
 }
 
-/// The notch on 22a's suggestions card, pointing up at the watching card it
-/// belongs to. A shape rather than a rotated square so the two lower corners sit
-/// exactly on the card's edge at any width.
 struct UpTriangle: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -133,8 +119,6 @@ struct UpTriangle: Shape {
     }
 }
 
-/// Warning banner — the home connection-problem slot ("plumbing problems"
-/// severity channel; overdue never renders here). Colors sampled from 21i.
 struct WarningBanner: View {
     let text: String
     var actionLabel: String?
@@ -161,7 +145,6 @@ struct WarningBanner: View {
     }
 }
 
-/// Round floating chrome button — back chevron, ellipsis.
 struct ChromeButton: View {
     let systemName: String
     var action: () -> Void = {}
@@ -197,7 +180,7 @@ struct ChromeButton: View {
                     FilterChip(label: "Inactive", count: 2)
                 }
                 SortToggle(options: ["By date", "By cost"], selection: $sort)
-                WarningBanner(text: "Nubank connection needs attention", actionLabel: "Fix")
+                WarningBanner(text: "Mock Bank connection needs attention", actionLabel: "Fix")
             }
             .padding(SignuMetric.screenPadding)
             .background(SignuColor.paper)

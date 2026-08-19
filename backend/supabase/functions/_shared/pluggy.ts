@@ -1,15 +1,3 @@
-// pluggy.ts — the Pluggy API surface the connect flow needs.
-//
-// `pluggy-sync` carries its own copy of these two helpers and keeps it: it is the
-// live daily job, and the same tolerated duplication already exists for
-// `secretsMatch` across the three machine-invoked functions. What is shared here
-// is shared because the CONNECT flow has two halves — mint a token, register the
-// item it produced — and they must agree about credentials and error shape.
-//
-// Everything here is verified against the live API rather than the published
-// reference, per the reality-contract habit this project acquired the hard way
-// (v20): `/auth` answers `{ apiKey }`, `/connect_token` answers `{ accessToken }`
-// and takes `itemId` at the TOP level (not inside `options`) for update mode.
 
 const PLUGGY = 'https://api.pluggy.ai'
 
@@ -21,8 +9,6 @@ export class PluggyError extends Error {
   }
 }
 
-/** One call per invocation. The key is short-lived and there is nowhere durable
- *  to cache it that would be worth the staleness risk. */
 export async function pluggyApiKey(): Promise<string> {
   const clientId = Deno.env.get('PLUGGY_CLIENT_ID')
   const clientSecret = Deno.env.get('PLUGGY_CLIENT_SECRET')

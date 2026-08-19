@@ -16,14 +16,8 @@ enum SignuTab: String, CaseIterable, Identifiable {
     }
 }
 
-/// Floating capsule tab bar from the mockups — three tabs, selected one
-/// carried on a sunken pill.
 struct SignuTabBar: View {
     @Binding var selection: SignuTab
-    /// Suggestions awaiting a decision. The dot rides the Subs tab because that
-    /// is where they are listed, and it clears at zero — so acting on them
-    /// clears it and merely looking does not. Dismissing counts as acting: the
-    /// user decided, and "not a subscription" is a decision.
     var suggestionCount = 0
 
     var body: some View {
@@ -64,11 +58,6 @@ struct SignuTabBar: View {
             }
         }
         .buttonStyle(.plain)
-        // The count is a VALUE, not part of the label. Folding it into the label
-        // renames the button — VoiceOver still reads "Subs, 2 to review", but
-        // every lookup by name breaks, which is exactly what happened: the auth
-        // test that waits for the tab bar to prove the gate flipped could no
-        // longer find `Subs`.
         .accessibilityLabel(tab.rawValue)
         .accessibilityValue(tab == .subs && suggestionCount > 0 ? "\(suggestionCount) to review" : "")
     }

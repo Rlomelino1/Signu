@@ -1,8 +1,6 @@
 import SwiftUI
 
 #if DEBUG
-/// One-stop preview of the design system — tokens and every reusable
-/// component, on paper. Not part of any navigation flow.
 struct DesignSystemGallery: View {
     var anchor: UnitPoint = .top
     @State private var sort = 0
@@ -103,7 +101,7 @@ struct DesignSystemGallery: View {
                             ChromeButton(systemName: "chevron.left")
                             ChromeButton(systemName: "ellipsis")
                         }
-                        WarningBanner(text: "Nubank connection needs attention", actionLabel: "Fix")
+                        WarningBanner(text: "Mock Bank connection needs attention", actionLabel: "Fix")
                     }
                 }
 

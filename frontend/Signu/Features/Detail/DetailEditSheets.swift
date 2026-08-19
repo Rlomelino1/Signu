@@ -1,23 +1,6 @@
 import SwiftUI
 
-/// The detail screen's overflow actions — rename and category.
-///
-/// Both columns have been user-owned since Migration #1 (`subscription.nickname`
-/// and `subscription.category` are two of the seven the client may write) and
-/// neither had a way in: the ellipsis called a closure nobody supplied. These are
-/// therefore plain column writes, not Edge Function actions, and the difference
-/// is visible in how they fail — see the detail screen's alert.
-///
-/// No mockup; designed to the system, like the R4 interval sheet.
 
-/// Rename writes `nickname`, never `service_name`.
-///
-/// The engine's name for a merchant stays the engine's, and `displayName` already
-/// prefers a nickname when one exists — so clearing the field is a real action
-/// rather than an omission: it drops the nickname and the engine's name shows
-/// through again. That is why the field starts EMPTY with the engine's name as
-/// its placeholder, instead of pre-filled with a value the user never chose:
-/// pre-filling would make "clear it" indistinguishable from "delete my own name".
 struct RenameSheet: View {
     let serviceName: String
     let nickname: String?
@@ -58,8 +41,6 @@ struct RenameSheet: View {
                     .buttonStyle(.signuPrimary)
                     .disabled(trimmed.isEmpty)
                 if nickname != nil {
-                    // Only offered when there is something to undo, so the sheet
-                    // never advertises an action with nothing to act on.
                     Button("Use \(serviceName) again") { onSave(nil) }
                         .buttonStyle(.signuSecondary)
                 }
@@ -80,12 +61,6 @@ struct RenameSheet: View {
     }
 }
 
-/// Category is seeded by detection and editable here.
-///
-/// The options are the categories already present in the user's own data plus
-/// whatever they type — not a fixed taxonomy invented in the client. A hardcoded
-/// list would be the app asserting what categories exist, and the engine is the
-/// thing that seeds them.
 struct CategorySheet: View {
     let serviceName: String
     let current: String?

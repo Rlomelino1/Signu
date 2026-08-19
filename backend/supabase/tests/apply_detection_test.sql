@@ -1,23 +1,9 @@
--- pgTAP: `apply_detection`, the app's most consequential SQL — and until now the
--- least tested. CI's `Schema applies` proves migrations APPLY; nothing asserted what
--- this function DOES.
---
--- v24's frozen-charge rule and v26's dual amounts both live in here, and both were
--- verified by reading. These tests exist so the next change to this function is not
--- also verified by reading.
---
--- Everything runs inside one transaction and rolls back, so the local database is
--- unchanged and the tests can be run repeatedly.
 
 begin;
 create extension if not exists pgtap with schema extensions;
 select plan(22);
 
--- ----------------------------------------------------------------- fixtures
 
--- A user. `profiles` appears by trigger (Migration #1), which is itself worth
--- exercising: an applier test that hand-inserted the profile would not notice the
--- trigger breaking.
 insert into auth.users (id, email, raw_user_meta_data)
 values ('11111111-1111-1111-1111-111111111111', 'applier@example.test', '{}'::jsonb);
 
@@ -32,7 +18,7 @@ values ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-1111111
 
 insert into public.bank_account (id, connection_id, provider_account_id, type, brand, last4, official_name, status)
 values ('33333333-3333-3333-3333-333333333333', '22222222-2222-2222-2222-222222222222',
-        'acct-applier', 'credit_card', 'MASTERCARD', '2049', 'platinum', 'active');
+        'acct-applier', 'credit_card', 'MASTERCARD', '4321', 'platinum', 'active');
 
 insert into public.transaction (id, account_id, provider_tx_id, status, type, date, amount, currency, raw_description)
 values
@@ -40,7 +26,6 @@ values
   ('44444444-4444-4444-4444-444444444402', '33333333-3333-3333-3333-333333333333', 'p-2', 'posted', 'DEBIT', '2026-02-10', 39.90, 'BRL', 'ACME STREAMING'),
   ('44444444-4444-4444-4444-444444444403', '33333333-3333-3333-3333-333333333333', 'p-3', 'posted', 'DEBIT', '2026-03-10', 39.90, 'BRL', 'ACME STREAMING');
 
--- The desired state the engine would produce for the first two charges.
 create temporary table payload (body jsonb);
 insert into payload values ($json${
   "subscriptions": [{
@@ -57,14 +42,13 @@ insert into payload values ($json${
       "cancelled_date": null,
       "next_expected_date": "2026-04-10",
       "charges": [
-        {"transaction_id": "44444444-4444-4444-4444-444444444401", "date": "2026-01-10", "amount": 39.90, "currency": "BRL", "amount_in_account_currency": null, "card_label": "Master 2049"},
-        {"transaction_id": "44444444-4444-4444-4444-444444444402", "date": "2026-02-10", "amount": 39.90, "currency": "BRL", "amount_in_account_currency": null, "card_label": "Master 2049"}
+        {"transaction_id": "44444444-4444-4444-4444-444444444401", "date": "2026-01-10", "amount": 39.90, "currency": "BRL", "amount_in_account_currency": null, "card_label": "Master 4321"},
+        {"transaction_id": "44444444-4444-4444-4444-444444444402", "date": "2026-02-10", "amount": 39.90, "currency": "BRL", "amount_in_account_currency": null, "card_label": "Master 4321"}
       ]
     }]
   }]
 }$json$::jsonb);
 
--- --------------------------------------------------------------- convergence
 
 select lives_ok(
   $$ select public.apply_detection('11111111-1111-1111-1111-111111111111', (select body from payload)) $$,
@@ -78,7 +62,7 @@ select is(
 
 select is(
   (select card_label from public.charge where transaction_id = '44444444-4444-4444-4444-444444444401'),
-  'Master 2049',
+  'Master 4321',
   'card_label is stored, not dropped — the column the engine only started writing in v60'
 );
 
@@ -87,12 +71,10 @@ select is(
   'one subscription'
 );
 
--- ------------------------------------------------------ ids across two passes
 
 create temporary table before_ids as
   select transaction_id, id from public.charge where transaction_id is not null;
 
--- The run now exists, so a second pass names it, exactly as the engine would.
 create temporary table payload2 (body jsonb);
 insert into payload2
 select jsonb_set(
@@ -112,10 +94,6 @@ select is(
   'an identical pass does not duplicate charges'
 );
 
--- THE POINT OF THIS FILE. Under delete-then-insert every charge gets a new id on
--- every sync, so nothing can ever reference a charge: not a user note, not a
--- receipt, not a stable export. The calendar already keys its entries by charge id
--- (v46) and so churns daily for no reason.
 select is(
   (select count(*)::int
      from public.charge c
@@ -125,10 +103,7 @@ select is(
   'charge ids SURVIVE a re-run — a charge is the same row, not a new one each day'
 );
 
--- ------------------------------------------------------------ the frozen region
 
--- v24: a charge orphaned by the remove-bank-link flow is an immutable historical
--- record. It has no transaction, so no pass may recompute, delete or re-parent it.
 insert into public.charge (run_id, transaction_id, date, amount, currency, card_label)
 select id, null, '2025-12-10', 29.90, 'BRL', 'Visa 4821' from public.subscription_run limit 1;
 
@@ -147,10 +122,7 @@ select is(
   'and its values are untouched'
 );
 
--- -------------------------------------------------------------------- pruning
 
--- Detection drops the February charge (a correction, or the transaction vanished
--- upstream). The stored state must follow.
 create temporary table payload3 (body jsonb);
 insert into payload3
 select jsonb_set(body, '{subscriptions,0,runs,0,charges}',
@@ -173,11 +145,7 @@ select is(
   'and the one it still wants is left alone'
 );
 
--- ------------------------------------------------------- a steady pass is silent
 
--- `charges_written` counts rows actually inserted or updated, so an agreeing pass
--- reports zero. This is the observable form of "no dead tuples": if the no-op guard
--- ever stops matching a column, this number stops being zero.
 select is(
   (select public.apply_detection('11111111-1111-1111-1111-111111111111',
                                  (select body from payload3)) ->> 'charges_written'),
@@ -192,15 +160,7 @@ select is(
   'and prunes nothing'
 );
 
--- --------------------------------------------------------------- a re-parent moves
 
--- A charge's run can change: detection decides the January charge belongs to a new
--- run rather than the stored one. The charge is the same event, so it must MOVE.
---
--- The two runs are deliberately ordered NEW-FIRST, which is the order that breaks a
--- prune scoped to each run's own charge list: the old run would look at a charge that
--- is no longer its own and delete the row the new run had just claimed. The prune
--- tests against the whole payload's wanted set for exactly this reason.
 create temporary table before_reparent as
   select id from public.charge where transaction_id = '44444444-4444-4444-4444-444444444401';
 
@@ -212,7 +172,6 @@ select jsonb_build_object(
     'merchant_key', 'acme',
     'service_name', 'ACME STREAMING',
     'runs', jsonb_build_array(
-      -- the NEW run, claiming the charge
       jsonb_build_object(
         'stored_run_id', null,
         'start_date', '2026-01-10', 'end_date', null,
@@ -220,7 +179,6 @@ select jsonb_build_object(
         'cancelled_date', null, 'next_expected_date', '2026-04-10',
         'charges', body #> '{subscriptions,0,runs,0,charges}'
       ),
-      -- the STORED run, now empty
       jsonb_build_object(
         'stored_run_id', body #>> '{subscriptions,0,runs,0,stored_run_id}',
         'start_date', '2026-01-10', 'end_date', null,
@@ -257,12 +215,7 @@ select isnt(
   'while its run_id did change to the new run'
 );
 
--- ------------------------------------------------------------- the fail-safe
 
--- THE reason the prune is scoped to runs the payload mentions. If `detect` ever
--- returns nothing — a transient read failure, a bug, rows that had not loaded — an
--- unscoped prune would delete the user's whole charge history on one bad pass. The
--- old delete-then-insert could not do that, and neither may this.
 create temporary table charges_before_empty as select id from public.charge;
 
 select lives_ok(

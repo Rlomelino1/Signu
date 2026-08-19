@@ -1,19 +1,3 @@
-// pluggy-sync — raw-chain sync. Implements the v20 Pluggy reality contract.
-//
-// Poll-only by design: there is no webhook endpoint, because Pluggy has no
-// `updatedAtFrom` parameter, so a full re-scan is the ONLY mechanism that
-// observes updates (a PENDING->POSTED transition, a billId arriving). See the
-// v20 changelog. That makes the daily re-scan the baseline rather than a
-// fallback, which is why missing a webhook costs nothing.
-//
-// This function owns the RAW chain only: connection, bank_account, transaction.
-// It never writes subscription / subscription_run / charge. Detection is a
-// separate function on the replayability doctrine — a detection bug must not be
-// able to fail a sync, and detection must be re-runnable over stored history
-// without touching Pluggy (which is the recovery path for withdrawn rows).
-//
-// Invocation is guarded by a shared secret, not a JWT: this URL is publicly
-// addressable once deployed and there is no user session behind a cron call.
 
 import {
   createClient,
@@ -24,22 +8,10 @@ import { withdrawalDecision } from '../_shared/sync.ts'
 
 const PLUGGY = 'https://api.pluggy.ai'
 
-// Item history is 365 days (docs/item.md: "up to the last 365 days"). Re-scan
-// the whole window every run; ~6 requests per account against a 360 req/min
-// limit, so the cost is trivial and the completeness is total.
 const WINDOW_DAYS = 365
 
-// Pagination guard. /v2/transactions is fixed at 500 rows per page, so this is
-// 20k rows per account. Exceeding it is reported, never silent — a quiet stop
-// reads as "that is all of them".
 const MAX_PAGES = 40
 
-// ------------------------------------------------------------------- API shapes
-//
-// Only the fields this function reads, typed so a misspelling is a check-time
-// error rather than a silent null in the database. Every one was confirmed
-// present on a live payload — `marketingName`, `creditData.brand` and
-// `autoSyncDisabledAt` are not all in the published reference.
 
 interface PluggyCreditCardMetadata {
   installmentNumber?: number | null
@@ -59,8 +31,6 @@ interface PluggyTransaction {
   type?: string
   date: string
   amount: number
-  /** Present only when the transaction currency differs from the account's.
-   *  Not derivable from `amount`: the implied FX rate moves per transaction. */
   amountInAccountCurrency?: number | null
   currencyCode?: string
   description?: string
@@ -84,8 +54,6 @@ interface PluggyItem {
   status?: string
   executionStatus?: string
   consentExpiresAt?: string | null
-  /** When PLUGGY last refreshed this item from the institution. Not our clock, and
-   *  the honest half of a freshness claim (v65). */
   lastUpdatedAt?: string | null
   nextAutoSyncAt?: string | null
   autoSyncDisabledAt?: string | null
@@ -129,17 +97,6 @@ interface AccountResult {
   withdrawn: number
 }
 
-// ---------------------------------------------------------------- date handling
-//
-// transaction.date is a `date` column but Pluggy sends ISO timestamps in UTC,
-// and its own docs say you must convert to GMT-3 to read them as Brazilian
-// time. 37 of 258 rows in the v20 probe carried a UTC time of 00:00-02:59,
-// every one of which lands on the PREVIOUS day once converted — so naive
-// truncation puts ~14% of the ledger on the wrong date, perturbing exactly the
-// gap arithmetic R1/R3 depend on (28-33d bands, +/-3d windows).
-//
-// Named IANA zone, not a fixed -3: Brazil abolished DST in 2019, but history
-// before that was GMT-2 in summer and the zone handles it.
 const SP_PARTS = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/Sao_Paulo',
   year: 'numeric',

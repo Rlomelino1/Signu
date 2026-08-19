@@ -1,29 +1,8 @@
 import Foundation
 
-/// The data a screen payload is assembled from, and — in the extensions below —
-/// the assembly itself.
-///
-/// Extracted from `MockDataProvider` in one piece so the live Supabase provider
-/// computes payloads with the SAME code rather than a second copy. Screen
-/// doctrine (hero totals, grouping, sorting, evidence strings) is ~780 lines; two
-/// implementations of it would drift, and this project has already been bitten by
-/// two implementations of one rule disagreeing.
-///
-/// The move was behaviour-preserving by construction, not by review: every method
-/// below already referred to `today`, `chargeList`, `runList` and friends by
-/// exactly these names, so becoming protocol requirements changed no line of
-/// logic. Only the eight async entry points were renamed to `make…` so the
-/// concrete providers can wrap them to satisfy `SignuDataProviding`.
-///
-/// `@MainActor` for the same reason as `SignuDataProviding`, and it has to match:
-/// the payload methods below are what the async entry points on that protocol
-/// call, so a non-isolated source behind an isolated provider would just move the
-/// hop one layer down.
 @MainActor
 protocol SignuPayloadSource {
     var today: Date { get }
-    /// Wall-clock "now", for relative copy. Distinct from `today` so previews can
-    /// pin a date without pinning the clock.
     var now: Date { get }
     var profileValue: Profile! { get }
     var connectionList: [Connection] { get }
@@ -31,14 +10,9 @@ protocol SignuPayloadSource {
     var subscriptionList: [Subscription] { get }
     var runList: [SubscriptionRun] { get }
     var chargeList: [Charge] { get }
-    /// charge.transactionId → bank_account.id, for bank attribution.
     var transactionAccountMap: [UUID: UUID] { get }
 }
 
-/// One calendar, referenced by both providers. America/Sao_Paulo matches the
-/// backend, where sync converts Pluggy's UTC timestamps to São Paulo dates before
-/// truncating (v22) — a different calendar here would silently disagree with the
-/// dates the engine reasoned about.
 enum SignuCalendar {
     static let saoPaulo: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
@@ -52,7 +26,6 @@ extension SignuPayloadSource {
 }
 
 extension SignuPayloadSource {
-    // MARK: - Home payload (endpoint stand-in)
 
     func makeHomePayload() -> HomePayload {
         HomePayload(
@@ -65,19 +38,12 @@ extension SignuPayloadSource {
         )
     }
 
-    /// nil when the profile carries no name of its own.
-    ///
-    /// `displayName` falls back to the email address so nothing renders blank, and
-    /// that fallback is right for a row that shows an identity — but "Good morning,
-    /// you@example.com" is not a greeting. Home drops the name instead.
     private var firstName: String? {
         guard !profileValue.displayNameIsFallback else { return nil }
         return profileValue.displayName.split(separator: " ").first.map(String.init)
             ?? profileValue.displayName
     }
 
-    /// The name's initial, or the email's when there is no name. Never the "@" that
-    /// `displayName.prefix(1)` would produce for an address beginning with one.
     private var profileInitial: String {
         let source = firstName ?? profileValue.email
         return String(source.prefix(1)).uppercased()
@@ -101,18 +67,11 @@ extension SignuPayloadSource {
         }
         guard visibleRuns.contains(where: { $0.status != .possible }) else {
             let bank = connectionList.first.map(bankLabel) ?? ""
-            // Suggestions are exactly the runs this branch is reached BY, so the
-            // screen that reports "nothing yet" is the one screen guaranteed to
-            // have them. Sorted by name so two reads of the same state name the
-            // same two services.
             let names = visibleRuns
                 .filter { $0.status == .possible }
                 .compactMap { subscription($0.subscriptionId)?.displayName }
                 .sorted()
             return .watching(HomePayload.Watching(
-                // "detected" is a claim about the engine, "confirmed" about the
-                // user. Saying "none detected" while holding suggestions was the
-                // defect 22a exists to fix.
                 headline: names.isEmpty ? "No subscriptions detected yet" : "No confirmed subscriptions yet",
                 syncText: "Updated \(SignuFormat.ago(dataFreshAsOf ?? now, now: now)) · \(bank) connected",
                 suggestionCount: names.count,
@@ -120,8 +79,6 @@ extension SignuPayloadSource {
             ))
         }
 
-        // Hero: landed charges this calendar month, non-ignored subs,
-        // primary currency only. Delta: same day-span of the previous month.
         let monthStart = Self.calendar.date(from: Self.calendar.dateComponents([.year, .month], from: today))!
         let previousMonthStart = Self.calendar.date(byAdding: .month, value: -1, to: monthStart)!
         let daysIntoMonth = Self.calendar.dateComponents([.day], from: monthStart, to: today).day!
@@ -191,7 +148,6 @@ extension SignuPayloadSource {
         ))
     }
 
-    // MARK: - Subs payload (endpoint stand-in)
 
     func makeSubsPayload() -> SubsPayload {
         let visibleSubs = subscriptionList.filter { !$0.ignored }
@@ -222,8 +178,6 @@ extension SignuPayloadSource {
                 ))
             case .ended, .cancelled:
                 let unit = run.billingInterval == .monthly ? "/mo" : "/yr"
-                // Context clause dropped: the date lives in the right-rail
-                // "Paid through", the ended/cancelled distinction in the chip.
                 let cancelled = run.status == .cancelled
                 inactive.append(SubsPayload.InactiveItem(
                     id: sub.id, serviceName: sub.displayName,
@@ -271,19 +225,12 @@ extension SignuPayloadSource {
         )
     }
 
-    // MARK: - Review payload (9a — endpoint stand-in)
 
     func makeReviewPayload() -> ReviewPayload {
         let suggestions = runList
             .filter { $0.status == .possible }
             .filter { run in subscription(run.subscriptionId).map { !$0.ignored } ?? false }
             .compactMap { run -> ReviewPayload.Suggestion? in
-                // `nextExpectedDate` is deliberately NOT required (v64). An ended
-                // run has none, and refusing to render it here while Home and Subs
-                // both count it produced a Review screen that said "You're all
-                // caught up" over a suggestion the user could see two taps away.
-                // A charge is still required: a run with none has no evidence to
-                // show, and suggestions are decided on evidence.
                 guard let sub = subscription(run.subscriptionId),
                       let last = latestCharge(run.id) else { return nil }
                 let charges = chargeList
@@ -309,15 +256,10 @@ extension SignuPayloadSource {
             }
         return ReviewPayload(
             suggestions: suggestions,
-            // Across every subscription, not just the visible ones: a reminder
-            // set on something dismissed still means the user has met the
-            // feature and does not need introducing to it.
             remindersNeverUsed: subscriptionList.allSatisfy { $0.remindBeforeDays == nil }
         )
     }
 
-    /// Full evidence headline (9a). R3 measured cadence + varying amounts;
-    /// R4 is the catalog fast-path off a single charge.
     private func reviewEvidence(_ run: SubscriptionRun) -> String {
         let count = chargeList.filter { $0.runId == run.id }.count
         switch run.detectedBy {
@@ -331,8 +273,6 @@ extension SignuPayloadSource {
         }
     }
 
-    /// Compressed evidence (9b): only what the engine measured. R3 states
-    /// cadence + approximate amount; R4 states the catalog fact, no amount.
     private func suggestionEvidence(_ run: SubscriptionRun) -> String {
         let charges = chargeList.filter { $0.runId == run.id }
         switch run.detectedBy {
@@ -355,7 +295,6 @@ extension SignuPayloadSource {
         total == 0 ? 0 : ((amount / total) as NSDecimalNumber).doubleValue
     }
 
-    /// Primary currency is derived, never stored: dominant across charges.
     private var primaryCurrency: String {
         let counts = Dictionary(grouping: chargeList, by: \.currency).mapValues(\.count)
         return counts.max { $0.value < $1.value }?.key ?? "BRL"
@@ -371,35 +310,12 @@ extension SignuPayloadSource {
         }
     }
 
-    /// "Monthly · Master 2049", or just "Monthly" when the card cannot be named.
-    ///
-    /// **Two bugs in one line, and the visible one was the smaller.** These subtitles
-    /// interpolated `charge.card_label` directly, which is NULL for every charge in
-    /// production — the engine hardcodes it (`detection.ts`, `card_label: null`), so the
-    /// column has a reader and no writer. The row rendered "Monthly · " with a dangling
-    /// separator, saying less than the data supports and drawing punctuation around the
-    /// absence.
-    ///
-    /// The card is derivable from data the app already holds: `transactionAccountMap`
-    /// resolves the charge's transaction to its `bank_account`, which carries the brand
-    /// and last four. Same mechanism the connection detail already uses, and the same
-    /// posture as `BankLabel` (v43): derive at render time rather than write an
-    /// interpretation into a sync-owned column.
-    ///
-    /// The separator is part of the label, so an unnameable card produces "Monthly"
-    /// and never "Monthly · ". A charge whose raw transaction has been deleted
-    /// (`transaction_id = NULL`, by design) lands there, which is exactly when a
-    /// trailing separator would be a lie about missing data rather than absent data.
     func intervalAndCard(_ run: SubscriptionRun, _ charge: Charge) -> String {
         let interval = run.billingInterval == .monthly ? "Monthly" : "Annual"
         guard let card = derivedCardLabel(for: charge) else { return interval }
         return "\(interval) · \(card)"
     }
 
-    /// The stored snapshot when the engine ever writes one, otherwise the account the
-    /// charge resolves to. Stored first on purpose: `card_label` is documented as a
-    /// snapshot at billing time, so if it is ever populated it describes the card as it
-    /// was, which outranks the account as it is now.
     func derivedCardLabel(for charge: Charge) -> String? {
         let stored = charge.cardLabel.trimmingCharacters(in: .whitespaces)
         if !stored.isEmpty { return stored }
@@ -424,16 +340,6 @@ extension SignuPayloadSource {
         chargeList.filter { $0.runId == runId }.max { $0.date < $1.date }
     }
 
-    /// What Home's "Updated …" line reports: the OLDEST freshness across
-    /// connections, because one label speaks for the whole picture and the picture
-    /// is only as current as its stalest bank. `max()` here would let a freshly
-    /// added second bank paper over a first one that stopped updating days ago —
-    /// which is the same overstatement `dataFreshAsOf` exists to remove, one level
-    /// up (v65).
-    ///
-    /// Connections that have never synced contribute nothing rather than dragging
-    /// the label to nil; a bank still setting up is not evidence about the data
-    /// already on screen.
     private var dataFreshAsOf: Date? {
         connectionList.compactMap(\.dataFreshAsOf).min()
     }

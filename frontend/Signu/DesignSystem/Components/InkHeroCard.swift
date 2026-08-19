@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Ink-dark hero card container — subscription detail and connection detail
-/// heroes. Content is injected; the card owns surface, radius and padding.
 struct InkHeroCard<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -15,15 +13,12 @@ struct InkHeroCard<Content: View>: View {
     }
 }
 
-/// Stat tile inside the ink hero: THIS YEAR / SINCE NOV 23 / LAST SYNCED…
 struct HeroStatTile: View {
     let label: String
     let value: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Own label (not OverlineText): lighter kerning + strong shrink so
-            // long labels like "SINCE SEP 25 · 2 RUNS" stay on one line.
             Text(label.uppercased())
                 .font(SignuFont.font(12, .semibold, tabular: true))
                 .kerning(0.5)
@@ -43,11 +38,9 @@ struct HeroStatTile: View {
     }
 }
 
-// Subscription-run heroes live in SubscriptionHeroCard (all four states
-// previewed there). This preview only exercises the bare container + tiles.
 #Preview("Container + stat tiles") {
     InkHeroCard {
-        Text("Itaú")
+        Text("Demo Bank")
             .font(.signuHeadline)
             .foregroundStyle(SignuColor.onInk)
             .padding(.bottom, 16)

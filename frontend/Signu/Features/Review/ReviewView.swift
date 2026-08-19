@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Loads the review payload from the provider and renders 9a.
 struct ReviewScreen: View {
     let provider: SignuDataProviding
     var actions = ReviewActions()
@@ -24,49 +23,25 @@ struct ReviewScreen: View {
 
 struct ReviewActions {
     var onBack: () -> Void = {}
-    /// run id, chosen interval (nil = R3, already measured).
     var onTrack: (UUID, BillingInterval?) -> Void = { _, _ in }
-    /// SUBSCRIPTION id → subscription.ignored = true. Was the run id, which named
-    /// the row the button sits on rather than the row the write targets — dismissing
-    /// is a statement about the subscription ("not a subscription"), not about one
-    /// run of it, and a suggestion carries both ids anyway.
     var onDismiss: (UUID) -> Void = { _ in }
-    /// SUBSCRIPTION id → `remind_before_days = 2`, the same write the detail
-    /// screen's toggle makes. Only fires on "Remind me": declining writes
-    /// nothing, because a decline is not a state a subscription should carry.
     var onRemind: (UUID) -> Void = { _ in }
 }
 
-/// Review screen (9a — mockup 21j): full charge evidence per possible run,
-/// Track it / Not a subscription. 9b informs, 9a decides.
 struct ReviewView: View {
     let payload: ReviewPayload
     var actions = ReviewActions()
 
-    /// Dismissed rows animate out. Confirmed ones do NOT — they are replaced in
-    /// place by a confirmation card (22b), so the queue above them is untouched
-    /// and the user reads the reminder offer next to the thing they just
-    /// confirmed. The rows are gone on the next visit either way: review lists
-    /// `possible` runs, and a confirmed one has moved to the Subs tab while a
-    /// dismissed one has moved to Settings.
     @State private var resolved: Set<UUID> = []
-    /// Confirmed this session → the interval it was confirmed with.
     @State private var confirmed: [UUID: BillingInterval] = [:]
-    /// The one confirmation carrying the reminder offer, and whether it has been
-    /// answered. Answering collapses the card rather than removing it.
     @State private var offering: UUID?
     @State private var intervalPrompt: ReviewPayload.Suggestion?
-    /// Screenshot harness: auto-open the R4 interval sheet on appear.
     var autoPresentIntervalForR4 = false
 
     private var remaining: [ReviewPayload.Suggestion] {
         payload.suggestions.filter { !resolved.contains($0.id) }
     }
 
-    /// Offered once, on the first confirmation by a user who has never used
-    /// reminders. `remindersNeverUsed` covers the durable half (a "yes" leaves a
-    /// `remind_before_days` behind); `ReminderOffer.answered` covers the "no",
-    /// which deliberately writes nothing to the database.
     private var offersReminder: Bool {
         payload.remindersNeverUsed && !ReminderOffer.answered
     }
@@ -113,10 +88,7 @@ struct ReviewView: View {
         }
     }
 
-    // MARK: - Header
 
-    // Chevron on the left, title on the same row starting just right of it,
-    // subtitle directly under the title (21j).
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             ChromeButton(systemName: "chevron.left", action: actions.onBack)
@@ -155,10 +127,7 @@ struct ReviewView: View {
         .padding(.horizontal, 20)
     }
 
-    // MARK: - Confirmation card (22b)
 
-    /// What a confirmed row becomes, in place. Collapsed to the header alone once
-    /// the offer is answered — or immediately, when there is no offer to make.
     private func confirmationCard(
         _ suggestion: ReviewPayload.Suggestion,
         interval: BillingInterval
@@ -173,12 +142,6 @@ struct ReviewView: View {
                             .foregroundStyle(SignuColor.textPrimary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
-                        // Bare date, tilde amount — the tilde rule is amounts-only
-                        // (locked 2026-07-15), and a predicted date carries the
-                        // same ±3-day window whatever rule found it.
-                        // No predicted date means the run is already over, so the
-                        // amount is not a prediction either -- claiming "~R$ 20,97"
-                        // next to nothing would be inventing a renewal (v64).
                         Text(suggestion.renewsDate.map {
                             "\(interval == .annual ? "Annual" : "Monthly") · renews \(SignuFormat.monthDay($0)) · \(SignuFormat.brl(suggestion.renewsAmount, approximate: true))"
                         } ?? "\(interval == .annual ? "Annual" : "Monthly") · no renewal expected")
@@ -201,16 +164,11 @@ struct ReviewView: View {
         }
     }
 
-    /// The offer, nested inside the confirmation so it reads as being about the
-    /// thing just confirmed rather than about the app in general.
     private func reminderOffer(_ suggestion: ReviewPayload.Suggestion) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Want a heads-up before it renews?")
                 .font(SignuFont.font(16, .semibold))
                 .foregroundStyle(SignuColor.textPrimary)
-            // Every claim here is one the pipeline actually keeps: email only,
-            // two days, to the address the account was created with. Push exists
-            // in the schema and is deliberately unbuilt, so it is not mentioned.
             Text("One email, 2 days before the expected charge — sent to the address you signed in with.")
                 .font(.signuBody)
                 .foregroundStyle(SignuColor.textSecondary)
@@ -234,7 +192,6 @@ struct ReviewView: View {
         }
     }
 
-    // MARK: - Suggestion card
 
     private func card(_ suggestion: ReviewPayload.Suggestion) -> some View {
         SignuCard {
@@ -245,8 +202,6 @@ struct ReviewView: View {
                         Text(suggestion.serviceName)
                             .font(.signuRowTitle)
                             .foregroundStyle(SignuColor.textPrimary)
-                        // One line, per 21j — 13pt scales to fit the longest
-                        // R3 evidence copy in Inter.
                         Text(suggestion.evidence)
                             .font(SignuFont.font(13, .semibold))
                             .foregroundStyle(SignuColor.green)
@@ -257,7 +212,6 @@ struct ReviewView: View {
 
                 evidenceList(suggestion.charges)
 
-                // Prediction: bare date, tilde amount (tilde rule — amounts only).
                 Text(suggestion.renewsDate.map {
                     "If confirmed: renews \(SignuFormat.monthDay($0)) · \(SignuFormat.brl(suggestion.renewsAmount, approximate: true))"
                 } ?? "If confirmed: no renewal expected — the last charge is too old to predict one")
@@ -308,22 +262,17 @@ struct ReviewView: View {
         .background(SignuColor.sunken.opacity(0.7), in: RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous))
     }
 
-    // MARK: - Actions
 
     private func trackTapped(_ suggestion: ReviewPayload.Suggestion) {
         if suggestion.asksIntervalOnTrack {
-            intervalPrompt = suggestion       // R4 → ask monthly/annual
+            intervalPrompt = suggestion
         } else {
-            track(suggestion, interval: nil)  // R3 → cadence already measured
+            track(suggestion, interval: nil)
         }
     }
 
     private func track(_ suggestion: ReviewPayload.Suggestion, interval: BillingInterval?) {
         actions.onTrack(suggestion.id, interval)
-        // Replaced in place rather than animated away: the confirmation is the
-        // acknowledgement, and on a first confirmation it carries the reminder
-        // offer. Only the first one offers — a second confirmation in the same
-        // session shows the compact card alone.
         withAnimation(.easeOut(duration: 0.25)) {
             confirmed[suggestion.id] = interval ?? suggestion.billingInterval
             if offering == nil && offersReminder { offering = suggestion.id }
@@ -331,8 +280,6 @@ struct ReviewView: View {
     }
 
     private func answerOffer(_ suggestion: ReviewPayload.Suggestion, remind: Bool) {
-        // Either answer ends the offer for good. "Yes" also writes the reminder,
-        // which is what makes the decision durable without a column of its own.
         ReminderOffer.answered = true
         if remind { actions.onRemind(suggestion.subscriptionId) }
         withAnimation(.easeOut(duration: 0.2)) { offering = nil }
@@ -344,10 +291,6 @@ struct ReviewView: View {
     }
 }
 
-/// R4 confirmation sheet: the single charge can't reveal a cadence, so we
-/// ask. The user's answer is the authoritative billing_interval write.
-/// (No mockup for this sheet — designed to the system; attaches to exactly
-/// one button in one place, per the contract.)
 struct IntervalPromptSheet: View {
     let serviceName: String
     var onChoose: (BillingInterval) -> Void
@@ -398,8 +341,6 @@ struct IntervalPromptSheet: View {
                 RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous)
                     .strokeBorder(SignuColor.hairline, lineWidth: 1)
             }
-            // The R4 sheet's two choices are the only way to confirm a
-            // single-charge suggestion, so a dead middle here blocks the flow.
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

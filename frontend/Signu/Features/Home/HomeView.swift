@@ -1,19 +1,11 @@
 import SwiftUI
 
-/// Loads the home payload from the provider and renders it.
 struct HomeScreen: View {
     let provider: SignuDataProviding
     var actions = HomeActions()
     var scrollAnchor: UnitPoint = .top
 
     @State private var payload: HomePayload?
-    /// Why the load failed, when it did.
-    ///
-    /// This screen used to render `Color.clear` for both "still loading" and
-    /// "the read threw", which meant a failed load was indistinguishable from an
-    /// empty account — and worse, from a working app with nothing in it. A
-    /// signed-in user with a broken read got a blank page and a tab bar, with
-    /// nothing on screen or in a log to say what happened.
     @State private var failure: String?
 
     var body: some View {
@@ -27,18 +19,6 @@ struct HomeScreen: View {
             }
         }
         .task { await load() }
-        // Pull-to-refresh, on the screen most likely to be open when the daily
-        // sync lands. The `refresh()` VERDICT is still ignored on purpose: the user
-        // asked, so the payload is re-read either way and the gesture never appears
-        // to do nothing.
-        //
-        // The ERROR is no longer ignored, which is what `try?` was quietly doing.
-        // A pull with no network threw inside `refresh()`, the throw was discarded,
-        // `load()` then re-read the cache that `reload()` had failed to replace, and
-        // the same stale rows came back with a completed spinner over them. A gesture
-        // that appears to have worked is worse than one that appears to do nothing:
-        // the freshness label was the only thing telling the truth, and only to
-        // someone who thought to read it.
         .refreshable {
             do {
                 try await provider.refresh()
@@ -51,13 +31,6 @@ struct HomeScreen: View {
 }
 
 extension HomeScreen {
-    /// One loader for the first read and for every retry, so the failure state
-    /// and the success state cannot drift apart.
-    ///
-    /// A failed re-read never trades a payload for an error screen — see
-    /// `LoadFailureRoute`. Unconditionally clearing `payload` here was safe while
-    /// this only ran on first load and became wrong the moment pull-to-refresh
-    /// called it: one bad re-read would replace a working Home with a retry button.
     fileprivate func load() async {
         do {
             payload = try await provider.homePayload()
@@ -74,12 +47,7 @@ extension HomeScreen {
     }
 }
 
-/// Navigation hooks — wired up as their destinations land (banner → 12b,
-/// review → 9a, subscription → detail).
 struct HomeActions {
-    /// A read that failed with something already on screen. Routed to the shell's
-    /// alert rather than handled here, for the reason the shell's alert exists at
-    /// all: a failure with nowhere to be noticed has to be said out loud somewhere.
     var onLoadFailed: (String) -> Void = { _ in }
     var onFixConnection: (UUID) -> Void = { _ in }
     var onReview: () -> Void = {}
@@ -89,7 +57,6 @@ struct HomeActions {
     var onConnectBank: () -> Void = {}
 }
 
-/// Stateless render of a HomePayload (21g / 21h / 21i).
 struct HomeView: View {
     let payload: HomePayload
     var actions = HomeActions()
@@ -106,7 +73,6 @@ struct HomeView: View {
                     }
                 }
 
-                // Label sits tight above the number, caption-style (21i).
                 VStack(alignment: .leading, spacing: 5) {
                     OverlineText("This month")
                         .padding(.top, 2)
@@ -127,15 +93,11 @@ struct HomeView: View {
         .background(SignuColor.paper)
     }
 
-    // MARK: - Header
 
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 OverlineText(SignuFormat.weekdayFull(payload.now))
-                // The name only when there is one. This greeted with the full
-                // email address for as long as `display_name` stayed null, which
-                // is not a greeting (#7 from the production run).
                 Text(payload.firstName.map { "\(greeting), \($0)" } ?? greeting)
                     .font(.signuTitle)
                     .foregroundStyle(SignuColor.textPrimary)
@@ -155,7 +117,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - No bank (21g)
 
     private var noBankContent: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -200,7 +161,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Watching (21h)
 
     private func watchingContent(_ watching: HomePayload.Watching) -> some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -247,12 +207,6 @@ struct HomeView: View {
         }
     }
 
-    /// 22a's card: what the engine found, and the only way in to deciding on it.
-    ///
-    /// Deliberately a second component rather than a reuse of 21i's review pill.
-    /// The pill announces a count on a screen already full of confirmed
-    /// subscriptions; this one has to say what was found and what confirming
-    /// does, because it is the first thing this user has ever seen the app find.
     private func suggestionsCard(count: Int, line: String) -> some View {
         Button(action: actions.onReview) {
             HStack(alignment: .top, spacing: 14) {
@@ -261,11 +215,6 @@ struct HomeView: View {
                     .foregroundStyle(.white)
                     .frame(width: 34, height: 34)
                     .background(SignuColor.green, in: Circle())
-                // The Review affordance sits in the TITLE row, not beside the
-                // whole block. In the same HStack as both lines it steals width
-                // from each of them, which wrapped the title in two and the
-                // sentence into four — measured on the simulator against 22a,
-                // where the title is one line and the sentence is two.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("Possible subscriptions found")
@@ -296,9 +245,6 @@ struct HomeView: View {
                 RoundedRectangle(cornerRadius: SignuMetric.cardRadius, style: .continuous)
                     .strokeBorder(SignuColor.hairline, lineWidth: 1)
             }
-            // The notch that ties this card to the one above it: "we're watching"
-            // and "here is what we spotted" are one thought, and the tail is what
-            // says so without a connecting line or a shared container.
             .overlay(alignment: .topLeading) {
                 UpTriangle()
                     .fill(SignuColor.surfaceBright)
@@ -310,7 +256,6 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Active (21i)
 
     private func activeContent(_ active: HomePayload.Active) -> some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -404,8 +349,6 @@ struct HomeView: View {
         }
     }
 
-    // Overdue: standalone tinted row above "Coming up" — never the banner.
-    // Multiple overdue runs stack; payment failures are never summarized away.
     private func overdueRow(_ item: HomePayload.OverdueItem) -> some View {
         Button {
             actions.onSelectSubscription(item.subscriptionId)
@@ -449,8 +392,6 @@ struct HomeView: View {
         }
     }
 
-    // 13pt is the largest size at which the locked copy fits one line in
-    // Inter beside the badge and "Review →" — the mockup face is narrower.
     private func reviewPill(count: Int) -> some View {
         Button(action: actions.onReview) {
             HStack(spacing: 10) {
@@ -499,7 +440,6 @@ struct HomeView: View {
     }
 }
 
-/// Dashed-outline empty slot (21g/21h "Coming up").
 struct EmptyDashCard: View {
     let title: String
     let subtitle: String
@@ -527,8 +467,6 @@ struct EmptyDashCard: View {
     HomeScreen(provider: MockDataProvider())
 }
 
-// Bottom-of-scroll spacing must always be reviewed in its real context:
-// inside the shell, tab bar overlaid, scrolled to the very end.
 #Preview("Home · in shell, scrolled to bottom") {
     AppShellView(provider: MockDataProvider(), homeScrollAnchor: .bottom)
 }

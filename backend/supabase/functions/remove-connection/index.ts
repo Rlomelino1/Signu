@@ -1,29 +1,3 @@
-// remove-connection — the remove-bank-link flow (12c), deletion tier (b).
-//
-// THE SEQUENCING RULE IS THE WHOLE POINT
-//
-// `charge.transaction_id` is the only place the raw chain and the interpreted
-// chain meet, and it is ON DELETE SET NULL — which is what makes "remove the
-// bank, keep the history" work at all: charges survive the loss of their
-// transactions, self-described by the date, amount, currency and card_label
-// duplicated onto them at detection time.
-//
-// The same SET NULL is a trap in the other order. Attribution — "found via this
-// bank" — is computed *through* `transaction_id`. Delete the connection first
-// and its transactions go with it, every attributed charge's pointer becomes
-// NULL, and the subscriptions the user just agreed to delete are no longer
-// identifiable as belonging to that bank. Not harder to find: gone. So the
-// history choice is captured up front in the sheet (locked v8) and the deletes
-// happen subscriptions-first, always.
-//
-// WHAT "FOUND VIA THIS BANK" MEANS
-//
-// The latest charge of the latest run resolves to this connection — most recent
-// charge wins, the data decides. It counts dismissed (`ignored`) subscriptions,
-// because they have charges too and silently keeping ghost data the user cannot
-// see would be the worst of the available outcomes. The rule lives in
-// _shared/actions.ts and is the same one the app renders on 12b and 13a, so the
-// count in the sheet is the count that gets deleted.
 
 import {
   type AttrCharge,
@@ -45,10 +19,6 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json()
     connectionId = typeof body?.connectionId === 'string' ? body.connectionId : null
-    // No default. The sheet pre-selects "keep", but a *missing* choice is a
-    // client that never asked, and guessing "keep" would quietly do something
-    // other than what the button said. Writer-states-everything, applied to a
-    // request body.
     deleteHistory = typeof body?.deleteHistory === 'boolean' ? body.deleteHistory : null
   } catch {
     return json({ error: 'body must be JSON' }, 400)
@@ -61,7 +31,6 @@ Deno.serve(async (req: Request) => {
   const owned = await ownedConnection<{ id: string }>(db, who.caller, connectionId, 'id')
   if (!owned.ok) return json({ error: owned.error }, owned.status)
 
-  // ---- attribution, narrowed at every step (see latestRunPerSubscription) ----
 
   const { data: accounts, error: aErr } = await db
     .from('bank_account')

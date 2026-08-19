@@ -1,25 +1,3 @@
-// actions.ts — the decisions behind the four writes the client is not granted.
-//
-// Same shape as detection.ts and reminders.ts: every rule is a pure function
-// over rows, so it is testable without a database and the Edge Functions above
-// it stay load-decide-write shells.
-//
-// WHY THESE FOUR LIVE ON THE SERVER AT ALL
-//
-// Migration #1 grants `authenticated` a column-scoped UPDATE on exactly seven
-// user-owned columns and no INSERT or DELETE, ever. Confirming a suggestion and
-// marking a run cancelled write `subscription_run`, which has no UPDATE grant at
-// all; removing a bank link and deleting an account delete rows. So these are
-// not "server-side because it is tidier" — Postgres refuses them from the client
-// no matter what the Swift code asks for, and widening the grant to make a
-// button work would dissolve the boundary the whole doctrine rests on (v29).
-//
-// A DECISION IS A VALUE HERE, NOT A WRITE
-//
-// Each function returns what *should* happen — write / noop / refuse — and never
-// touches a client. That is what lets the interesting cases (a second tap on
-// Track it, a rename that must not be clobbered, a run whose cadence was already
-// measured) be tested as data rather than mocked round trips.
 
 import { addInterval, type Interval } from './dates.ts'
 
@@ -29,16 +7,11 @@ export type RunStatus = 'possible' | 'active' | 'overdue' | 'ended' | 'cancelled
 export type DetectedBy = 'R1' | 'R3' | 'R4'
 export type Identification = 'auto' | 'user_confirmed' | 'user_renamed'
 
-/** A decision the caller applies, refuses, or reports as already true.
- *  `noop` is deliberately distinct from `refuse`: a second Track-it tap after a
- *  dropped response is a success from where the user sits, and answering 409 to
- *  it would make a retry look like a failure. */
 export type Decision<W> =
   | { kind: 'write'; write: W }
   | { kind: 'noop'; reason: string }
   | { kind: 'refuse'; reason: string; status: number }
 
-// ------------------------------------------------------------------- confirm
 
 export type ConfirmRun = {
   id: string
@@ -57,22 +30,9 @@ export type ConfirmWrite = {
   runId: string
   run: { status: 'active'; billing_interval?: Interval }
   subscriptionId: string
-  /** null when the stored identification already carries a stronger assertion. */
   subscription: { identification: 'user_confirmed' } | null
 }
 
-/**
- * Review's *Track it* (9a).
- *
- * The write is one thing: lift the run out of `possible`. Everything after that
- * is derived again on the next detection pass — `applyAssertions` preserves
- * `detected_by` and R4's interval for a confirmed suggestion but lets the
- * lifecycle re-derive the status, so a confirmed run that never receives
- * another charge still goes overdue and then ended through the normal
- * machinery. `active` is therefore a starting state, not a permanent claim, and
- * a run confirmed while already overdue is corrected within a day rather than
- * frozen wrong.
- */
 export function confirmation(
   run: ConfirmRun,
   subscription: ConfirmSubscription,
@@ -82,24 +42,14 @@ export function confirmation(
     return { kind: 'refuse', reason: 'run does not belong to that subscription', status: 400 }
   }
 
-  // R1 auto-confirms at creation and never surfaces on the review screen, so a
-  // confirm aimed at one is a client bug rather than a user action. Refused
-  // instead of ignored: `identification = 'user_confirmed'` on a run the user
-  // was never shown would be the system putting words in their mouth.
   if (run.detected_by === 'R1') {
     return { kind: 'refuse', reason: 'R1 runs are tracked at detection, never confirmed', status: 409 }
   }
 
-  // Above `possible` on an R3/R4 run IS the stored confirmation (v24 — that is
-  // why no extra column exists). So this is the second tap, not a new fact.
   if (run.status !== 'possible') {
     return { kind: 'noop', reason: `run is already confirmed (status ${run.status})` }
   }
 
-  // R3 measured the cadence from 3+ date-aligned charges. Asking would be the
-  // system pretending not to know something it proved, so the client sends no
-  // interval — and one arriving anyway means a client that has lost track of
-  // which rule it is confirming. Surfaced rather than silently dropped.
   if (run.detected_by !== 'R4' && interval !== null) {
     return {
       kind: 'refuse',
