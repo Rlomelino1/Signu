@@ -10,8 +10,14 @@ export type CallerResult =
 export type VerificationKey = { key: string; source: 'publishable' | 'anon' | 'none' }
 
 export function verificationKey(
-  env: { SUPABASE_ANON_KEY?: string; SUPABASE_PUBLISHABLE_KEYS?: string },
+  env: {
+    SUPABASE_ANON_KEY?: string
+    SUPABASE_PUBLISHABLE_KEYS?: string
+    SIGNU_PUBLISHABLE_KEY?: string
+  },
 ): VerificationKey {
+  const explicit = firstWithPrefix(env.SIGNU_PUBLISHABLE_KEY ?? '', 'sb_publishable_')
+  if (explicit) return { key: explicit, source: 'publishable' }
   const publishable = firstWithPrefix(env.SUPABASE_PUBLISHABLE_KEYS ?? '', 'sb_publishable_')
   if (publishable) return { key: publishable, source: 'publishable' }
   const anon = (env.SUPABASE_ANON_KEY ?? '').trim()
@@ -27,8 +33,14 @@ function firstWithPrefix(raw: string, prefix: string): string | null {
 export type WriteKey = { key: string; source: 'secret' | 'service_role' | 'none' }
 
 export function writeKey(
-  env: { SUPABASE_SERVICE_ROLE_KEY?: string; SUPABASE_SECRET_KEYS?: string },
+  env: {
+    SUPABASE_SERVICE_ROLE_KEY?: string
+    SUPABASE_SECRET_KEYS?: string
+    SIGNU_SECRET_KEY?: string
+  },
 ): WriteKey {
+  const explicit = firstWithPrefix(env.SIGNU_SECRET_KEY ?? '', 'sb_secret_')
+  if (explicit) return { key: explicit, source: 'secret' }
   const secret = firstWithPrefix(env.SUPABASE_SECRET_KEYS ?? '', 'sb_secret_')
   if (secret) return { key: secret, source: 'secret' }
   const legacy = (env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim()
@@ -42,6 +54,7 @@ export function writeApiKey(): string {
   const chosen = writeKey({
     SUPABASE_SERVICE_ROLE_KEY: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),
     SUPABASE_SECRET_KEYS: Deno.env.get('SUPABASE_SECRET_KEYS'),
+    SIGNU_SECRET_KEY: Deno.env.get('SIGNU_SECRET_KEY'),
   })
   if (!reportedWriteSource) {
     reportedWriteSource = true
@@ -60,6 +73,7 @@ export async function resolveCaller(req: Request): Promise<CallerResult> {
   const verifier = verificationKey({
     SUPABASE_ANON_KEY: Deno.env.get('SUPABASE_ANON_KEY'),
     SUPABASE_PUBLISHABLE_KEYS: Deno.env.get('SUPABASE_PUBLISHABLE_KEYS'),
+    SIGNU_PUBLISHABLE_KEY: Deno.env.get('SIGNU_PUBLISHABLE_KEY'),
   })
   if (!reportedSource) {
     reportedSource = true

@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-19** (v77) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-19** (v78) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1851,6 +1851,32 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v78** — KEY SELECTION BECOMES VERIFIABLE RATHER THAN INFERRED (2026-08-19). **No
+  migration.** Two more env lookups and two tests.
+  **v76 and v77 rested on an inference that the evidence does not support.** Both prefer a
+  new-style key read from the platform-injected `SUPABASE_PUBLISHABLE_KEYS` /
+  `SUPABASE_SECRET_KEYS`. Those variables exist — they appear in `supabase secrets list` —
+  but their **digests did not change across two deploys that spanned the creation of a new
+  secret key**, so there is no evidence they carry a usable client credential, and they are
+  injected alongside `SUPABASE_JWKS` in a way that suggests they are for *validating*
+  presented keys rather than for outbound use. Neither reading can be confirmed from
+  outside the runtime.
+  **So selection now prefers an explicitly set secret**: `SIGNU_PUBLISHABLE_KEY` and
+  `SIGNU_SECRET_KEY`, before the injected plurals, before the legacy keys. The `SIGNU_`
+  prefix is not a style choice — Supabase reserves `SUPABASE_*` for its own injection and
+  refuses to set those names.
+  **The point is that arrival is now checkable.** A user-set function secret changes its
+  digest in `supabase secrets list`, so "the key reached the runtime" becomes an
+  observation instead of an assumption. The injected route stays as a second preference in
+  case it does work; the legacy keys stay last so the worst case is unchanged behaviour.
+  **An explicit key of the wrong type is ignored rather than used**, pinned by a test:
+  a publishable value in `SIGNU_SECRET_KEY` must not become a write credential, and a
+  secret value in `SIGNU_PUBLISHABLE_KEY` must not become the caller-verification key.
+  **Why this mattered more than a log line.** The intended confirmation was a one-off log
+  naming the chosen source, read from the dashboard. That proved unobservable in practice —
+  the function logs showed only platform boot/shutdown events from an older version — and a
+  migration gated on an unobservable signal is a migration that cannot be finished.
 
 - **v77** — THE WRITE PATH LEAVES THE LEGACY KEY TOO (2026-08-19). **No migration.**
   `_shared/auth.ts` plus the three cron functions; six more tests.

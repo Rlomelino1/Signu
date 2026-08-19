@@ -397,6 +397,17 @@ source it used, once per instance, so that can be confirmed from the function lo
 the legacy key is switched off. A secret key can never be selected: the scan matches only
 the publishable prefix.
 
+**Key selection prefers an explicitly set secret.** `SIGNU_PUBLISHABLE_KEY` and
+`SIGNU_SECRET_KEY` are checked before the platform-injected `SUPABASE_PUBLISHABLE_KEYS` /
+`SUPABASE_SECRET_KEYS`, which are checked before the legacy keys. The explicit pair exists
+because the injected plurals are undocumented: their digests did not change across two
+deploys spanning a key creation, so whether they carry usable client credentials at all is
+unproven, and a migration cannot rest on an inference. Set them with
+`supabase secrets set SIGNU_PUBLISHABLE_KEY=… SIGNU_SECRET_KEY=…` — the `SIGNU_` prefix is
+required because Supabase reserves `SUPABASE_*` for its own injection. A user-set secret
+also changes its digest in `supabase secrets list`, which makes arrival **verifiable**
+rather than assumed. An explicit key of the wrong type is ignored, not used.
+
 **The write path is key-independent too.** `serviceClient()` and the three cron functions
 run on `writeApiKey()`, which prefers an injected **secret** key (`sb_secret_…` from
 `SUPABASE_SECRET_KEYS`) and falls back to `SUPABASE_SERVICE_ROLE_KEY`. Both selections are
