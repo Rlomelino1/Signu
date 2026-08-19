@@ -120,9 +120,19 @@ extension SignuPayloadSource {
         return ConnectionDetailPayload(
             id: connection.id,
             institutionName: bankLabel(connection),
+            // "via Open Finance" is HARDCODED and is not true of every connection.
+            // Connector 200 is Pluggy's credentials-based own-accounts aggregator, which
+            // carries no Open Finance consent -- which is also why `consentExpiresText`
+            // below renders "—" on the live connection. Documented in v73 and left
+            // alone on purpose: `BankLabel.proxyConnectorIds` already holds the fact
+            // that would derive this honestly, if it is ever wanted.
             connectedSinceText: "Connected \(SignuFormat.monthYearLong(connection.createdAt)) · via Open Finance",
             statusText: chipText, statusTone: chipTone,
             lastSyncedText: connection.lastSyncedAt.map(SignuFormat.syncStamp) ?? "—",
+            // Null is a REAL state, not a gap: no consent exists (connector 200), or a
+            // consent exists that never expires (Open Finance's documented default), or
+            // it is not known yet. All three render "—", which the reader cannot
+            // disambiguate. v73 records the conflation instead of inventing copy for it.
             consentExpiresText: connection.consentExpiresAt.map(SignuFormat.monthDay) ?? "—",
             needsReconnect: needsReconnect,
             reassurance: reassurance(connection),

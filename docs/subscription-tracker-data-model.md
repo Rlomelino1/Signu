@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-19** (v72) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-19** (v73) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -52,7 +52,7 @@ Managed entirely by Supabase Auth — not part of our schema.
 | `institution_id` | string | Aggregator connector id, for re-initiating flows |
 | `institution_name` | string | |
 | `status` | string | active / needs_action / expired / disconnected; **no default, sync states it** |
-| `consent_expires_at` | date | Warn user before lapse; renewal is manual |
+| `consent_expires_at` | date | Warn user before lapse; renewal is manual. **Null is a real state, and means three different things** — see [Consent expiry is usually absent](#consent-expiry-is-usually-absent-v73) |
 | `last_synced_at` | timestamptz | Incremental sync cursor |
 | `last_sync_error` | string | Nullable; surfaced in UI |
 | `created_at` | timestamptz | |
@@ -477,6 +477,41 @@ no business existing, and all four are purely additive later.*
   (parcelar a fatura), which generates monthly charges and would read as
   recurring. If a card bill is ever parcelled, this becomes a live
   false-positive source and earns a column.
+
+### Consent expiry is usually absent (v73)
+
+**Observed in the app on 2026-08-19**, on the live MeuPluggy connection: the detail hero
+reads *"Connected Aug 2026 · via Open Finance"* and **CONSENT EXPIRES —** at the same
+time. Both halves are wrong, in complementary ways, and the second explains the first.
+
+- **`consent_expires_at` is null, correctly.** `pluggy-sync` copies the item's
+  `consentExpiresAt` through and writes null when there is none. Connector **200** is
+  Pluggy's own-accounts aggregator, credentials-based, so **there is no Open Finance
+  consent behind it and therefore no expiry to report**. The same fact drives the label
+  reading "Nu Pagamentos S.A." rather than "Nubank" (`BankLabel`, v43): connector 200
+  names no institution, so the label is derived from the account's legal entity.
+- **Not a parsing failure**, which is the first thing to suspect. The column is `date`,
+  sync writes `YYYY-MM-DD`, and `asPostgresDate` parses date-only strings — a real value
+  would render.
+- **`needsReconnect` is unaffected**: `consentExpiresAt.map { … } ?? false` means a null
+  consent never raises a false reconnect warning, and the "Expiring" chip likewise
+  cannot fire. Nothing misleads the user into acting.
+- **"via Open Finance" is hardcoded**, at `PayloadSource+Settings.swift`:
+  `connectedSinceText: "Connected \(…) · via Open Finance"`. Nothing derives it, so every
+  connection claims it. The sharp part: **the app already holds the fact that would
+  contradict it** — `BankLabel.proxyConnectorIds = ["200"]` exists precisely to identify
+  "connectors that proxy other institutions rather than being one", and is used one line
+  away to derive the institution name.
+- **The em dash carries three distinct facts.** Null means *no consent exists* (this
+  case), and would equally render for *a consent that never expires* — the documented
+  default for Open Finance consents, see the README — and for *not yet known*. One glyph,
+  three meanings, and the reader cannot tell which.
+
+**Deliberately documented rather than fixed (2026-08-19, Rafael's call).** The fix needs
+no migration if it is ever wanted: `institution_id` is already stored and
+`proxyConnectorIds` is already the discriminator, so the method line can be derived and
+the consent slot given its three states. Recorded here because the next person to see a
+blank consent field will otherwise go looking for a sync bug, and there is none.
 
 ### Still open
 
@@ -1594,6 +1629,9 @@ implementations back to the 21-series rendering.*
 - Rows: bank + status chip + one-line context. Chips map to schema: **Active** (`status = active`, subtitle "Synced \<ago\> · N cards"), **Needs action** (`needs_action`/`expired`, subtitle "Sign in again to resume syncing"), **Expiring** (`consent_expires_at` near — the warn-before-lapse behavior, subtitle "Consent expires \<date\> · renew soon").
 - **Connection detail (12b) is also the Home banner's tap destination** — one screen serves both entry points; the banner-destination gap from the home contract is closed here.
 - Detail hero (ink card, same language as the subscription detail screen): institution, connected-since, status badge, LAST SYNCED (`last_synced_at`) + CONSENT EXPIRES (`consent_expires_at`) stat slots, **Reconnect** primary action, and reassurance copy stating the connection-death doctrine in user terms: *"Signing in again resumes syncing — nothing was lost."*
+  **As built, this hero contradicts itself on the only connection that exists** — see
+  [Consent expiry is usually absent](#consent-expiry-is-usually-absent-v73). Documented,
+  not fixed.
 - Below the hero: **cards on this link** (bank_account rows, "N subscriptions billed here" per card) and a summary row (*"N subscriptions found via this bank · R$ X tracked since \<date\>"*) — counts use the attribution rule below.
 
 ### Remove-bank-link flow (12c) — deletion tier (b) made concrete
@@ -1813,6 +1851,27 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v73** — THE CONSENT FIELD IS BLANK, AND THAT IS THE HONEST ANSWER (2026-08-19).
+  **No migration. Documentation only — no behaviour changed.**
+  Noticed by Rafael in the running app: the connection hero says *"via Open Finance"* and
+  *"CONSENT EXPIRES —"* simultaneously. `consent_expires_at` is null because connector
+  **200** is Pluggy's credentials-based own-accounts aggregator and has no Open Finance
+  consent to expire, so sync correctly writes nothing; *"via Open Finance"* is a
+  **hardcoded string** in `PayloadSource+Settings.swift` that every connection gets. The
+  blank field is the truthful half.
+  **What makes it worth writing down rather than shrugging at**: the app already stores
+  the fact that contradicts the claim. `BankLabel.proxyConnectorIds = ["200"]` exists to
+  separate proxying connectors from real ones and is used one line away to derive the
+  institution name. And the em dash is doing triple duty — no consent, a consent that
+  never expires (Open Finance's documented default), and not-yet-known all render
+  identically.
+  **Checked and cleared**: not a parse failure (`date` column, `YYYY-MM-DD` in,
+  date-only formatter out), and `needsReconnect` / the "Expiring" chip both fail closed
+  on null, so nothing pushes the user to act on it.
+  **Not fixed, by decision.** No migration would be needed — `institution_id` plus
+  `proxyConnectorIds` is enough to derive the method line and give the consent slot three
+  states. Recorded so the next blank-field sighting does not start a hunt for a sync bug.
 
 - **v72** — PULL-TO-REFRESH TOLD THE TRUTH ABOUT FAILING (2026-08-19). **No
   migration.** Two `.refreshable` handlers, `SubsScreen`'s missing failure state, one
