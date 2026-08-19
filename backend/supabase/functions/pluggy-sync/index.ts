@@ -20,6 +20,7 @@ import {
   type SupabaseClient,
 } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 import { accountType, lastFour } from '../_shared/accounts.ts'
+import { withdrawalDecision } from '../_shared/sync.ts'
 
 const PLUGGY = 'https://api.pluggy.ai'
 
@@ -382,26 +383,42 @@ async function syncAccount(
   // Scoped to `date >= windowStart` on purpose. Comparing against every stored
   // row would withdraw the entire pre-window history on every run, since it is
   // absent from a 365-day response by construction.
+  //
+  // The rule itself now lives in `_shared/sync.ts` and is tested there. It moved
+  // for one reason: CI runs `deno test _shared/` and nothing else, so as long as
+  // this decision was written inline it was the one rule in the system that could
+  // delete user assertions and could not be gated (v71).
   let withdrawn = 0
-  if (!truncated) {
-    const seen = new Set(mapped.map((m) => m.provider_tx_id))
-    const { data: held, error } = await db
-      .from('transaction')
-      .select('id, provider_tx_id')
-      .eq('account_id', accountRowId)
-      .gte('date', windowStart)
-      .is('withdrawn_at', null)
-    if (error) throw new SyncError(`select held transactions: ${error.message}`)
+  const { data: held, error: hErr } = await db
+    .from('transaction')
+    .select('id, provider_tx_id')
+    .eq('account_id', accountRowId)
+    .gte('date', windowStart)
+    .is('withdrawn_at', null)
+  if (hErr) throw new SyncError(`select held transactions: ${hErr.message}`)
 
-    const gone = (held ?? []).filter((h) => !seen.has(h.provider_tx_id))
-    if (gone.length) {
-      const { error: wErr } = await db
-        .from('transaction')
-        .update({ withdrawn_at: new Date().toISOString() })
-        .in('id', gone.map((g) => g.id))
-      if (wErr) throw new SyncError(`mark withdrawn: ${wErr.message}`)
-      withdrawn = gone.length
-    }
+  const verdict = withdrawalDecision(
+    mapped.map((m) => m.provider_tx_id),
+    held ?? [],
+    truncated,
+  )
+  if (verdict.kind === 'refuse') {
+    // Fails the CONNECTION rather than carrying on quietly. Three things follow
+    // from throwing here and all three are wanted: nothing is withdrawn, because
+    // the throw precedes the write; `last_synced_at` does not advance, so the
+    // freshness label cannot claim a successful read of a response we rejected;
+    // and the per-connection catch upstream puts the reason in `last_sync_error`,
+    // which is the only place a human or the app will see it. Other connections
+    // still sync -- one bad item must not abort the others.
+    throw new SyncError(verdict.reason)
+  }
+  if (verdict.kind === 'withdraw') {
+    const { error: wErr } = await db
+      .from('transaction')
+      .update({ withdrawn_at: new Date().toISOString() })
+      .in('id', verdict.ids)
+    if (wErr) throw new SyncError(`mark withdrawn: ${wErr.message}`)
+    withdrawn = verdict.ids.length
   }
 
   return { fetched: mapped.length, pages, truncated, withdrawn }

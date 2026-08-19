@@ -230,8 +230,8 @@ from the bank's app, and once revoked *"all its data endpoints (accounts,
 transactions, etc) will return empty data"*. **[documented]** Empty. Not `403`, not an
 error status — the shape of a healthy response describing an account with no activity.
 
-Traced through this codebase as it stands today, that is **not** currently safe:
-**[observed]**
+Traced through this codebase **as it stood before v71**, that was not safe. The
+chain below is what the guard now interrupts at step 1: **[observed]**
 
 1. `pluggy-sync`'s withdrawn detection compares the ids Pluggy returned against every
    stored row inside the 365-day window. An empty response means `seen` is empty, so
@@ -250,15 +250,35 @@ cancellations. A later sync would un-withdraw the rows (*"a row present in the f
 by definition not withdrawn"*) and detection would re-anchor them, but the rebuilt
 runs are new rows with new ids, so those decisions do not come back.
 
-**The guard that does not exist yet:** treating "the provider returned nothing for an
-account that had hundreds of rows yesterday" as *suspicious* rather than as *truth*.
-This is the same reasoning v61 applied to the applier's prune — an empty desired state
-must not wipe a history — except the engine's `delete_run_ids` path bypasses that
-safety, because emptiness there arrives as a legitimate-looking absence of evidence.
-A minimum-viable version is a per-account floor: if the response is empty and stored
-non-withdrawn rows exist in the window, record a sync error and skip withdrawal.
-**[speculative]** — the failure has not been reproduced against a real revoked
-consent, and the numbers a floor should use are unmeasured.
+**The guard, built in v71:** treating "the provider returned nothing for an account
+that had rows yesterday" as *suspicious* rather than as *truth*. Same reasoning v61
+applied to the applier's prune — an empty desired state must not wipe a history —
+except `delete_run_ids` bypasses that safety, because emptiness arrives there as a
+legitimate-looking absence of evidence, which is why the guard sits up in the raw
+chain instead.
+
+`withdrawalDecision` in `_shared/sync.ts` answers `withdraw` / `noop` / `refuse` over
+(feed ids, held rows, truncated). An empty feed with held rows in the window is
+**refused**: nothing is withdrawn, the connection fails with the count in
+`last_sync_error`, and `last_synced_at` does not advance, so the freshness label cannot
+claim a successful read of a response we rejected. An empty feed with **nothing** held
+stays an ordinary no-op — a new account, or a quiet window — because conflating those
+two would make first sync on a fresh connection report a failure. Truncation is checked
+first, since a truncated feed can also arrive empty and then incompleteness is the
+honest explanation.
+
+The rule lives in `_shared/` rather than inline for one reason: CI runs `deno test
+backend/supabase/functions/_shared/` and nothing else, so written inline this was the
+one rule in the system that could destroy user assertions and could not be gated. Seven
+tests, and the old inline rule was extracted verbatim first to confirm they falsify it.
+
+**Still [speculative]** in two ways worth naming. The failure has never been reproduced
+against a real revoked consent, and cannot be on the current plan — MeuPluggy is not an
+Open Finance connector — so the guard is written from documented behaviour plus the
+traced code path, which is precisely why it refuses rather than trying to repair. And
+only a *fully* empty feed is refused: one row where two hundred were held is trusted,
+because no threshold separates a partial revocation from a quiet month without inventing
+a number. A measured floor would need numbers this project does not have.
 
 ### 2. Regulated rate limits, and why the duplicate check matters more than it looks
 
