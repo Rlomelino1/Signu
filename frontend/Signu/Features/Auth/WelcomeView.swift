@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// Welcome carousel (16a — mockups 21a / 21a-second / 21a-third).
-/// Upper zone = wordmark + auto-advancing carousel; lower zone = anchored
-/// CTA stack that never moves. Reads no user state.
 struct WelcomeView: View {
     var onCreateAccount: () -> Void = {}
     var onGoogle: () -> Void = {}
@@ -17,8 +14,6 @@ struct WelcomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Shared with SplashView (and mirrored by the launch storyboard)
-            // so restoring → welcome doesn't move the mark.
             SignuWordmark()
                 .padding(.top, SignuWordmark.topPadding)
 
@@ -81,12 +76,9 @@ struct WelcomeView: View {
     }
 }
 
-/// One carousel slide: swappable mock content + headline + body.
 struct WelcomeSlide {
     let view: AnyView
 
-    /// `@MainActor` because it holds `AnyView`s: constructing SwiftUI views is
-    /// main-actor work, and this is only ever read from the carousel above.
     @MainActor
     static let all: [WelcomeSlide] = [
         WelcomeSlide(view: AnyView(SlideList())),
@@ -95,9 +87,6 @@ struct WelcomeSlide {
     ]
 }
 
-/// Shared slide layout: content top-anchored at a shared position with a
-/// fixed gap reserved above the page-dot indicator, so all three slides
-/// (different heights) keep a consistent gap instead of sagging into the dots.
 private struct SlideScaffold<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
@@ -107,11 +96,10 @@ private struct SlideScaffold<Content: View>: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.top, 6)
-        .padding(.bottom, 24)   // fixed gap above the dots
+        .padding(.bottom, 24)
     }
 }
 
-// MARK: - Slide 1: the all-in-one-place promise
 
 private struct SlideList: View {
     var body: some View {
@@ -144,7 +132,6 @@ private struct SlideList: View {
     }
 }
 
-// MARK: - Slide 2: price-hike narration
 
 private struct SlidePriceHike: View {
     var body: some View {
@@ -174,11 +161,8 @@ private struct SlidePriceHike: View {
     }
 }
 
-// MARK: - Slide 3: found-from-bank (teaches the tilde)
 
 private struct SlideFound: View {
-    // Descriptor is one non-breaking unit — it wraps whole (or drops to a new
-    // line) at the "·", never mid-phrase.
     private let descriptor = "·\u{00A0}spotted\u{00A0}in\u{00A0}your\u{00A0}bank\u{00A0}activity"
 
     var body: some View {

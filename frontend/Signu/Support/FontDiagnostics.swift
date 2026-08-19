@@ -1,9 +1,6 @@
 #if DEBUG
 import UIKit
 
-/// Launch-arg diagnostics (`--font-check`): verifies the bundled Inter faces
-/// registered, and measures the hero amount row against real font metrics to
-/// find the widest hero-XL size that never truncates.
 enum FontDiagnostics {
     static func runIfRequested() {
         guard CommandLine.arguments.contains("--font-check") else { return }
@@ -17,8 +14,6 @@ enum FontDiagnostics {
             lines.append("FONTCHECK \(name) \(UIFont(name: name, size: 12) != nil ? "OK" : "MISSING")")
         }
 
-        // Hero amount row budget: screen - screen padding (2×20) - card padding (2×24),
-        // minus unit text, spacings, and the widest date-slot column.
         let worstAmount = "R$\u{00A0}449,90"
         let worstValue = "Jul 18 · in 5 days"
         let worstLabel = "PAID THROUGH"
@@ -42,7 +37,6 @@ enum FontDiagnostics {
             lines.append("FONTCHECK screen \(screen): amount@44=\(Int(at44))pt available=\(Int(available))pt maxSafe=\(safe)pt")
         }
 
-        // Header row: avatar + spacing + subtitle + spacer + chip vs card inner.
         let states: [(subtitle: String, chip: String)] = [
             ("Monthly · Visa – 4821", "Active"),
             ("Monthly · Master – 7730", "Overdue"),

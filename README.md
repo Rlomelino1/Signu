@@ -1,328 +1,705 @@
 # Signu
 
 A subscription tracker for Brazilian bank and card data. Charges are read from
-Pluggy, interpreted by a pure detection engine, and rendered by a SwiftUI app.
+Pluggy, interpreted by a pure detection engine, and rendered by a SwiftUI iOS app.
 
-- **The specification is `docs/subscription-tracker-data-model.md`** — a living
-  document with a changelog. It is the source of truth for schema, detection
-  doctrine, screen contracts and every decision's reasoning. This README is
-  deliberately thin by comparison.
-- `frontend/` — the iOS app (SwiftUI, Swift 6 language mode).
-- `backend/supabase/` — migrations, pgTAP tests, and ten Edge Functions.
-- `.github/workflows/ci.yml` — three required checks: `iOS build`,
-  `Detection tests`, `Schema applies`.
+**The architecture in one sentence:** a **raw chain** that only ever mirrors the
+provider (connection → bank_account → transaction) and an **interpreted chain** that
+only ever holds our conclusions (subscription → subscription_run → charge) meet at
+exactly one nullable foreign key, which is what makes detection fully replayable and
+what lets a bank link be deleted without losing history.
+
+This README is the only prose document besides the specification, and it carries the
+invariants and "why not the obvious thing" reasoning that used to live in code comments.
 
 ---
 
-# How fresh the data is, and why a charge can be missing
+## 1. What Signu is
 
-**The short version: a charge on your card today is normally visible in Signu
-tomorrow, and the delay is almost never Signu's.** Three schedules are stacked,
-only one of which this project controls.
+The app answers one question — *what am I paying for every month, and when does the
+next charge land?* — from bank and card transaction data rather than from receipts or
+manual entry. Nothing is entered by hand: a charge arrives in the raw chain, the engine
+decides whether a series of charges is a subscription, and the user confirms or dismisses
+only the ones the engine is not sure about. The name is from *assinatura* — subscriptions
+are things you signed.
 
-This section exists because the question "the charge is on my card, why isn't it
-in the app?" has a long answer, and every attempt to shorten it produces a wrong
-diagnosis. Statements below are marked **[observed]** (measured against live
-production data), **[documented]** (quoted from Pluggy's docs, linked at the
-bottom), or **[speculative]** (reasoning we could not verify — flagged rather
-than smoothed over).
+Two properties shape every design decision in the repo:
 
-## The three layers
+- **The engine is pure and replayable.** Rules are functions over rows; `today` is a
+  parameter, never a clock read. Given the same raw data, the same user assertions and
+  the same date, a full replay and an incremental sync must converge on identical
+  state.
+- **The app never says more than the data supports.** A failed read is never rendered
+  as an empty account, a predicted amount is always marked as predicted, and a number
+  is never cropped.
 
-| # | Hop | Cadence | Who controls it |
-|---|-----|---------|-----------------|
-| 1 | bank → aggregator | unobservable to us | the bank / the aggregator |
-| 2 | aggregator → Pluggy item | ~24h per item | Pluggy (plan-level) |
-| 3 | Pluggy → Signu | daily, 15:30 UTC | us |
+---
 
-**Layer 3 is ours and is the least interesting.** `pluggy-sync` runs at 15:30 UTC
-from `pg_cron`, re-scans 365 days per account, and chains directly into
-`run-detection`. Every call it makes **to Pluggy's data endpoints is a GET** —
-`/items/{id}`, `/accounts`, `/v2/transactions` — and it never issues
-`PATCH /items/{id}`. (It does POST twice: `/auth` to mint an API key, and its own
-`run-detection` hand-off.) So it reads whatever Pluggy already holds and cannot
-make Pluggy look again. The transactions request sends
-`dateFrom` with **no upper bound**, so "today" is never excluded by the query
-itself. **[observed]**
-
-**Layer 2 is Pluggy's auto-sync.** Each item carries `lastUpdatedAt` and
-`nextAutoSyncAt`, and the gap between them has been exactly **24 hours**, anchored
-to the previous update rather than to a fixed wall-clock slot — so the anchor
-drifts each time an item updates. Two items on the same account sit on unrelated
-clocks (15:01 UTC and 22:54 UTC in one recorded case). **[observed]**
-Pluggy documents this as *"We provide automatic Item updates, for Production
-applications, every 24/12/8 hours, based on your plan."* — the 24h we observe is
-consistent with the slowest tier; which tier this project is on is not visible
-through the API. **[documented]**
-Our 15:30 UTC cron is deliberately scheduled **after** the observed 15:01 UTC
-auto-sync, so a normal day needs no coordination.
-
-**Layer 1 is the bank, and it is where the time actually goes.** Nothing in the
-API exposes it, and it cannot be bypassed from here.
-
-## The worked example that motivated this section
-
-2026-08-18. A subscription renewal (R$ 35,51) hit the card at **07:41 local
-(10:41 UTC)**. Signu did not show it. The chain, measured: **[observed]**
-
-| step | evidence | verdict |
-|------|----------|---------|
-| Pluggy auto-synced *after* the charge | `lastUpdatedAt 15:01:23Z`, `executionStatus SUCCESS` | ran, and succeeded |
-| Pluggy held it? | **0 transactions** dated ≥ 2026-08-17 across all four accounts | **no** |
-| Signu missed rows Pluggy had? | 4 of 4 rows since Aug 13 present locally | **no** |
-| detection ignored it? | nothing to ignore — the row did not exist | **no** |
-
-So Pluggy looked **4h20m after the charge landed**, succeeded, and still had
-nothing. The charge had not reached Pluggy from upstream. **[observed]**
-Why not is not observable through the API — the bank may not publish a card
-authorisation immediately, or the aggregator in front of it may not have
-refreshed. **[speculative]**
-
-**Measured end-to-end latency** (charge date → the row first existing locally,
-production, charges since 2026-08-01, n=9): **median +1 day**, min +0, max +8.
-The closest comparison to the case above — same merchant, same card — took
-**+2 days**. **[observed]**
-
-**Side effect worth knowing.** A run goes `overdue` at its expected date + 3 days
-and `ended` 10 days after that. So if a renewal takes more than four days to
-surface, the app shows the subscription as overdue while the money has already
-left the card. It self-heals on the next pass. That is upstream latency made
-visible, not a defect to chase.
-
-## This behaviour is specific to a MeuPluggy connection
-
-The connection in use is **connector 200, "MeuPluggy"**, and its metadata says
-plainly what it is: **[observed]**
+## 2. Repo layout
 
 ```
-id=200  MeuPluggy  type=PERSONAL_BANK  country=BR  isOpenFinance=false  oauth=true  hasMFA=false
+backend/supabase/
+  migrations/        19 versioned SQL files, forward-only, applied by `db push`
+  functions/         nine Edge Functions plus _shared/
+    _shared/         the pure, tested core — the ONLY code CI runs tests for
+  templates/         the two auth emails (HTML, no comments — see §12)
+  tests/             pgTAP suites
+  config.toml        local CLI config; NOT pushed to production (see §13)
+frontend/
+  Signu/             the iOS app (SwiftUI, Swift 6 language mode):
+                     Data/ (providers, row decoding, session, BankLabel),
+                     DesignSystem/, Features/ (one directory per screen area)
+  SignuTests/        unit tests (Swift Testing) · SignuUITests/ UI tests (XCTest)
+docs/
+  subscription-tracker-data-model.md   the specification — source of truth
+  Screen-mockups/                      design references for the screen contracts
+.github/workflows/ci.yml               three required checks + deploy-on-green
 ```
 
-`isOpenFinance: false` is the important field. MeuPluggy is Pluggy's own
-consumer aggregation product: the user logs into `meu.pluggy.ai`, connects banks
-*there*, and Signu's item then mirrors **that account** rather than any single
-bank. Connector 200 therefore names no bank at all, which is why `BankLabel`
-derives the institution from the account's own name (v43).
+**`_shared/` is load-bearing, not organisational.** CI runs
+`deno test backend/supabase/functions/_shared/` and nothing else, so a rule written inside
+a function's `index.ts` cannot be gated by any check. Every decision that matters —
+detection, reminder selection, the four user-asserted writes, withdrawal — lives in
+`_shared/` as a pure function for that reason, and the Edge Functions above them are
+load-decide-write shells.
 
-**Consequence:** layer 1 is itself two hops — bank → `meu.pluggy.ai` → Pluggy
-item — and the middle hop has its own refresh cadence that the Pluggy API does
-not expose. **[speculative]** (The architecture is documented; the internal
-cadence is inferred, and it is the most likely explanation for a successful
-Pluggy sync returning nothing 4h20m after a charge.)
+The modules: `detection.ts` (the engine), `actions.ts` (the four writes the client is not
+granted), `sync.ts` (the withdrawal decision), `reminders.ts`, `accounts.ts`, `money.ts`,
+`dates.ts`, `auth.ts`, `pluggy.ts`. Note that **`deno check` names files individually in
+CI while `deno test` is directory-scoped** — a new module is type-checked only once added
+to that list, but picked up as a test suite for free.
 
-**The one lever this gives the user:** refreshing the bank connection *inside the
-`meu.pluggy.ai` dashboard* acts on the layer that is otherwise unreachable. No
-API call from this project can substitute for it. **[speculative]** — consistent
-with the architecture, never tested here.
+---
 
-## What a direct bank connection would look like
-
-Pluggy also offers regulated connectors for the same institutions: **[observed]**
+## 3. The two chains, and the one place they meet
 
 ```
-id=612  Nubank   type=PERSONAL_BANK  isOpenFinance=true  oauth=true  hasMFA=false
-id=626  C6 Bank  type=PERSONAL_BANK  isOpenFinance=true  oauth=true  hasMFA=false
+RAW CHAIN  (mirrors the provider; we never invent a row)
+  connection ──< bank_account ──< transaction
+                                      │
+                          transaction_id (nullable, ON DELETE SET NULL)
+                                      │
+INTERPRETED CHAIN  (our conclusions; recomputed freely)
+  subscription ──< subscription_run ──< charge
 ```
 
-Switching would remove the aggregator hop. It would **not** obviously make the
-app fresher, and might make card data worse:
+`charge.transaction_id` is **the bridge — the only place the two chains meet**, and it
+is nullable on purpose. `ON DELETE SET NULL` is what makes *delete the bank link,
+preserve the history* work: the charge survives the transaction's deletion,
+self-described by columns duplicated onto it (date, amount, currency,
+`amount_in_account_currency`, `card_label`).
 
-- **Bank-side latency remains.** *"New transactions in Open Finance (regulated)
-  connectors can take up to 24 hours to be available for consultation."*
-  **[documented]** — surfaced via Pluggy's docs search; we could not reproduce the
-  sentence on the page we fetched, so treat the exact figure as unconfirmed while
-  the direction (bank-side delay exists regardless) is well supported.
-- **Open credit-card bills may be worse.** Pluggy's FAQ states institutions
-  *"provide new purchases on a daily"* basis but that open bills are
-  *"unavailable until bills are closed or overdue"*. **[documented]** If that
-  applies to the accounts here, current-cycle purchases could become **less**
-  visible than today — the MeuPluggy path currently delivers `PENDING`
-  open-cycle rows, which is exactly what a subscription tracker needs.
-  **[speculative]** — we have not tested a regulated connector on this data.
-- **Per-sync lookback differs.** *"Open Finance (regulated) connectors: 7
-  calendar days including today"* versus *"Direct connectors: 4 to 5 calendar
-  days from the last sync."* **[documented]** Signu re-scans 365 days every run,
-  so this changes nothing for us — noted because it would matter to an
-  incremental design.
-- **Consent replaces credentials**, and revocation is silent — see
-  [Two failure shapes](#two-open-finance-failure-shapes-worth-designing-against).
-- **Regulated rate limits appear**, and they interact with the duplicate check —
-  same section.
+**The frozen region.** A charge whose `transaction_id` is NULL has no raw backing, so it
+is evidence rather than a derivation: never recomputed, never deleted, never re-parented.
+Run identity is resolved by overlap on *live* transaction ids, excluding frozen charges
+because they cannot be identity evidence. A run holding frozen charges is never deleted
+even when nothing derives it any more — its basis is those charges.
 
-**Net:** a direct connector is a plausible improvement to *attribution* (a real
-bank name, no aggregator hop) and an unproven one to *freshness*. It should be
-tested on a throwaway item before anything is migrated. **[speculative]**
+**Why this makes replay safe.** The engine reads user assertions and never writes them;
+it recomputes everything else. Recompute is therefore *reconcile*, not *rebuild*:
 
-## Forcing an update, and what each bypass buys
+| Value | Status |
+|---|---|
+| run status where `detected_by = 'R1'` | derived — recomputed freely |
+| run status where `detected_by IN ('R3','R4')` and stored status ≠ `possible` | asserted — the user confirmed a suggestion |
+| `run.billing_interval` for a confirmed R4 | asserted — the confirm flow's authoritative write |
+| `cancelled_date`, and `status = cancelled` | asserted |
+| everything else | derived |
 
-| layer | mechanism | what it actually buys |
-|-------|-----------|----------------------|
-| 3 (ours) | invoke `pluggy-sync` with `x-sync-secret` | nothing if Pluggy has no new data |
-| 2 (Pluggy) | `PATCH /items/{id}` | a fresh pull **from the aggregator**, once the aggregator has the data |
-| 1 (bank) | refresh inside `meu.pluggy.ai` | the only lever on the layer that usually blocks |
+`transaction.withdrawn_at` is a soft delete: a row Pluggy stops returning is marked,
+never removed, because raw rows are the evidence the interpreted chain rests on. A row
+that reappears under the same `provider_tx_id` is un-withdrawn by the next scan.
+Detection reads only `withdrawn_at is null`.
 
-Constraints on the layer-2 bypass, before reaching for it: **[documented]**
+**Money** is compared exactly and always with its currency — never with a float epsilon.
+`abs(6.46 - 6.45)` is `0.009999999999999787`, so an epsilon test makes amounts a cent
+apart compare equal, which produced a false anchor on real data. Equality means currency
+*and* cents, because one real merchant bills in two currencies. Comparison is centralised
+in `money.ts`. A foreign charge carries both `amount` and `amount_in_account_currency`, so
+`coalesce(second, first)` is always in the account's currency — that is what makes a total
+a plain sum.
 
-- Rate limited — *"The updates could not be performed more than once per hour"*
-  for API-triggered updates on newer client ids.
-- Pluggy steers integrators to the **widget** instead (a connect token carrying
-  `itemId` plus `updateItem`), and says *"In most cases, you can simply start the
-  Item Update process without any problem or further input from the user"* —
-  with `INVALID_CREDENTIALS` items and MFA prompts as the exceptions that do need
-  the user. An API `PATCH` on an item that then wants input can leave it in a
-  state the app renders as "Reconnect". **[speculative]** — the exact resulting
-  status was not tested here.
+---
 
-**Webhooks are not the fix, and are deliberately not built.** They fire when
-*Pluggy* updates an item — and in the case above Pluggy did update, with nothing
-new, so a webhook would have delivered an empty event on time. The spec's other
-reason still stands: Pluggy offers no webhook signature, so authenticating a
-public endpoint would rest on a bearer header that does not bind to the payload
-plus a hard-coded IP. See "Sync shape: poll-only, no webhook endpoint" in the
-spec.
+## 4. Detection rules R1–R5
 
-## What the "Updated …" label actually measures
+**Doctrine: strict to create, generous to extend, re-runs repair.** Date granularity only;
+all five rules are live.
 
-Fixed in **v65**; recorded here because the old behaviour is the kind of thing that
-gets reintroduced by someone reaching for the nearest timestamp.
+| Rule | Mode | What it does |
+|---|---|---|
+| **R1 — anchor** | auto | Two charges, same merchant and the **same money**, one cadence apart (monthly = 28–33 days, ±3 day window). Continuation is amount-flexible, so a price rise never splits a run. |
+| **R2 — backfill** | auto | On a confirmed run, claim an unclaimed same-merchant charge about one interval before the start, any amount, and correct `start_date`. |
+| **R3 — cadence beats amount** | suggest-only | 3+ date-aligned charges with varying amounts. The user confirms or dismisses. |
+| **R4 — catalog fast path** | suggest-only | One charge from a known subscription-only merchant ⇒ a `possible` run immediately. |
+| **R5 — trailing charge on cancelled runs** | auto | A cancelled run may claim **at most one** charge dated after its `cancelled_date`. |
 
-`connection.last_synced_at` is our own clock — `new Date()` at the moment a sync
-finishes. Rendering it as "Updated 3h ago" reads as a claim about the data and is in
-fact a claim about our polling, and the two diverge exactly when it matters: on a day
-Pluggy's own auto-sync fails, the old label would keep saying "Updated 5m ago" about
-data frozen a day earlier. A freshness label that cannot express staleness argues
-against the user's own suspicion that something is behind.
+**R2 is not an event.** Doctrine says it fires "on confirmation", but under recompute
+the confirmation state is preserved, so the precondition still holds, so the backfill
+re-applies and reproduces the same `start_date`. Nothing needs to remember that R2 ran.
 
-So the sync now also stores Pluggy's `item.lastUpdatedAt` as
-`connection.provider_updated_at` (Migration #17) — it was already fetching
-`GET /items/{id}` and discarding the field — and the app reports the **older of the
-two**:
+**R4 cannot state an interval honestly** — it creates a run from a single charge, so
+cadence cannot be measured. The engine writes a provisional `monthly` (keeping the
+column non-null and the prediction renderable) and the confirm flow asks the user
+monthly-or-annual, which is the authoritative write. **R3 confirmations never ask:**
+3+ aligned charges already *measure* the cadence, and asking would be the system
+pretending not to know something it proved.
+
+**R5, in full.** Claiming the trailing charge recomputes `end_date` (paid-through
+extends one interval) and the timeline renders it as *"Charged · after cancellation"*.
+If a **second** matching charge lands one cadence later, the trailing charge is
+**un-claimed** — removed from the cancelled run, the original `end_date` restored — and
+both charges anchor a **new** run through standard R1: a resubscription, not a
+resurrection. Three decisions inside it are load-bearing:
+
+- **The cap is measured from `cancelled_date`, never from the run's last claimed
+  charge.** `cancelled_date` is an assertion; the last claimed charge is derived and
+  moves the instant a trailing charge is claimed, so a cap anchored on it ratchets
+  forward one charge per sync — the unlimited-swallowing bug wearing a limit.
+- **Paid-through is derived every pass, never frozen.** It is `last claimed charge +
+  one interval`, the same expression the cancel action writes, which is what lets the
+  un-claim restore the original date without storing it. Freezing the stored value made
+  paid-through a function of sync history rather than of the data.
+- **The un-claim requires a real anchor.** "Both charges anchor a new run via standard
+  R1" is a precondition: R1 needs the *same* money, so two post-cancellation charges at
+  different amounts anchor nothing. Then the cap decides instead and the run keeps its
+  one trailing charge, rather than un-claiming into charges that belong to no run.
+
+R5 is **the only place a charge ever moves between runs**, which is why run identity is
+matched by descending overlap: the cancelled run overlaps itself on many charges while
+the new run overlaps it on one, so the cancelled run keeps its id.
+
+### The candidate filter, and why each exclusion exists
+
+Each came from a dry run against real data, and each is a false positive R1 or R3 would
+otherwise have produced:
+
+1. **Card-bill payments, card side** — a `CREDIT` on the card account.
+2. **Fees** — excluded by the *value* of `fee_type_additional_info`, never its presence.
+   The field is populated on nearly every card row with `'NA'` meaning "no fee"; testing
+   `IS NOT NULL` excluded 146 of 258 rows and detected nothing.
+3. **Instalments** — `installment_number` or `total_installments` disqualifies a row from
+   anchoring *and* from continuing a run. A 12× purchase is identical in amount and one
+   month apart: R1's exact trigger.
+4. **Internal transfers** — paying the card bill from a connected checking account puts a
+   `DEBIT` there matching a `CREDIT` on the card. The strongest false positive in real
+   data: twelve consecutive months, same day, gaps 28–33, amounts spanning two orders of
+   magnitude — R3's trigger executed perfectly, and confirming it would have tracked the
+   user's entire card spend as one subscription. It needs *both* accounts connected.
+
+**`merchant_key` is derived from CNPJ, not the descriptor.** One real merchant bills
+under three different descriptors carrying the same CNPJ, so descriptor-keyed R1 saw no
+pair and detected nothing. Across one card, 15 descriptors collapse to 5 CNPJs and no
+descriptor ever maps to more than one CNPJ. Aggregator CNPJs (payment processors) are
+the exception and must not unify unrelated merchants, or two unrelated purchases anchor
+a phantom run.
+
+**`dedupe_key` ordinals are assigned by ascending first-charge date**, never by
+discovery order. Discovery-order numbering would let a recompute renumber runs and
+silently re-attach a user's nickname, category and reminders to the wrong subscription.
+
+**Predictions are marked.** `detected_by` powers expected-exact (R1) versus
+expected-approximate (R3/R4); the UI renders approximate amounts with a tilde. One marker,
+one meaning, and markers never stack.
+
+---
+
+## 5. The write boundary
+
+The client may write **eight columns across three tables** and nothing else. This is a
+Postgres permission boundary, not a convention — the app cannot violate it no matter
+what the Swift code asks for.
+
+```
+revoke insert, update, delete  from anon, authenticated  -- on all seven tables
+grant  select                  to authenticated          -- on all seven tables
+
+grant update (display_name, reminder_channels) on profiles     to authenticated
+grant update (avatar_path)                     on profiles     to authenticated
+grant update (nickname)                        on bank_account to authenticated
+grant update (nickname, category, ignored, remind_before_days)
+                                               on subscription to authenticated
+```
+
+Everything else — every raw-chain row, every run, every charge — is written only by the
+engine through `service_role`. **`subscription_run` has no client UPDATE grant at
+all**, which is why confirming a suggestion and marking a run cancelled must be Edge
+Functions rather than client writes, and why the four server-side writes exist:
+confirm-suggestion, cancel-subscription, remove-connection, delete-account.
+
+The rule behind the grant list: **sync-owned and user-owned columns never overlap.**
+`institution_name` is sync-owned and never overwritten by the client; `nickname` is
+user-owned and never touched by sync.
+
+**A decision is a value, not a write.** Each of those four operations is a pure
+function in `_shared/actions.ts` returning `write` / `noop` / `refuse`, so the
+interesting cases can be tested as data rather than as mocked round trips. `noop` is
+deliberately distinct from `refuse`: a second *Track it* tap after a dropped response is
+a success from where the user sits, and answering 409 would make a retry look like a
+failure.
+
+`identification` (`auto` / `user_confirmed` / `user_renamed`) marks how a subscription got
+its name; `user_renamed` freezes `service_name` against the engine's re-derivation.
+
+---
+
+## 6. Sync contract, freshness, and the shared secret
+
+**Schedule.** `pluggy-sync` runs daily at **15:30 UTC** from `pg_cron`, re-scans 365 days
+per account, and **chains directly into `run-detection`** on success — deliberately, since
+an independently scheduled detection run can wake mid-sync and interpret a half-written
+raw chain. Both stay independently invokable, which is what replay needs.
+`send-reminders` runs at **16:30 UTC**.
+
+**Every call to Pluggy's data endpoints is a GET** — `/items/{id}`, `/accounts`,
+`/v2/transactions` — and the sync never issues `PATCH /items/{id}`. So it reads
+whatever Pluggy already holds and cannot make Pluggy look again. The transactions
+request sends `dateFrom` with no upper bound, so "today" is never excluded by the query.
+
+**Three schedules are stacked and only the last is ours:** bank → aggregator (not
+observable to us), aggregator → provider item (~24h, plan-level), provider → Signu
+(daily, ours). So "the charge is on my card, why isn't it in the app?" is almost never
+layer 3. Measured end-to-end latency from charge date to the row existing locally:
+**median +1 day, max +8**. A charge taking more than four days to surface shows the
+subscription as overdue while the money has already left the card — upstream latency made
+visible, not a defect, and it self-heals next pass.
+
+**Webhooks are deliberately not built.** They fire when *Pluggy* updates an item, and an
+item can update with nothing new — so a webhook would deliver an empty event on time.
+There is also no webhook signature, so authenticating a public endpoint would rest on a
+bearer header that does not bind to the payload plus a hard-coded IP.
+
+### What "Updated 3h ago" actually measures
+
+`connection.last_synced_at` is **our** clock: `new Date()` when a sync finishes.
+Rendering it as "Updated 3h ago" reads as a claim about the *data* while being a claim
+about our *polling*, and the two diverge exactly when it matters — on a day the
+provider's own sync fails, that label keeps saying "Updated 5m ago" about data frozen a
+day earlier. A freshness label that cannot express staleness argues against the user's
+own suspicion that something is behind.
+
+So the sync also stores the provider's `lastUpdatedAt` as
+`connection.provider_updated_at`, and the app reports the **older of the two**:
 
 ```
 dataFreshAsOf = min(provider_updated_at, last_synced_at)
 ```
 
-Both halves are load-bearing. The provider's stamp bounds it because our copy shows
-the provider's state as of our read; our own stamp bounds it because a stalled cron
-means we do not *have* the provider's newer state. Null `provider_updated_at` — every
-row until its next sync, and any response omitting the field — falls back to
+Both halves are load-bearing: the provider's stamp bounds freshness because our copy
+shows its state as of our read, and ours bounds it because a stalled cron means we do not
+*have* the provider's newer state. A null `provider_updated_at` falls back to
 `last_synced_at` rather than inventing a freshness.
 
-Across several banks the label reports the **oldest** connection's freshness, not the
-newest: one line speaks for the whole screen, and `max()` would let a freshly added
-second bank paper over a first one that stopped updating days ago. A connection that
-has never synced contributes nothing — it has no data on screen to be stale about,
-and "Setting up" (v55) covers it.
+Across several banks the label reports the **oldest** connection — `max()` would let a
+freshly added second bank paper over a first one that stopped updating days ago. A
+connection that has never synced contributes nothing, and "Setting up" covers it.
+Settings deliberately still says "Synced …" from `last_synced_at`, because there the
+question really is *when did Signu last look* — what you want when diagnosing a stalled
+cron rather than stale data.
 
-Settings deliberately keeps saying "Synced …" from `last_synced_at`, because there the
-question really is *when did Signu last look* — the number you want when diagnosing a
-stalled cron rather than stale data.
+### An empty provider response is refused, not obeyed
 
-## Two Open Finance failure shapes worth designing against
+A revoked Open Finance consent returns **empty data, not an error**: HTTP 200, a
+well-formed body, zero transactions — indistinguishable in shape from an account with
+no activity. Read literally, every in-window row becomes "gone", so every one is marked
+withdrawn; detection then finds no candidates and `delete_run_ids` removes every
+non-frozen run, taking **run-level assertions** with it (confirmed suggestions,
+cancellations) while subscription-level ones survive. Re-running does not repair that:
+*re-runs repair* is a promise about derived state, and an assertion is not derived.
 
-Neither applies to the current MeuPluggy connection. Both would arrive with a direct
-regulated connector, and the first one is dangerous in a way that is easy to miss.
+`withdrawalDecision` in `_shared/sync.ts` answers `withdraw` / `noop` / `refuse`:
 
-### 1. A revoked consent returns empty data, not an error
+- **Truncation is checked first** — a truncated feed can arrive empty too, and then
+  incompleteness is the honest explanation rather than a revocation.
+- **Empty feed + held rows in the window ⇒ refused.** Nothing is withdrawn, the
+  connection fails with the held-row count in `last_sync_error`, and `last_synced_at`
+  does not advance, so the freshness label cannot claim a read we rejected. Other
+  connections still sync — one bad item must not abort the others.
+- **Empty feed + nothing held ⇒ ordinary no-op** (a new account, a quiet window), or
+  first sync on a fresh connection would report a failure.
+- **Only a *fully* empty feed is refused.** One row where two hundred were held is
+  trusted: no threshold separates a partial revocation from a quiet month without
+  inventing a number.
 
-Open Finance consents *"have no expiration"* by default but the user can revoke them
-from the bank's app, and once revoked *"all its data endpoints (accounts,
-transactions, etc) will return empty data"*. **[documented]** Empty. Not `403`, not an
-error status — the shape of a healthy response describing an account with no activity.
+### The shared secret must be rotated atomically
 
-Traced through this codebase **as it stood before v71**, that was not safe. The
-chain below is what the guard now interrupts at step 1: **[observed]**
+`pluggy-sync`, `run-detection` and `send-reminders` are called by machines, not users,
+so they gate on a shared secret in the `x-sync-secret` header. That secret exists in
+**two places that must change together**:
 
-1. `pluggy-sync`'s withdrawn detection compares the ids Pluggy returned against every
-   stored row inside the 365-day window. An empty response means `seen` is empty, so
-   **every** row in the window is marked `withdrawn_at`. Nothing is hard-deleted —
-   deliberately, since raw rows are the evidence a replayable chain rests on.
-2. Detection filters `withdrawn_at is null`, so it now sees **zero** candidates.
-3. With no candidates there are no proto-runs, so `keptRunIds` is empty and
-   `delete_run_ids` becomes *every stored run that is not frozen* — and the applier
-   deletes them, charges cascading.
+| Copy | Where | Read by |
+|---|---|---|
+| Edge Function secret | `SYNC_SECRET` in the functions' environment | the functions, to compare |
+| Vault secret | `signu_sync_secret` in `vault.secrets` | the `pg_cron` trigger functions, to set the header |
 
-What survives: `subscription` rows and everything the user asserted on them —
-nickname, category, `remind_before_days`, `ignored` — plus any run holding a frozen
-charge (`transaction_id is null`), which is protected by design (v24). What is lost:
-**run-level assertions**, meaning confirmations of R3/R4 suggestions and user-marked
-cancellations. A later sync would un-withdraw the rows (*"a row present in the feed is
-by definition not withdrawn"*) and detection would re-anchor them, but the rebuilt
-runs are new rows with new ids, so those decisions do not come back.
+**A mismatch fails silently and there is no error signal anywhere.** This is not
+hypothetical: the Vault copy once held a four-character paste artefact, so every
+scheduled POST was rejected at the gate with HTTP 403 for three days while cron
+reported *"succeeded"* — because `net.http_post` returns the moment the request is
+*queued*, so `cron.job_run_details` describes the queueing and reads identically for a
+200, a 403 or a DNS failure. The HTTP status lands in `net._http_response` and nowhere
+else, and pg_net prunes that within about a day. The app's own "Updated 2d ago" label
+was the only thing that ever said otherwise.
 
-**The guard, built in v71:** treating "the provider returned nothing for an account
-that had rows yesterday" as *suspicious* rather than as *truth*. Same reasoning v61
-applied to the applier's prune — an empty desired state must not wipe a history —
-except `delete_run_ids` bypasses that safety, because emptiness arrives there as a
-legitimate-looking absence of evidence, which is why the guard sits up in the raw
-chain instead.
+Two guards came out of it, and neither closes the whole hole:
 
-`withdrawalDecision` in `_shared/sync.ts` answers `withdraw` / `noop` / `refuse` over
-(feed ids, held rows, truncated). An empty feed with held rows in the window is
-**refused**: nothing is withdrawn, the connection fails with the count in
-`last_sync_error`, and `last_synced_at` does not advance, so the freshness label cannot
-claim a successful read of a response we rejected. An empty feed with **nothing** held
-stays an ordinary no-op — a new account, or a quiet window — because conflating those
-two would make first sync on a fresh connection report a failure. Truncation is checked
-first, since a truncated feed can also arrive empty and then incompleteness is the
-honest explanation.
+- The trigger functions **refuse to fire below a 32-character floor** — a floor, not a
+  format assertion, chosen low enough that a future rotation to a shorter secret is not
+  broken by it. It makes a *mangled paste* fail as a FAILED cron run on the first
+  firing. It cannot catch a wrong-but-plausible value.
+- `supabase secrets list` prints a **sha256 digest** of each deployed secret, so a
+  local value can be confirmed against production by hashing it, never by printing it.
+  That read-back is what covers the wrong-but-plausible case.
 
-The rule lives in `_shared/` rather than inline for one reason: CI runs `deno test
-backend/supabase/functions/_shared/` and nothing else, so written inline this was the
-one rule in the system that could destroy user assertions and could not be gated. Seven
-tests, and the old inline rule was extracted verbatim first to confirm they falsify it.
+The cron HTTP timeout is **150 s**, matched to the platform's ceiling rather than to a
+measurement: an Edge Function request is cut off around 150 s, so a POST outstanding then
+means the function is gone and "timeout" is honest. The default 5 s was shorter than the
+work — a sync chains detection and takes ~7 s — so it overwrote every real status with a
+timeout. Both schedules use the same value: one rule, not two.
 
-**Still [speculative]** in two ways worth naming. The failure has never been reproduced
-against a real revoked consent, and cannot be on the current plan — MeuPluggy is not an
-Open Finance connector — so the guard is written from documented behaviour plus the
-traced code path, which is precisely why it refuses rather than trying to repair. And
-only a *fully* empty feed is refused: one row where two hundred were held is trusted,
-because no threshold separates a partial revocation from a quiet month without inventing
-a number. A measured floor would need numbers this project does not have.
+---
 
-### 2. Regulated rate limits, and why the duplicate check matters more than it looks
+## 7. The nine Edge Functions
 
-Documented ceilings: after **240** requests new transactions stop appearing until the
-next month, and after **420** the balance stops updating. Normal usage — *"one CPF and
-institution on only one item"* — is documented as safe *"even if you had automatic
-updates enabled on all your items updating up to 4 times per day"*, while connecting
-the same CPF/CNPJ to the same institution across multiple items *"will reach the
-limitation of Open Finance faster, meaning that some products won't be
-updating/returning their data until the limit is renewed on the next month"*.
-**[documented]**
+`verify_jwt = true` means the caller must present a signed-in user's JWT; `false` means
+the caller is a machine and the function gates on `x-sync-secret` itself.
 
-Two readings matter here and only one of them is comfortable:
+| Function | JWT | Who calls it, and what it does |
+|---|---|---|
+| `pluggy-sync` | **false** | `pg_cron`, 15:30 UTC. Mirrors accounts and transactions into the raw chain, decides withdrawal, then chains into `run-detection`. |
+| `run-detection` | **false** | `pluggy-sync` (or a manual invoke). Loads the graph, runs the pure engine, applies the desired state in one atomic call. |
+| `send-reminders` | **false** | `pg_cron`, 16:30 UTC. Selects due runs and sends through the mail provider. |
+| `connect-token` | true | The app, to mint a Pluggy connect token for the widget. |
+| `register-connection` | true | The app, after the widget succeeds: creates the `connection` row and refuses duplicates. |
+| `confirm-suggestion` | true | The app — *Track it* on an R3/R4 suggestion. |
+| `cancel-subscription` | true | The app — *Mark cancelled*. |
+| `remove-connection` | true | The app — delete a bank link, preserving history via the frozen region. |
+| `delete-account` | true | The app — delete the account and all its data. |
 
-- **Most likely, the quota counts Pluggy → bank calls, not our reads.** Open Finance
-  limits govern the regulated interface, and our GETs hit Pluggy's stored copy. On
-  that reading Signu's design — a full 365-day re-scan every day, roughly one to six
-  transaction pages per account — costs nothing against the quota, and only *item
-  updates* (auto-sync, plus any `PATCH`) consume it. **[speculative]** — this is
-  inference from how the limits are described, not a documented statement about which
-  calls count.
-- **If reads did count**, the re-scan design would sit uncomfortably close: 30 days ×
-  up to 6 pages per account is 180 requests a month per account against a 240 ceiling,
-  before a second item exists. Worth knowing before assuming a migration is free.
-  **[speculative]**
+**Invariant worth stating explicitly:** `verify_jwt` is a per-function deploy property
+taken from `config.toml`, and `config.toml` declares it only for `pluggy-sync` and
+`run-detection`. `send-reminders` runs with `verify_jwt = false` in production but has
+no block declaring it, so a future scoped redeploy of that function would take the CLI
+default of `true` and silently 401 every 16:30 firing. A blanket
+`supabase functions deploy` reads each function's declared value, which is why it cannot
+flip the cron-called ones by accident — but the undeclared one is a real gap.
 
-Either way the exposure multiplies per duplicate item, which promotes
-`register-connection`'s duplicate check (v53) from tidiness to a quota control. That
-check compares the **accounts** an incoming item exposes, keyed `type:last4`, and it
-**fails open** — it prefers a loud false positive to a silent double-count. Under
-regulated connectors a silent double-count would also mean products quietly stopping
-mid-month, which is a failure the app has no way to distinguish from a bank going
-quiet. Note the check was built for connector 200, where one aggregator login fronts
-every bank; whether `type:last4` is still the right key when each institution is its
-own item is an open question. **[speculative]**
+**`register-connection`'s duplicate check** deserves its own note. It compares the
+**accounts** an incoming item exposes, keyed `type:last4` — not the provider's account
+id (per-item, so it would match nothing) and not the display name (which the provider
+rewords). It **fails open**: a loud false positive beats a silent double-count. The
+check lives here rather than in `connect-token` because the token is minted *before* the
+user picks a bank in the widget, so it cannot be scoped by connector.
 
-## Sources
+---
 
-- [Data sync: Update an Item](https://docs.pluggy.ai/docs/data-sync-update-an-item)
-- [Updating an Item](https://docs.pluggy.ai/docs/updating-an-item)
-- [Consents and expiration](https://docs.pluggy.ai/docs/consents)
-- [Considerations & FAQ](https://docs.pluggy.ai/docs/considerations-faq)
-- [Operational Rate Limits](https://docs.pluggy.ai/docs/rate-limits-of)
-- [Open Finance Connectors](https://docs.pluggy.ai/docs/open-finance-regulated)
+## 8. Migration discipline
 
-Connector and item facts above were read from the live Pluggy API on 2026-08-18;
-latency figures from the production database on the same day.
+- **Versioned files, forward-only.** `backend/supabase/migrations/` holds 19 timestamped
+  SQL files. `supabase db push` applies what is pending, and the deploy job runs it
+  unconditionally on every merge, so a migration that misses one deploy self-heals on
+  the next.
+- **Never edit an applied migration.** `db push` records and compares a **version**, not
+  the file's contents, so a file edited after it was applied silently never reaches
+  production and no check can see the drift. Write a new migration instead.
+- **Trust the ledger less than the database.** The deploy job ends with
+  `migration list --linked` and fails if any local version has no remote counterpart. A
+  green deploy that applied nothing is a failure already paid for once.
+- **`Schema applies` in CI proves migrations apply to an *empty* database** — nothing
+  more. A migration that locks a populated table, or violates a constraint only real rows
+  can violate, passes that gate. The deploy prints `db push --dry-run` first, so a
+  post-mortem starts with what ran.
+- **Migrations run before functions**, and the job fails fast between them: a writer must
+  never ship ahead of the column or data it depends on.
+- **Some steps are deliberately one-off and manual** because they do not belong in a
+  migration: creating Vault secrets, and uploading the email mark to the public `brand`
+  bucket (a binary in a migration is the wrong shape).
+
+Migration headers used to carry a `Source of truth: <spec> (vNN, date)` line naming the
+spec version each was written against; those were comments, so that provenance now lives
+in git history and the spec's changelog.
+
+---
+
+## 9. Logo sourcing
+
+Three tiers, in order:
+
+1. **Runtime fetch by domain** from logo.dev, cached to disk for 30 days.
+2. **Bundled assets — deliberately unpopulated.** Insurance against an outage or an
+   uncovered domain, to be added only if tier 1 fails in practice.
+3. **The monogram tile**, which needs no data at all and is what the avatar already
+   draws.
+
+**Why it fetches logos the user has no subscription to.** Fetching only the domains a
+user is subscribed to would tell logo.dev the user's subscription list, one request at a
+time — a financial-behaviour fingerprint tied to an IP. So the prefetch walks the
+**whole catalog**: the request set is identical for every install and independent of
+anyone's data. The cost is roughly two megabytes once per TTL, and the property is
+structural rather than a promise.
+
+**That property depends on the catalog being independent of the user.** A catalog seeded
+from the user's own merchants would make "fetch everything" leak anyway — which is why
+`brand_catalog` is shared reference data carrying no `user_id`, identical for every
+account.
+
+**`kind` scoping is load-bearing.** `brand_catalog` holds both services and financial
+institutions, and a bank's name also appears on statements as the *acquirer* — so an
+unscoped lookup gives a bank-acquired subscription the bank's logo. The lookup takes
+`kind` as a required argument for that reason. Every institution domain was verified to
+resolve at logo.dev before being written, because a row whose logo does not resolve is a
+row that does nothing.
+
+Logos **fill** the avatar tile — logo.dev images carry their own padding, so an extra
+inset double-pads them — and renaming a subscription costs it its logo, because
+resolution runs off the merchant identity rather than the display name.
+
+---
+
+## 10. The auth gate
+
+Four states, and `RootView` switches on exactly one value:
+
+```
+.restoring        cold launch, session restore in flight — renders the splash
+.unauthenticated  the welcome flow
+.recovering       a password-reset deep link is in charge
+.authenticated    the app shell
+```
+
+**Every transition is a function of (current state, event), never of the event alone.**
+Blind assignment was the same defect twice — a late restore overwriting a link's
+decision, and an expired link ejecting a signed-in user — so all transitions are
+funnelled through one place rather than patched per site.
+
+Each event enumerates **all four states with no `default`**, so the compiler forces a
+decision per cell and a `break` reads as a decision rather than as an omission.
+
+The race that motivated it: a deep link can land while restore is still in flight — a
+cold launch from an email link is exactly that. **The link already decided, and it
+wins**; a late restore overwriting `.recovering` with `.authenticated` drops the user on
+Home with their password unchanged.
+
+**There is no "signed in but unverified" branch, by construction.** Email confirmation
+is on and non-negotiable, so a session existing *implies* a verified address. That is
+why the signup → confirm-notice step is navigation inside the welcome flow rather than a
+gate transition.
+
+---
+
+## 11. Failure honesty
+
+**A failed read must never look like no data.** Every read used to be `try?`, and a screen
+rendered the same empty view for "still loading" and "the read threw" — so a signed-in
+user whose data would not load got a blank page with a tab bar and nothing naming the
+problem, on screen or in a log. "Renders nothing" tells the user nothing and tells us
+nothing.
+
+The rule both list screens now follow:
+
+| On screen | A failed read does |
+|---|---|
+| nothing | the failure view, with a retry — the error **is** the screen |
+| a payload | keep it, and report the failure through the shell alert |
+
+The second row is the one worth stating: a failure view there would say **less** than
+the data already displayed supports.
+
+**Messages are the underlying error's own words**, not a paraphrase. The reader of this
+deployment is also its developer, and "Something went wrong" deletes the only useful
+part. The connect flow and the four server-side writes take the same posture, surfacing
+the server's message verbatim.
+
+**Failures with nowhere to be noticed get an alert.** The four Edge Function writes change
+state no screen is showing, and a failed pull-to-refresh leaves the last good data on
+screen — correct, and indistinguishable from a refresh that worked. One channel, one
+meaning: *the thing you asked for did not happen.*
+
+**Pull-to-refresh ignores the refresh verdict but never the error.** The verdict (did
+anything change?) is ignored because the user asked, so the payload is re-read either way
+and the gesture never appears to do nothing. Swallowing the *error* produced a gesture
+that appeared to have worked, which is worse. A **foreground** refresh does use the
+verdict: discarding someone's scroll position to show them what they were already looking
+at is worse than not refreshing.
+
+**A number is never cropped.** `minimumScaleFactor` alone was not enough — at the largest
+accessibility sizes the date slot grows and the amount truncated anyway — so layouts
+reflow. And a layout claim is worth what the screenshot says: two changes that read as
+correct in code were wrong on screen.
+
+---
+
+## 12. Auth email templates
+
+The two emails Signu sends live in `backend/supabase/templates/`, registered in
+`config.toml` under `[auth.email.template.recovery]` and `.confirmation`. Paths there are
+relative to the directory holding `supabase/`, hence the `./supabase/` prefix — the CLI's
+own examples show it both ways and only that form resolves.
+
+**The HTML files carry no comments, deliberately.** Comments in an email template are
+*delivered* — they sit in the source the recipient can open with "show original" — and
+worse, a `{{ .Email }}` mentioned in prose is substituted like any other, putting the
+address in the source an extra time.
+
+| Template | Sent when | Included |
+|---|---|---|
+| `confirmation` | signup, because confirmation is on | yes |
+| `recovery` | the password reset, and the Settings row that reuses it | yes |
+| `email_change` | changing an address | no — the app has no change-email UI |
+| `invite`, `magic_link`, `reauthentication` | — | no — never sent |
+
+The confirmation template is included because confirmation being on makes it the
+**first** email any account receives: fixing only the reset would fix the second
+impression and not the first.
+
+**Construction rules, none of them preferences:**
+
+- **Table layout, inline styles.** Outlook renders no flexbox and strips `<style>`
+  blocks, so a stylesheet degrades to unstyled text in the client most likely to open
+  it. Every colour is stated on the element that uses it.
+- **One image, with a fallback that still reads as the brand.** The mark is two
+  counter-rotated arcs, not a letter, so no font substitutes for it. SVG is out (Gmail
+  drops it) and so is a `data:` URI (Gmail strips those), so it must be hosted — from the
+  **public** `brand` bucket, because a mail client holds no session and an email outlives
+  any signed URL. The opposite requirement to the private avatars bucket. Rendered 40×40
+  from an 80×80 source; placing the asset is a one-off step per environment.
+- **The link appears twice**, as a button and as selectable text, because a client that
+  strips anchor styling still leaves something the reader can copy.
+- **Palette copied from the app's `Theme.swift`** — paper, surface, ink, on-ink, text,
+  secondary, hairline — so the mail matches the app without importing anything.
+- **Pure ASCII**, with entities for em dashes. GoTrue does declare `charset=UTF-8` so raw
+  UTF-8 would almost certainly survive, but "almost certainly" is doing work in the one
+  email a locked-out user needs to read, and an entity depends on no charset negotiation
+  at all. Verified by counting: zero bytes above 0x7F in either file.
+
+**Copy that had to be checked rather than written:** "within the hour" is
+`otp_expiry = 3600`, not an assumption. An earlier draft said the bank connection "is
+read-only" and that Signu "cannot" move money — **cut**, because the Pluggy connector
+payload advertises `supportsPaymentInitiation`, so that claim needs the consent scope
+verified before it goes in writing to a user. It now says Signu only ever reads, which
+is defensible from what the app does.
+
+**Deploying them is a dashboard operation**, on evidence rather than caution — see §13.
+
+---
+
+## 13. Local dev, test, deploy
+
+### Run
+
+```sh
+xcodebuild build -project frontend/Signu.xcodeproj -scheme Signu \
+  -configuration Debug -destination 'generic/platform=iOS'
+xcodebuild test  -project frontend/Signu.xcodeproj -scheme Signu \
+  -configuration Debug -destination "id=$SIMULATOR_UDID"
+
+deno test  backend/supabase/functions/_shared/
+deno lint  backend/supabase/functions
+deno check backend/supabase/functions/_shared/detection.ts
+```
+
+**Never hand over a `CODE_SIGNING_ALLOWED=NO` build.** CI passes that flag because it
+only needs to compile, but the resulting app has **no entitlements**, so the Keychain
+refuses every write — and the auth client stores its session there and nowhere else.
+Sign-in succeeds, nothing persists, the session reads back nil, and every request falls
+back to the anonymous key. That looked exactly like a production permissions outage once.
+Use Xcode's default simulator signing for anything a human will touch.
+
+**A DEBUG build runs against mock data by default**, and live is opt-in:
+`simctl launch <udid> <bundle-id> --live-auth --live-data`. Both flags exist so the
+session provider and the data provider can never disagree about which world a build is
+in. With the mock provider `refresh()` never throws, so failure paths are unreachable —
+a live build is the only way to exercise them.
+
+**Local configuration.** The project URL, the anon key and the logo.dev publishable key
+are read at launch from a `Config.plist` that is **not committed** — copy the template:
+
+```sh
+cp frontend/Signu/Config.example.plist frontend/Signu/Config.plist
+```
+
+### CI
+
+Three required checks, plus a deploy that runs on `main` only and is gated on all three:
+**`iOS build`** (the app compiles and the whole Swift suite passes on a simulator),
+**`Detection tests`** (`deno check` per named file, `deno lint`, every `_shared/` suite),
+and **`Schema applies`** (all migrations apply to an empty database).
+
+**Third-party actions are pinned to commit SHAs, not tags.** `@v4` is a tag the owner
+can move and `@v1` is a *branch*, so both can gain new code without this file changing —
+and the deploy job runs them with a Supabase access token in its environment, which
+carries the same privileges as the account. The pins, and the versions they resolved to:
+
+| Action | Commit | Was |
+|---|---|---|
+| `actions/checkout` | `11d5960a326750d5838078e36cf38b85af677262` | v4.4.0 |
+| `supabase/setup-cli` | `ab058987d8d6c725971f6cf9d0b5c98467e30bd1` | v1.7.1 |
+| `denoland/setup-deno` | `22d081ff2d3a40755e97629de92e3bcbfa7cf2ed` | v2.0.5 |
+
+The Supabase CLI itself is pinned to `2.109.1` in the job. To upgrade any of these,
+resolve the new tag to a commit and change both the SHA and the table row together:
+`gh api repos/<owner>/<repo>/git/ref/tags/<version> --jq .object.sha`. Never "fix" a pin
+by reverting to a tag; that silently restores the mutability.
+
+**Deploy on green.** A merge to `main` runs `db push`, then deploys functions scoped to
+what changed. A `_shared/` change deploys **every** function, because they all bundle it —
+narrow scoping there would silently leave old copies running in production.
+
+**Superseded PR runs are cancelled; runs on `main` are not.** Cancelling on every ref
+cost a production deploy once, silently: a newer merge cancelled the previous merge's run
+mid-build, its deploy died with it, and the next run's scoped diff legitimately found no
+function changed — so a merged guard sat undeployed behind three green checkmarks.
+Deploys still serialise through their own concurrency group, which GitHub does not
+document as FIFO, so two queued together could land out of order; the next merge
+redeploys, so that window closes on its own.
+
+**Recovering a skipped deploy:** re-run the cancelled run rather than deploying by hand.
+Its event payload still carries the right base commit, so scoping deploys correctly, and
+a laptop deploy bypasses the green gate the pipeline exists to be. Verify from the log
+that it printed `Deployed Functions on project …`.
+
+**Nothing verifies that a deploy shipped the functions it should have.** Migrations have
+`migration list` as a post-check; functions have no equivalent. That gap is how the
+skipped deploy above went unnoticed.
+
+### `supabase config push` is forbidden
+
+Not caution — evidence:
+
+- **It has never been run against this project**, so `config.toml` has never been
+  reconciled wholesale with production. Exactly one setting was ever checked by hand.
+- The file holds **74 auth settings** and a first push applies all of them at once.
+  Several are the CLI's *local-dev* defaults and wrong for production: the reset-email
+  minimum interval is `1s` against production's `60s` (pushing it removes the
+  server-side limit the app's countdown exists to make visible), `site_url` points at
+  localhost, and email confirmation sat at the CLI default of *off* — pushing that would
+  have silently disabled confirmation, so signup would return live sessions for
+  unverified addresses with no error anywhere, and the auth gate rests on it being on.
+- **There is no way to check the rest.** `supabase config pull` does not exist, so
+  nothing can diff production's auth config first — and `config push` has no dry-run and
+  aborts midway on the first rejected setting, after auth has already been written.
+
+**Four other `config.toml` values are load-bearing and easy to "tidy" wrongly.**
+`site_url` *and* `additional_redirect_urls` must both name the app's deep link, because
+Supabase refuses any redirect not **exactly** on that list — naming it once is not enough.
+The Google provider is a **web** client, not an iOS one, since the code exchange happens
+on Supabase's server. The `[db.seed]` block stays present with seeding off: removing it
+makes the CLI fall back to a default path and warn on every `db reset`, and a warning
+that always fires trains you to ignore warnings. And vector buckets stay `false` because
+on a free project the API rejects `true` with a 402 that aborts a push midway — after
+auth has already been written.
+
+So auth config changes, including the email templates, go through the dashboard until
+all 74 settings have been reconciled as its own task. The drift this creates is real and
+accepted: the templates and their registration stay committed so the repo remains the
+source of truth, and the dashboard is only today's delivery mechanism.
+
+---
+
+## 14. The specification
+
+**`docs/subscription-tracker-data-model.md` is the source of truth.** A living document
+with a changelog, carrying the full schema, the detection doctrine, every screen contract,
+and the reasoning behind decisions this README only summarises — including the ones that
+were rejected and why. `docs/Screen-mockups/` holds the design references those screen
+contracts were locked against. Where this README and the spec disagree, the spec wins.

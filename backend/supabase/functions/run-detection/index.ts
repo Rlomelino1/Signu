@@ -1,14 +1,3 @@
-// run-detection — the interpreted chain. Thin shell around a pure core (v24).
-//
-// Owns subscription / subscription_run / charge and never writes the raw chain.
-// Separate from pluggy-sync on the replayability doctrine: a detection bug must
-// not be able to fail a sync, and detection must be re-runnable over stored
-// history without touching Pluggy. pluggy-sync chains into this on success;
-// both stay independently invokable, which is what replay needs.
-//
-// This file does three things and no more: load, call detect(), apply in one
-// RPC. Every decision lives in _shared/detection.ts, where it is testable
-// without a database.
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 import { detect, type EngineInput, type TxRow } from '../_shared/detection.ts'
@@ -26,9 +15,6 @@ async function secretsMatch(given: string, expected: string): Promise<boolean> {
   return diff === 0
 }
 
-/** Candidate evaluation is per-USER, not per-account: the internal-transfer
- *  filter compares a DEBIT against CREDITs on the user's other accounts, so
- *  sharding by account would silently disable it (v24). */
 async function loadUser(db: SupabaseClient, userId: string): Promise<EngineInput['rows']> {
   const { data, error } = await db
     .from('transaction')

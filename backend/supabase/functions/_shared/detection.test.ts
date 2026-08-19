@@ -1,14 +1,3 @@
-// Rule tests for the detection core.
-//
-// FIXTURE NOTE: v24 says fixtures are "the real 258 rows captured by v20's
-// probe". They cannot be committed -- pluggy-probe-raw.json is gitignored
-// because it is real bank history and this repo is public. So each case below is
-// the STRUCTURAL equivalent of a finding from the dry run, reduced to the
-// minimum rows that reproduce it, and the real-258-row check stays local via
-// backend/pluggy-detection-dryrun.py. Every false positive the dry run found has
-// a regression test here.
-//
-// Run:  deno test --allow-none backend/supabase/functions/_shared/detection.test.ts
 
 import { assert, assertEquals, assertFalse } from 'https://deno.land/std@0.224.0/assert/mod.ts'
 import { cents, moneyKey, sameMoney } from './money.ts'

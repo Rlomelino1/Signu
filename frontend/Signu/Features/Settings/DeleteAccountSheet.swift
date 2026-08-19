@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Delete-account confirmation (14a — mockup 21z). Type-to-confirm.
 struct DeleteAccountSheet: View {
     let scope: DeleteAccountScope
     var onDelete: () -> Void = {}

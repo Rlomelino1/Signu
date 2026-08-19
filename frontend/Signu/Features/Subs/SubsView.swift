@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Loads the subs payload from the provider and renders it.
 struct SubsScreen: View {
     let provider: SignuDataProviding
     var actions = SubsActions()
@@ -9,12 +8,6 @@ struct SubsScreen: View {
     var scrollAnchor: UnitPoint = .top
 
     @State private var payload: SubsPayload?
-    /// Why the load failed, when it did.
-    ///
-    /// Subs rendered `Color.clear` for both "still loading" and "the read threw"
-    /// long after Home stopped doing so — same bug, one screen over, and on the tab
-    /// that lists everything the user tracks. Pull-to-refresh made it reachable
-    /// without a broken session: one failed re-read emptied a working list.
     @State private var failure: String?
 
     var body: some View {
@@ -31,9 +24,6 @@ struct SubsScreen: View {
             }
         }
         .task { await load() }
-        // Same shape as Home, deliberately: the verdict is ignored because the user
-        // asked, the error is not, and a failed re-read keeps whatever is already on
-        // screen instead of emptying the list.
         .refreshable {
             do {
                 try await provider.refresh()
@@ -46,10 +36,6 @@ struct SubsScreen: View {
 }
 
 extension SubsScreen {
-    /// One loader for the first read and for every retry, so the failure state and
-    /// the success state cannot drift apart. Mirrors `HomeScreen.load()`, including
-    /// the routing rule — two screens reading the same graph must not disagree about
-    /// what a failure looks like.
     fileprivate func load() async {
         do {
             payload = try await provider.subsPayload()
@@ -67,10 +53,9 @@ extension SubsScreen {
 }
 
 struct SubsActions {
-    /// See `HomeActions.onLoadFailed`.
     var onLoadFailed: (String) -> Void = { _ in }
     var onSelectSubscription: (UUID) -> Void = { _ in }
-    var onReviewSuggestion: (UUID) -> Void = { _ in }   // run id → 9a
+    var onReviewSuggestion: (UUID) -> Void = { _ in }
     var onSearch: () -> Void = {}
 }
 
@@ -78,7 +63,6 @@ enum SubsFilter {
     case all, active, inactive
 }
 
-/// Subscriptions tab (7a/8a/9b — mockups 21r/21s/21t).
 struct SubsView: View {
     let payload: SubsPayload
     var actions = SubsActions()
@@ -123,7 +107,6 @@ struct SubsView: View {
         .background(SignuColor.paper)
     }
 
-    // MARK: - Header, hero, chips
 
     private var header: some View {
         HStack {
@@ -136,7 +119,6 @@ struct SubsView: View {
         .padding(.top, 4)
     }
 
-    // Hero is invariant: the chips filter the list only, never these numbers.
     private var hero: some View {
         VStack(alignment: .leading, spacing: 5) {
             OverlineText("All subscriptions")
@@ -149,7 +131,6 @@ struct SubsView: View {
                     .font(.signuSubtitle)
                     .foregroundStyle(SignuColor.textSecondary)
                 Spacer(minLength: 8)
-                // ÷12 derivation — approximate by construction, always tilde.
                 Text("\(SignuFormat.brl(payload.monthlyCompanion, approximate: true)) /mo")
                     .font(.signuSubtitleEmphasis)
                     .foregroundStyle(SignuColor.textSecondary)
@@ -172,15 +153,12 @@ struct SubsView: View {
         }
     }
 
-    // MARK: - Suggested (9b: informs; all actions live on 9a)
 
     @ViewBuilder
     private var suggestedSection: some View {
         if !payload.suggested.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader("Suggested · \(payload.suggested.count)", color: SignuColor.green)
-                // Shared tinted-alert-surface rule (tint fill + 1px darker-tint
-                // stroke) — same treatment as Home's banner/overdue/review pill.
                 VStack(spacing: 0) {
                     ForEach(Array(payload.suggested.enumerated()), id: \.element.id) { index, item in
                         suggestedRow(item)
@@ -212,8 +190,6 @@ struct SubsView: View {
                     Text(item.serviceName)
                         .font(.signuRowTitle)
                         .foregroundStyle(SignuColor.textPrimary)
-                    // 13pt + slight scale: largest that keeps the locked
-                    // evidence copy on one line in Inter (21t face is narrower).
                     Text(item.evidence)
                         .font(SignuFont.font(13, .semibold, tabular: true))
                         .foregroundStyle(SignuColor.green)
@@ -227,15 +203,11 @@ struct SubsView: View {
             }
             .padding(.vertical, SignuMetric.rowPaddingV)
             .padding(.horizontal, SignuMetric.rowPaddingH)
-            // Same rule as SignuRow, which this row does not use because its
-            // evidence line carries its own type treatment: a plain button
-            // hit-tests only what it draws.
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    // MARK: - Groups (native-unit subtotals; per-group sorting)
 
     @ViewBuilder
     private func groupSection(_ group: SubsPayload.Group, title: String, showsSortToggle: Bool) -> some View {
@@ -245,8 +217,6 @@ struct SubsView: View {
                     OverlineText("\(title) · \(SignuFormat.brl(group.subtotal, approximate: group.approximate))")
                     Spacer()
                     if showsSortToggle {
-                        // Global control for both groups; sits on the
-                        // MONTHLY header row (accepted placement).
                         SortToggle(options: ["By date", "By cost"], selection: Binding(
                             get: { sortByCost ? 1 : 0 },
                             set: { sortByCost = $0 == 1 }
@@ -261,8 +231,6 @@ struct SubsView: View {
         }
     }
 
-    // By date = next-charge order (overdue floats up for free);
-    // By cost = descending amount, within the group.
     private func sortedRows(_ group: SubsPayload.Group) -> [SubsPayload.Row] {
         sortByCost ? group.rows.sorted { $0.amount > $1.amount } : group.rows
     }
@@ -307,7 +275,6 @@ struct SubsView: View {
         .frame(height: 4)
     }
 
-    // MARK: - Inactive (8a: flat list, no groups, no sort)
 
     @ViewBuilder
     private var inactiveSection: some View {
@@ -317,7 +284,6 @@ struct SubsView: View {
                 SignuListCard(data: payload.inactive) { item in
                     inactiveRow(item)
                 }
-                // True for both statuses; honest about the one-cycle blind spot.
                 Text("If charges come back, two in a row start a new run.")
                     .font(.signuSubtitle)
                     .foregroundStyle(SignuColor.textSecondary)
@@ -333,10 +299,6 @@ struct SubsView: View {
         Button {
             actions.onSelectSubscription(item.id)
         } label: {
-            // Same vertical rhythm as the active rows (SignuRow) — avatar,
-            // leading title/subtitle, trailing two-line rail — so the row
-            // height is driven by the 44pt avatar and stays interchangeable
-            // with the active list rows above it.
             HStack(spacing: 12) {
                 ServiceAvatar(name: item.serviceName)
                 VStack(alignment: .leading, spacing: 3) {
@@ -344,10 +306,6 @@ struct SubsView: View {
                         .font(.signuRowTitle)
                         .foregroundStyle(SignuColor.textPrimary)
                         .lineLimit(1)
-                    // One compact line: "Was R$ X /mo". "Was" framing =
-                    // historical fact — never a tilde here. Scale down a hair
-                    // before truncating (guards wider amounts, e.g.
-                    // "Was R$ 199,90 /yr", from clipping).
                     Text(item.statusText)
                         .font(SignuFont.font(14))
                         .foregroundStyle(SignuColor.textSecondary)
@@ -355,20 +313,13 @@ struct SubsView: View {
                         .minimumScaleFactor(0.9)
                         .truncationMode(.tail)
                 }
-                // Left column takes the slack so the fixed-width right rail
-                // never squeezes the title/subtitle.
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // Right rail mirrors the left: chip-over-date opposite
-                // title-over-subtitle. Compact chip keeps the rail ≤ 44pt.
                 VStack(alignment: .trailing, spacing: 3) {
                     StatusChip(
                         text: item.cancelled ? "Cancelled" : "Ended",
                         tone: item.cancelled ? .danger : .neutral,
                         compact: true
                     )
-                    // Billing state, not access state — paid-through carries
-                    // the access story. 14pt (not 15) keeps this longer string
-                    // from widening the rail into the title.
                     Text(item.paidThroughText)
                         .font(SignuFont.font(14))
                         .foregroundStyle(SignuColor.textSecondary)
@@ -377,16 +328,12 @@ struct SubsView: View {
             }
             .padding(.vertical, SignuMetric.rowPaddingV)
             .padding(.horizontal, SignuMetric.rowPaddingH)
-            // As SignuRow. Inactive rows are hand-built because the right rail is
-            // chip-over-date rather than value-over-date.
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 }
 
-// Tab screens are reviewed inside AppShellView (tab bar overlaid) so clearance
-// and the Safari-style hide/show behavior are visible (tab bar contract v13).
 #Preview("Subs · All (21t)") {
     AppShellView(provider: MockDataProvider(), initialTab: .subs)
 }
@@ -399,8 +346,6 @@ struct SubsView: View {
     AppShellView(provider: MockDataProvider(), initialTab: .subs, initialSubsFilter: .active)
 }
 
-// Bottom-of-scroll spacing must be reviewed in context: shell + tab bar,
-// pre-scrolled to the very end (mirrors the Home bottom-inset preview).
 #Preview("Subs · in shell, scrolled to bottom") {
     AppShellView(provider: MockDataProvider(), initialTab: .subs, subsScrollAnchor: .bottom)
 }

@@ -2,12 +2,6 @@ import Testing
 import Foundation
 @testable import Signu
 
-// What a re-read counts as "something changed" (v35).
-//
-// This decides whether returning to the app rebuilds the visible tab. Both wrong
-// answers are silent: always-changed throws away the user's scroll position on
-// every app switch, never-changed leaves the app rendering yesterday's state
-// after the 15:30 UTC sync has moved everything.
 
 @Suite("Graph signature")
 @MainActor
@@ -36,12 +30,9 @@ struct GraphSignatureTests {
         #expect(full != empty)
     }
 
-    // MARK: - The changes a background sync actually produces
 
     @Test("a run going overdue is a change, though no row moves")
     func statusChangeCounts() async throws {
-        // The trap this guards: counts alone would call this identical, and
-        // overdue is the state the user most needs to see arrive.
         let p = MockDataProvider()
         let before = try await signature(p)
         var runs = try await allRuns(p)
@@ -74,8 +65,6 @@ struct GraphSignatureTests {
 
     @Test("a user-owned column changing is a change")
     func userColumnsCount() async throws {
-        // Not a sync's doing, but the same refresh path carries a write made on
-        // another device, and every one of these renders somewhere.
         let p = MockDataProvider()
         let before = try await signature(p)
         let sub = try #require(try await p.subscriptions().first)
@@ -99,7 +88,6 @@ struct GraphSignatureTests {
         #expect(before != after)
     }
 
-    // MARK: - Helpers
 
     private func allRuns(_ p: MockDataProvider) async throws -> [SubscriptionRun] {
         var out: [SubscriptionRun] = []

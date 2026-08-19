@@ -1,7 +1,4 @@
 #!/bin/sh
-# Regenerates Signu/Assets.xcassets/Wordmark.imageset from SignuWordmark.
-# Run from the frontend/ directory. See GenerateWordmarkAsset.swift for why
-# the launch screen needs a rendered image rather than storyboard views.
 set -e
 cd "$(dirname "$0")/.."
 out="$(mktemp -d)/generate-wordmark"

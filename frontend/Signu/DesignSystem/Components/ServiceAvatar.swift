@@ -1,29 +1,14 @@
 import SwiftUI
 
-/// Monogram tile — tier 3 of the logo sourcing contract (the zero-data
-/// fallback, and the only tier built at this stage). Colored rounded square
-/// with the service's initial.
 struct ServiceAvatar: View {
     let name: String
     var size: CGFloat = 44
     var color: Color?
-    /// Rendered on the ink hero rather than the paper ground (v59). Drops the hairline:
-    /// it exists to stop a pale tile dissolving into paper, and on ink it is the thing
-    /// you see — a white outline drawn around a logo that needs no help standing out.
-    /// This closes v12's open check, which flagged exactly this pairing.
     var onInk = false
-    /// Which half of the catalog this name may match (v58). Defaults to `.service`
-    /// because most avatars in the app are subscriptions; the bank surfaces pass
-    /// `.institution` explicitly. A wrong value costs a monogram, never a wrong logo —
-    /// the scoping is what guarantees that.
     var kind: BrandKind = .service
 
-    /// Optional so every preview, screenshot harness and test that renders a row
-    /// without a store keeps working — and gets tier 3, which is a complete
-    /// answer rather than a degraded one.
     @Environment(LogoStore.self) private var logos: LogoStore?
 
-    // Verbatim first character — "iCloud+" keeps its lowercase "i" (21r).
     private var initial: String {
         String(name.trimmingCharacters(in: .whitespaces).prefix(1))
     }
@@ -36,24 +21,6 @@ struct ServiceAvatar: View {
         }
     }
 
-    /// Tier 1: the real mark, filling the tile.
-    ///
-    /// The container is still doing two of its three jobs (v12): it absorbs
-    /// logo.dev's background variance, and colour is kept because recognition is the
-    /// entire point of fetching real logos.
-    ///
-    /// **What changed (v57): the mark fills the tile instead of sitting inside an
-    /// 18% inset.** v12 added that padding to keep a list of real logos calm rather
-    /// than reading as competing billboards. That was a real concern and it lost to a
-    /// plainer one: logo.dev returns square icons that already carry their own
-    /// padding and background, so ours stacked on top and produced a small mark
-    /// floating in a near-white square — the tile looked unfinished rather than calm.
-    ///
-    /// `scaledToFill` with an explicit frame and clip, not `scaledToFit` with the
-    /// padding removed. Every image logo.dev serves here is square (verified: 128×128
-    /// across the catalog), so for real data the two are identical — but a future
-    /// non-square source should fill and be clipped by the tile's own shape rather
-    /// than letterbox inside it, which is the request this implements.
     private func mark(_ logo: Image) -> some View {
         RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
             .fill(SignuColor.surfaceBright)
@@ -66,10 +33,6 @@ struct ServiceAvatar: View {
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.32, style: .continuous))
             }
             .overlay {
-                // A hairline, because a near-white tile on the paper ground would
-                // otherwise dissolve into it. NOT on ink: there the same stroke reads as
-                // a white outline around the mark, which is what v12 flagged as an open
-                // check and what this closes (v59).
                 if !onInk {
                     RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
                         .strokeBorder(SignuColor.hairline, lineWidth: 1)
@@ -77,8 +40,6 @@ struct ServiceAvatar: View {
             }
     }
 
-    /// Tier 3: the zero-data fallback, and what every row rendered before logos
-    /// existed.
     private var monogram: some View {
         RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
             .fill(color ?? BrandPalette.color(for: name))

@@ -1,17 +1,8 @@
 import SwiftUI
 
-/// The auth gate, and nothing else. Four states, one for each thing the app
-/// can legitimately be showing at launch; the tab shell is one of them, not
-/// the default (see `AppShellView`).
-///
-/// Transitions are **crossfade root swaps**, never pushes — which is what
-/// makes "no back gesture from the shell to WelcomeFlow" structural rather
-/// than something to suppress.
 struct RootView: View {
     var session: SessionStore
 
-    /// Built on entry to `.authenticated`, dropped on exit — the gate
-    /// boundary is the provider boundary.
     @State private var provider: SignuDataProviding?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -24,7 +15,6 @@ struct RootView: View {
 
     var body: some View {
         #if DEBUG
-        // Screenshot harnesses: `simctl launch … pro.sinatra.signu --hero-states[=0,1]`
         if let heroArg = CommandLine.arguments.first(where: { $0.hasPrefix("--hero-states") }) {
             let indices = heroArg.split(separator: "=").dropFirst().first
                 .map { $0.split(separator: ",").compactMap { Int($0) } } ?? []
@@ -49,10 +39,6 @@ struct RootView: View {
                 bottom: CommandLine.arguments.contains("--detail-bottom")
             )
         } else if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--calendar") }) {
-            // `--calendar` opens on today's month, `--calendar=-1` a month back.
-            // The offset exists because the calendar's two v46 changes can only be
-            // checked by looking: a past month proves landed charges render, and
-            // paging proves the grid keeps its six rows.
             CalendarDebugView(
                 monthOffset: arg.split(separator: "=").dropFirst().first.flatMap { Int($0) } ?? 0
             )
@@ -61,8 +47,6 @@ struct RootView: View {
         } else if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--auth=") }) {
             AuthDebugView(name: String(arg.dropFirst("--auth=".count)))
         } else {
-            // `--gate=…` / `--welcome` / `--link=…` all run through the real
-            // gate rather than a separate demo host.
             gate
         }
         #else
@@ -84,24 +68,11 @@ struct RootView: View {
                     .transition(.opacity)
 
             case .recovering:
-                // 17e, standalone and with no back chevron: the reset link is
-                // not part of a navigation stack, so there is nothing to pop
-                // to. Its submit is the only exit (or an app kill).
                 NewPasswordView(
                     email: session.email ?? "",
                     onSubmit: { password in
                         Task { await session.updatePassword(password) }
                     },
-                    // NOT signInMessage: that copy is 17a's ("Couldn't sign in.
-                    // Check your password…") and would be actively wrong here.
-                    // SessionAuthError has no case describing a failed password
-                    // update, and `authError()` funnels unknowns to
-                    // .invalidCredentials, so rendering it raw would mislead.
-                    //
-                    // PLACEHOLDER COPY, flagged like signInMessage's own
-                    // emailNotConfirmed string: the auth flow contract never
-                    // specified 17e failure copy, and inventing locked wording is
-                    // worse than surfacing something honest and saying so.
                     error: session.lastError == nil ? nil : AuthError(
                         message: "Couldn't set your new password. Try again."
                     )
@@ -109,16 +80,10 @@ struct RootView: View {
                 .transition(.opacity)
 
             case .authenticated:
-                // nil only for the single frame between the state flip and
-                // the provider being built below — hidden under the crossfade.
                 if let provider {
                     AppShellView(
                         provider: provider,
                         onSignOut: { Task { await session.signOut() } },
-                        // The address comes from the session, which is why v19
-                        // renders no form here. Guarded rather than defaulted to
-                        // "": an empty address would be a send that always fails,
-                        // behind copy claiming a link is on its way.
                         onSetPassword: {
                             guard let address = session.email else { return }
                             Task { await session.requestPasswordReset(email: address) }
@@ -128,17 +93,11 @@ struct RootView: View {
                 }
             }
         }
-        // Crossfade, not a push. Reduce Motion gets no animation at all —
-        // same accessibility posture as the v13 tab bar.
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: session.gateState)
         .task {
             await session.restore()
         }
         .onChange(of: session.gateState, initial: true) { _, state in
-            // The gate boundary is also the provider boundary: the real
-            // provider will need a user_id, and stale rows must not survive a
-            // sign-out. So it is constructed on entry and released on exit
-            // rather than held globally and merely hidden.
             if state == .authenticated {
                 if provider == nil { provider = SignuDataProviderFactory.make() }
             } else {
@@ -154,9 +113,6 @@ struct RootView: View {
 }
 
 #if DEBUG
-/// Screenshot harness for detail variants: `--detail=<name>` where name is
-/// netflix / globoplay / spotify / amazon / cancelled / max, plus optional
-/// `--detail-bottom` to open scrolled to the run start (21l).
 private struct DetailDebugView: View {
     let name: String
     let bottom: Bool
@@ -189,12 +145,6 @@ private struct DetailDebugView: View {
 #endif
 
 #if DEBUG
-/// Screenshot harness for settings sub-screens: `--settings=<name>` where
-/// name is connection-itau / connection-nubank / connection-bradesco /
-/// attributed-itau / remove / delete.
-/// The calendar at an arbitrary month, for the screenshots v46's two changes need.
-/// `MockDataProvider`'s clock is pinned, so `--calendar=-1` lands on the same
-/// month every run and the images stay comparable.
 private struct CalendarDebugView: View {
     let monthOffset: Int
     private let provider = MockDataProvider()
@@ -215,9 +165,6 @@ private struct SettingsDebugView: View {
             ConnectionDetailScreen(provider: provider, connectionId: connId(String(name.dropFirst("connection-".count))))
         case "attributed-itau":
             AttributedSubsScreen(provider: provider, connectionId: connId("itau"))
-        // v47. `edit-profile-unnamed` clears the name first, so the state the
-        // production account was actually in — no name, email standing in — can be
-        // seen rather than reasoned about.
         case "edit-profile", "edit-profile-unnamed":
             SignuColor.paper.ignoresSafeArea()
                 .sheet(isPresented: .constant(true)) {
@@ -232,7 +179,7 @@ private struct SettingsDebugView: View {
         case "remove":
             SignuColor.paper.ignoresSafeArea()
                 .sheet(isPresented: .constant(true)) {
-                    RemoveBankSheet(institutionName: "Itaú", count: 11)
+                    RemoveBankSheet(institutionName: "Demo Bank", count: 11)
                         .presentationDetents([.height(560)])
                         .presentationDragIndicator(.visible)
                 }
@@ -256,16 +203,13 @@ private struct SettingsDebugView: View {
     }
 
     private func connId(_ key: String) -> UUID {
-        let map = ["itau": "Itaú", "nubank": "Nubank", "bradesco": "Bradesco"]
-        return provider.connectionList.first { $0.institutionName == (map[key] ?? "Itaú") }?.id ?? UUID()
+        let map = ["demobank": "Demo Bank", "mockbank": "Mock Bank", "samplebank": "Sample Bank"]
+        return provider.connectionList.first { $0.institutionName == (map[key] ?? "Demo Bank") }?.id ?? UUID()
     }
 }
 #endif
 
 #if DEBUG
-/// Screenshot harness for individual auth screens: `--auth=<name>` where
-/// name is signin / create / confirm / forgot / newpassword / expired.
-/// Renders each screen in isolation, outside the gate.
 private struct AuthDebugView: View {
     let name: String
     var body: some View {
@@ -281,12 +225,7 @@ private struct AuthDebugView: View {
 }
 #endif
 
-// MARK: - Gate previews
 
-// One per gate state. Review each on **iPhone 17 Pro and 17 Pro Max** (v15
-// preview convention) using the canvas device picker: `previewDevice` is
-// ignored inside the `#Preview` macro — the compiler says so outright — which
-// is why no preview in this project specifies a device in code.
 
 #Preview("Gate · restoring (splash)") {
     @Previewable @State var session = SessionStore(provider: MockSessionProvider(scenario: .restoring))

@@ -1,17 +1,3 @@
-// confirm-suggestion — Review's *Track it* (9a).
-//
-// The user's answer to a suggestion the engine refused to promote on its own.
-// R3 and R4 are suggest-only rules: detection creates their runs as `possible`
-// and never lifts them, so this function is the only path out of that state and
-// the app's only way to start tracking something.
-//
-// It writes `subscription_run.status`, which `authenticated` holds no UPDATE
-// grant on at all, and `subscription.identification`, which the engine never
-// writes. Both facts are the reason this is a function and not a PATCH from the
-// client (v29).
-//
-// Load, decide, write — the decision is `confirmation()` in _shared/actions.ts,
-// where the interesting cases are tested without a database.
 
 import { confirmation, type ConfirmRun, type ConfirmSubscription, type Interval } from '../_shared/actions.ts'
 import { json, resolveCaller, serviceClient } from '../_shared/auth.ts'

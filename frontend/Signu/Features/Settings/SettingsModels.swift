@@ -1,26 +1,19 @@
 import Foundation
 
-/// Settings screen (12a / 12d empty state).
 struct SettingsPayload {
     var displayName: String
     var email: String
     var initial: String
-    /// Profile picture path, for `ProfileAvatar`. nil renders the monogram.
     var avatarPath: String?
-    /// True when `displayName` is the email standing in for a name never given, so
-    /// the row can invite the user to set one instead of implying it is their name.
     var displayNameIsFallback: Bool
-    var providers: [String]              // "Google" / "Password"
-    /// Drives the v19 password row off the same identities the chips render:
-    /// present ⇒ "Change password", Google-only ⇒ "Set a password". Data, so it
-    /// lives here; the two copy strings are static and live in the view.
+    var providers: [String]
     var hasPassword: Bool
     var banks: [BankRow]
     var dismissed: [DismissedRow]
-    var deleteScopeLine: String          // "Everything, permanently — banks, history, profile"
+    var deleteScopeLine: String
 
     struct BankRow: Identifiable {
-        let id: UUID                     // connection id
+        let id: UUID
         var name: String
         var subtitle: String
         var chipText: String
@@ -28,63 +21,60 @@ struct SettingsPayload {
     }
 
     struct DismissedRow: Identifiable {
-        let id: UUID                     // subscription id
+        let id: UUID
         var name: String
-        var subtitle: String             // "Not a subscription · Jun 14"
+        var subtitle: String
     }
 }
 
-/// Connection detail (12b).
 struct ConnectionDetailPayload: Identifiable {
-    var id: UUID                         // connection id
+    var id: UUID
     var institutionName: String
-    var connectedSinceText: String       // "Connected Oct 2025 · via Open Finance"
+    var connectedSinceText: String
     var statusText: String
     var statusTone: StatusChip.Tone
-    var lastSyncedText: String           // "Jul 12 · 08:14"
-    var consentExpiresText: String       // "Sep 28"
+    var lastSyncedText: String
+    var consentExpiresText: String
     var needsReconnect: Bool
     var reassurance: String
     var cards: [CardRow]
-    var summaryCount: Int                // "N subscriptions found via this bank"
-    var summaryTotalText: String         // "R$ 1.412,80 tracked since Oct 25"
+    var summaryCount: Int
+    var summaryTotalText: String
 
     struct CardRow: Identifiable {
-        let id: UUID                     // account id
-        var brandMark: String            // "VISA" / "MC" / "ELO"
-        var label: String                // "Visa – 4821"
-        var subtitle: String             // "4 subscriptions billed here"
+        let id: UUID
+        var brandMark: String
+        var label: String
+        var subtitle: String
     }
 }
 
-/// Attributed-subscriptions list (13a).
 struct AttributedSubsPayload {
     var institutionName: String
     var institutionInitial: String
     var headerCount: Int
-    var headerLine: String               // "7 subscriptions · R$ 1.412,80 since Oct 25"
+    var headerLine: String
     var cardGroups: [CardGroup]
     var dismissed: [Row]
 
     struct CardGroup: Identifiable {
-        let id: UUID                     // account id
-        var header: String               // "VISA ···· 4821 · 4"
+        let id: UUID
+        var header: String
         var rows: [Row]
     }
 
     struct Row: Identifiable {
-        let id: UUID                     // subscription id
+        let id: UUID
         var serviceName: String
-        var statusLine: String           // "Renews Jul 22" / "Overdue · expected Jul 10" / "Ended · paid through Mar 12" / "Not a subscription · Jun 14"
-        var statusTone: StatusChip.Tone  // danger for overdue, else normal
-        var amountText: String?          // nil for dismissed rows
-        var unit: String?                // "/mo" | "/yr"
+        var statusLine: String
+        var statusTone: StatusChip.Tone
+        var amountText: String?
+        var unit: String?
     }
 }
 
-/// Delete-account sheet (14a).
 struct DeleteAccountScope {
     var bankCount: Int
-    var subscriptionCount: Int           // includes ignored
+    var subscriptionCount: Int
     var sinceText: String
 }

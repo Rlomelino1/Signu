@@ -1,19 +1,8 @@
-// The detection engine's pure core (v24).
-//
-// Rules in, desired state out. No database access, no clock reads, no I/O.
-// `today` is a parameter, never read inside a rule, so every rule is testable
-// against a fixed date. The shell (run-detection/index.ts) does the loading and
-// the single atomic write; nothing here knows a database exists.
-//
-// Recompute is RECONCILE, not rebuild: user assertions are read and never
-// written, and charges whose transaction_id is NULL are a frozen region that is
-// never recomputed, never deleted and never re-parented.
 
 import { cardLabel } from './accounts.ts'
 import { moneyKey, sameMoney } from './money.ts'
 import { addInterval, circularDomDistance, daysBetween, type Interval } from './dates.ts'
 
-// ----------------------------------------------------------------------- input
 
 export interface TxRow {
   id: string
@@ -67,23 +56,16 @@ export interface StoredSubscription {
   ignored: boolean
 }
 
-/** An account as the engine needs it: only enough to label a charge (v60). */
 export interface AccountRow {
   id: string
   brand: string | null
   last4: string | null
 }
 
-/** A `brand_catalog` row, as R4 reads it. `domain` and `category` are the client's
- *  business (logos, display) and are deliberately absent: the engine has no use for
- *  them and a field an engine does not need is a field that can drift. */
 export interface CatalogRow {
   brand_name: string
   patterns: string[] | null
-  /** "A charge from this merchant is ALWAYS a subscription" — a claim about the
-   *  MERCHANT, not about one charge. R4's entire trigger. */
   subscription_only: boolean
-  /** 'service' | 'institution'. R4 considers services only — see `catalogEntryFor`. */
   kind: string
 }
 
@@ -93,25 +75,16 @@ export interface EngineInput {
   subscriptions: StoredSubscription[]
   runs: StoredRun[]
   charges: StoredCharge[]
-  /** For `card_label`. Optional so every existing caller and the 86 tests that
-   *  predate this keep compiling; an absent map simply yields null labels, which is
-   *  exactly the old behaviour. */
   accounts?: AccountRow[]
-  /** R4's catalog. Optional for the same reason: absent means R4 cannot fire, which
-   *  is precisely the behaviour of every version of this engine before v63. */
   catalog?: CatalogRow[]
 }
 
-// ---------------------------------------------------------------------- output
 
 export interface DesiredCharge {
   transaction_id: string
   date: string
   amount: number
   currency: string
-  /** Copied through, not computed. Null when `amount` is already in the
-   *  account's currency; `coalesce(this, amount)` is therefore always in the
-   *  account currency, which is what makes a total a plain sum (v26). */
   amount_in_account_currency: number | null
   card_label: string | null
 }
@@ -142,14 +115,7 @@ export interface DesiredState {
   diagnostics: Record<string, number>
 }
 
-// --------------------------------------------------------------- candidate pass
-//
-// Per-USER, never per-account: filter 4 compares a DEBIT against CREDITs on the
-// user's OTHER accounts, so sharding by account would silently disable it (v24).
 
-/** NULL / '' / 'NA' / 'N/A' all mean "no fee". Presence carries no information:
- *  fee_type_additional_info is populated on 164 of 165 card rows, 'NA' on 104 of
- *  them. Testing IS NOT NULL excludes 146 of 258 rows and detects nothing (v21). */
 const NOT_A_FEE = new Set(['', 'NA', 'N/A'])
 
 export function isFee(r: TxRow): boolean {
@@ -158,8 +124,6 @@ export function isFee(r: TxRow): boolean {
   return !NOT_A_FEE.has(v.trim().toUpperCase())
 }
 
-/** Metadata first; descriptor N/M marker as the documented fallback for banks
- *  that omit the fields. Agreed 7/7 with zero disagreements on real data (v21). */
 const PARCEL_IN_DESCRIPTOR = /(^|[^0-9])\d{1,2}\s*\/\s*\d{1,2}([^0-9]|$)/
 
 export function isInstallment(r: TxRow): boolean {
@@ -167,18 +131,12 @@ export function isInstallment(r: TxRow): boolean {
   return PARCEL_IN_DESCRIPTOR.test(r.raw_description)
 }
 
-/** Paying the credit card writes two rows when both accounts are connected: a
- *  CREDIT on the card and a DEBIT on the checking account. Filter 1 catches the
- *  card side; this catches the other. Structural, not lexical, so it survives
- *  rewording and unseen institutions (v21). Verified 12/12 on real data. */
 export function isInternalTransfer(r: TxRow, allRows: TxRow[]): boolean {
   if (r.type !== 'DEBIT') return false
   return allRows.some(
     (c) =>
       c.type === 'CREDIT' &&
       c.account_id !== r.account_id &&
-      // Currency-aware: a USD card charge numerically matching a BRL bank
-      // credit would wrongly EXCLUDE a real transaction (v25).
       sameMoney(c, r) &&
       Math.abs(daysBetween(c.date, r.date)) <= 3,
   )
@@ -209,10 +167,6 @@ export function filterCandidates(rows: TxRow[]): {
   return { candidates, diagnostics: d }
 }
 
-// ------------------------------------------------------------------ merchant_key
-//
-// CNPJ where present, normalized descriptor otherwise, with an aggregator
-// exception in the other direction (v21).
 
 const AGGREGATOR_NAME_PATTERNS = [/PAYPAL/]
 
@@ -228,8 +182,6 @@ export function merchantKey(r: TxRow): string {
     .toUpperCase()
   const cnpj = r.provider_merchant_cnpj
   if (cnpj) {
-    // One PayPal CNPJ covers five unrelated merchants; keying on it alone would
-    // anchor a phantom subscription, so the descriptor suffix is retained.
     return isAggregator(r) ? `${cnpj}:${descriptor}` : cnpj
   }
   return descriptor
@@ -663,10 +615,6 @@ function applyAssertions(
     if (stored.status === 'cancelled') {
       // Paid-through is DERIVED, not frozen: R5's trailing charge extends it by an
       // interval and un-claiming has to restore it. Both are `last claimed charge +
-      // one interval` -- the same expression `cancellation()` writes in the first
-      // place -- so nothing has to remember the pre-trailing value and replay cannot
-      // ratchet it forward. Freezing the stored value made the paid-through date
-      // depend on sync history rather than on the data.
       const last = desired.charges[desired.charges.length - 1]
       return {
         ...desired,
@@ -678,9 +626,6 @@ function applyAssertions(
       }
     }
 
-    // A confirmed suggestion is an assertion: R3/R4 above 'possible' means the
-    // user said yes, so the derived lifecycle status is allowed to stand and the
-    // suggestion is not demoted back to 'possible'. R1 status is always derived.
     const confirmedSuggestion =
       (stored.detected_by === 'R3' || stored.detected_by === 'R4') &&
       stored.status !== 'possible'
@@ -689,31 +634,18 @@ function applyAssertions(
       return {
         ...desired,
         detected_by: stored.detected_by,
-        // R4's interval is the confirm flow's authoritative write (v11).
         billing_interval:
           stored.detected_by === 'R4' ? stored.billing_interval : desired.billing_interval,
       }
     }
   }
 
-  // Suggest-only rules are never promoted by the engine -- only the user
-  // promotes them. Deliberately OUTSIDE the `stored` branch: a brand-new R3
-  // suggestion has no stored row, and an early return here would let it inherit
-  // the derived lifecycle status and auto-activate. That defect was live until a
-  // test caught it.
   if (desired.detected_by === 'R3' || desired.detected_by === 'R4') {
     return { ...desired, status: 'possible' }
   }
   return desired
 }
 
-// ------------------------------------------------------------------ dedupe_key
-//
-// UNIQUE(user_id, dedupe_key), forking to `key:2` when one merchant hosts two
-// concurrent subscriptions. Ordinals are assigned by ASCENDING FIRST-CHARGE
-// DATE, tie-broken by provider_tx_id — never discovery order. Discovery-order
-// numbering would let a recompute renumber and silently re-attach a user's
-// nickname, category and reminders to the WRONG subscription (v24).
 
 function dedupeKeys(merchant: string, runs: ProtoRun[]): string[] {
   const order = runs

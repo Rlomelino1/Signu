@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Loads a detail payload (real subscription or a preview fixture) and renders it.
 struct DetailScreen: View {
     var payload: DetailPayload?
     var loader: (() async -> DetailPayload?)?
@@ -22,13 +21,6 @@ struct DetailScreen: View {
         }
     }
 
-    /// Re-reads after an edit that this screen displays.
-    ///
-    /// Renaming changes the hero the user is looking at, so leaving the old name
-    /// on screen would be the two-representations-of-one-row problem the write
-    /// boundary exists to avoid (v29) — just locally instead of across screens.
-    /// The wrapping happens here rather than at the shell's call site because the
-    /// payload lives here and nothing else can reload it.
     private func editing(_ actions: DetailActions) -> DetailActions {
         var wrapped = actions
         wrapped.onRename = { name in
@@ -45,30 +37,17 @@ struct DetailScreen: View {
 
 struct DetailActions {
     var onBack: () -> Void = {}
-    /// The overflow menu's two actions. `onMore` used to sit here as a single
-    /// closure nobody supplied — the ellipsis was a button that opened nothing —
-    /// and the menu itself is now local to the view, because presenting a menu is
-    /// not a decision the shell has any part in. nil clears the value.
-    /// `async` on purpose: the screen re-reads itself when one of these returns,
-    /// and a fire-and-forget closure would race the write it is meant to show. The
-    /// hero renders the name being changed, so "eventually correct" is visibly
-    /// wrong here in a way it is not for the reminder toggle.
     var onRename: (String?) async -> Void = { _ in }
     var onChangeCategory: (String?) async -> Void = { _ in }
     var onToggleReminder: (Bool) -> Void = { _ in }
     var onMarkCancelled: () -> Void = {}
 }
 
-/// Subscription detail (mockups 21k–21q): ink hero + self-narrating timeline.
 struct DetailView: View {
     let payload: DetailPayload
     var actions = DetailActions()
     @State private var editing: Editing?
 
-    /// Seeded from the payload, so the label matches what is stored. `@State`
-    /// rather than reading the payload directly because the tap must show
-    /// immediately — the write is fire-and-forget and the row is only re-read on
-    /// the next visit.
     @State private var reminderOn: Bool
     var scrollAnchor: UnitPoint = .top
 
@@ -85,7 +64,6 @@ struct DetailView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     topChrome
                     hero
-                    // History sits tight under the hero (21q).
                     VStack(alignment: .leading, spacing: 8) {
                         Text("History")
                             .font(.signuSection)
@@ -104,8 +82,6 @@ struct DetailView: View {
             switch which {
             case .rename:
                 RenameSheet(
-                    // The ENGINE's name: the placeholder and the reset action are
-                    // both about what shows through when the nickname is gone.
                     serviceName: payload.engineName,
                     nickname: payload.nickname,
                     onSave: { name in
@@ -135,8 +111,6 @@ struct DetailView: View {
         HStack {
             ChromeButton(systemName: "chevron.left", action: actions.onBack)
             Spacer()
-            // A native menu rather than a sheet of choices: two actions, both
-            // one-tap destinations of their own.
             Menu {
                 Button("Rename…") { editing = .rename }
                 Button(payload.category == nil ? "Add category…" : "Change category…") {
@@ -156,8 +130,6 @@ struct DetailView: View {
         .padding(.top, 4)
     }
 
-    /// Which overflow sheet is up. One optional rather than two booleans — the
-    /// same lesson 14a's empty sheet taught: one presentation, one piece of state.
     enum Editing: String, Identifiable {
         case rename, category
         var id: String { rawValue }
@@ -187,7 +159,6 @@ struct DetailView: View {
         }
     }
 
-    // MARK: - Bottom bar
 
     @ViewBuilder
     private var bottomBar: some View {
@@ -225,8 +196,6 @@ struct DetailView: View {
         }
     }
 
-    // Reminder toggle → subscription.remind_before_days (on = 2). No mockup
-    // for the on-state; rendered as a green confirmed pill.
     private var remindButton: some View {
         Button {
             reminderOn.toggle()
@@ -240,7 +209,6 @@ struct DetailView: View {
     }
 }
 
-/// One timeline row: leading rail (connector + marker) and the event content.
 private struct TimelineRow: View {
     let event: TimelineEvent
 
@@ -257,7 +225,7 @@ private struct TimelineRow: View {
                     .foregroundStyle(SignuColor.textSecondary)
             }
             .padding(.vertical, 10)
-            .layoutPriority(1)          // label wins space over the amount
+            .layoutPriority(1)
             Spacer(minLength: 6)
             if let amount = event.amountText {
                 Text(amount)
@@ -280,7 +248,7 @@ private struct TimelineRow: View {
                 .font(.signuRowTitle)
                 .foregroundStyle(event.tone == .normal ? SignuColor.textPrimary : tone)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)   // one line — all timeline labels (21o)
+                .minimumScaleFactor(0.8)
         }
     }
 
@@ -321,7 +289,6 @@ private struct TimelineRow: View {
     }
 }
 
-/// Vertical connector segment — solid, dashed, or nothing.
 private struct RailLine: View {
     let style: TimelineEvent.Line
 
@@ -348,12 +315,7 @@ private struct VLineShape: Shape {
     }
 }
 
-// MARK: - Previews
 
-/// Detail payload for the real subscription with the given service name.
-///
-/// `@MainActor` because the providers are: this builds one, and a nonisolated
-/// async helper could otherwise touch it from any executor.
 @MainActor
 private func detailByName(_ name: String) async -> DetailPayload? {
     let provider = MockDataProvider()

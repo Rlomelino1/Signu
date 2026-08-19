@@ -1,10 +1,5 @@
 import Foundation
 
-// Detail-screen timeline synthesis. Interleaves synthesized run-state events
-// (renewal, cancellation, missed, ended, gap) with charge rows by date.
-//
-// Moved verbatim out of MockDataProvider+Detail.swift so the live provider
-// shares it. See PayloadSource.swift for why.
 
 extension SignuPayloadSource {
     func makeDetailPayload(subscriptionId: UUID) -> DetailPayload? {
@@ -14,7 +9,6 @@ extension SignuPayloadSource {
         return detailPayload(subscription: sub, runs: runs, charges: charges)
     }
 
-    /// Pure builder — also used by the preview fixtures (demoMax, demoCancelled).
     func detailPayload(subscription sub: Subscription,
                        runs allRuns: [SubscriptionRun],
                        charges allCharges: [Charge]) -> DetailPayload {
@@ -38,14 +32,9 @@ extension SignuPayloadSource {
         let interval = latest.billingInterval
         let currentCardLabel = derivedCardLabel(for: lastCharge)
 
-        // MARK: Hero
         let unit = interval == .monthly ? "/mo" : "/yr"
-        let approx = latest.detectedBy.isApproximate            // tilde iff R3/R4
+        let approx = latest.detectedBy.isApproximate
         let amountText = SignuFormat.brl(lastCharge.amount, approximate: approx)
-        // Derived rather than read straight from `card_label`, which is null for every
-        // charge in production (v59). `cardWithDash` renders "Master – 2049"; the
-        // separator lives inside the label, so an unnameable card gives "Monthly"
-        // instead of "Monthly · ".
         let heroCard = derivedCardLabel(for: lastCharge).map { " · \(cardWithDash($0))" } ?? ""
         let subtitle = "\(interval == .monthly ? "Monthly" : "Annual")\(heroCard)"
 
@@ -59,10 +48,8 @@ extension SignuPayloadSource {
         var sinceLabel = "Since \(SignuFormat.monthYearShort(runs.first!.startDate))"
         if runs.count > 1 { sinceLabel += " · \(runs.count) runs" }
 
-        // MARK: Timeline
         var dated: [(Date, TimelineEvent)] = []
 
-        // Upcoming/expected head event for the latest run.
         if latest.status == .active, let next = latest.nextExpectedDate {
             let rel = SignuFormat.relativeShort(days: dayCount(from: today, to: next))
             dated.append((next, TimelineEvent(
@@ -89,13 +76,11 @@ extension SignuPayloadSource {
                 let amount = SignuFormat.brl(charge.amount)
 
                 if run.status == .cancelled, let cd = run.cancelledDate, charge.date > cd {
-                    // R5 trailing charge on a cancelled run.
                     dated.append((charge.date, TimelineEvent(
                         id: UUID(), title: "Charged · after cancellation",
                         dateText: dateText, amountText: amount, tone: .warning, marker: .filled
                     )))
                 } else if prev == nil {
-                    // Oldest charge of the run = boundary event.
                     let boundary = runIndex == 0 ? "First charge · start of run" : "Started · new run"
                     let dt = runIndex == 0 ? dateText : "\(dateText) · charged"
                     dated.append((charge.date, TimelineEvent(
@@ -111,18 +96,12 @@ extension SignuPayloadSource {
                           let card = derivedCardLabel(for: charge),
                           let previousCard = derivedCardLabel(for: prev),
                           card != previousCard {
-                    // Switch-point charge carries the transition annotation. BOTH cards
-                    // must be nameable to claim a change: with `card_label` null
-                    // everywhere, comparing raw values made every charge look like a
-                    // card switch to an empty string, and the annotation read "card
-                    // changed to " (v59).
                     dated.append((charge.date, TimelineEvent(
                         id: UUID(), title: "Charged",
                         dateText: "\(dateText) · card changed to \(card)",
                         amountText: amount, tone: .info, marker: .filled
                     )))
                 } else {
-                    // Ordinary charge; inline card only when it differs from current.
                     let card = derivedCardLabel(for: charge)
                     let dt = (card != nil && card != currentCardLabel)
                         ? "\(dateText) · \(card!)"
@@ -134,10 +113,7 @@ extension SignuPayloadSource {
                 }
             }
 
-            // Run-death synthesized events.
             if run.status == .ended, let endDate = run.endDate {
-                // Missed expected row only on a standalone ended run (21p);
-                // for an older ended run before a gap the gap carries it (21q).
                 if run.id == latest.id {
                     dated.append((endDate, TimelineEvent(
                         id: UUID(), title: "Expected charge missed",
@@ -160,7 +136,6 @@ extension SignuPayloadSource {
                 )))
             }
 
-            // Gap between this run's death and the next run's start (11a).
             if runIndex < runs.count - 1 {
                 let next = runs[runIndex + 1]
                 let deadDate = deadDate(of: run, calendar: cal)
@@ -179,10 +154,7 @@ extension SignuPayloadSource {
         var events = dated.sorted { $0.0 > $1.0 }.map(\.1)
         applyConnectors(&events)
 
-        // MARK: Actions + footer
         let showRemindMe = latest.status == .active
-        // The stored setting, not a guess. `remind_before_days` nullable IS the
-        // switch (v5), so its presence is the whole answer.
         let reminderOn = sub.remindBeforeDays != nil
         let showMarkCancelled = latest.status == .active || latest.status == .overdue
         let footer = detailFooter(latest, lastCharge: lastCharge, calendar: cal)
@@ -200,7 +172,6 @@ extension SignuPayloadSource {
         )
     }
 
-    // MARK: - Helpers
 
     private func statusChip(_ status: RunStatus) -> (String, StatusChip.Tone) {
         switch status {
@@ -251,7 +222,6 @@ extension SignuPayloadSource {
         }
     }
 
-    /// Solid connectors throughout; dashed only around the not-subscribed gap.
     private func applyConnectors(_ events: inout [TimelineEvent]) {
         guard !events.isEmpty else { return }
         events[0].lineAbove = .none
@@ -274,4 +244,3 @@ extension SignuPayloadSource {
     }
 }
 
-// MARK: - Preview fixtures (not in the Home/Subs dataset)

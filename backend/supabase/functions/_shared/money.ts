@@ -1,14 +1,4 @@
-// The only place amounts are compared or added. Every rule calls into here and
-// no rule performs its own arithmetic on amounts (v24).
-//
-// This exists because the identical bug has already shipped once: the dry-run
-// harness compared amounts with `abs(a - b) < 0.01`, and abs(6.46 - 6.45) is
-// 0.009999999999999787 in IEEE float, which slips under that threshold. Two
-// amounts a cent apart compared EQUAL and R1 invented a pair (v23). Moving the
-// rules into a second language re-opens exactly that hole, so the discipline is
-// centralised rather than restated at each call site.
 
-/** Amount as integer cents. The only representation the rules compare. */
 export function cents(amount: number | string): number {
   const n = typeof amount === 'string' ? Number(amount) : amount
   if (!Number.isFinite(n)) throw new Error(`not a finite amount: ${amount}`)

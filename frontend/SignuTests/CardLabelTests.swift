@@ -2,12 +2,6 @@ import Testing
 import Foundation
 @testable import Signu
 
-// "Monthly · Master 2049" (v59), and the dangling separator it replaces.
-//
-// The rows interpolated `charge.card_label` directly. That column has a reader and NO
-// writer — the engine hardcodes `card_label: null` in `detection.ts` — so every charge
-// in production carries null and the subtitle rendered "Monthly · " with punctuation
-// drawn around an absence.
 
 @Suite("Card label (v59)")
 @MainActor
@@ -35,12 +29,11 @@ struct CardLabelTests {
     private static func charge(transactionId: UUID?, storedLabel: String) -> Charge {
         Charge(
             id: UUID(), runId: UUID(), transactionId: transactionId,
-            date: Date(timeIntervalSince1970: 1_779_000_000), amount: 34.33,
+            date: Date(timeIntervalSince1970: 1_779_000_000), amount: 44.22,
             currency: "BRL", cardLabel: storedLabel
         )
     }
 
-    /// A charge whose transaction resolves to `account`, as the live provider maps it.
     private static func source(
         charge: Charge, account: BankAccount?
     ) -> (StubSource, Charge) {
@@ -55,21 +48,16 @@ struct CardLabelTests {
 
     @Test("the card is derived from the account when the column is null")
     func derivedFromAccount() {
-        // Production's shape: card_label null, and a Mastercard ending 2049 behind the
-        // transaction. The app already holds both halves.
-        let account = Self.account(brand: "MASTERCARD", last4: "2049")
+        let account = Self.account(brand: "MASTERCARD", last4: "4321")
         let (source, charge) = Self.source(
             charge: Self.charge(transactionId: UUID(), storedLabel: ""), account: account
         )
-        #expect(source.derivedCardLabel(for: charge) == "Master 2049")
+        #expect(source.derivedCardLabel(for: charge) == "Master 4321")
     }
 
     @Test("a stored snapshot wins over the account")
     func storedWins() {
-        // `card_label` is documented as a snapshot at billing time. If the engine ever
-        // writes one it describes the card as it WAS, which outranks the account as it
-        // is now — a card replaced since would otherwise rewrite history.
-        let account = Self.account(brand: "MASTERCARD", last4: "2049")
+        let account = Self.account(brand: "MASTERCARD", last4: "4321")
         let (source, charge) = Self.source(
             charge: Self.charge(transactionId: UUID(), storedLabel: "Visa 4821"), account: account
         )
@@ -87,8 +75,6 @@ struct CardLabelTests {
 
     @Test("a charge with no brand cannot be named")
     func noBrand() {
-        // A checking account has no card brand, so there is no card to name — and
-        // "Account 3816" would be inventing one.
         let account = Self.account(brand: nil, last4: "3816")
         let (source, charge) = Self.source(
             charge: Self.charge(transactionId: UUID(), storedLabel: ""), account: account
@@ -98,15 +84,12 @@ struct CardLabelTests {
 
     @Test("a charge whose raw transaction is gone cannot be named")
     func deletedTransaction() {
-        // `transaction_id = NULL` is by design once raw data is deleted, so this is an
-        // ordinary state and not an error.
         let (source, charge) = Self.source(
             charge: Self.charge(transactionId: nil, storedLabel: ""), account: nil
         )
         #expect(source.derivedCardLabel(for: charge) == nil)
     }
 
-    // MARK: - The subtitle, which is where the dangling separator showed
 
     private static func run(_ interval: BillingInterval) -> SubscriptionRun {
         SubscriptionRun(
@@ -121,11 +104,10 @@ struct CardLabelTests {
     func separatorIsPartOfTheLabel() {
         let named = Self.source(
             charge: Self.charge(transactionId: UUID(), storedLabel: ""),
-            account: Self.account(brand: "MASTERCARD", last4: "2049")
+            account: Self.account(brand: "MASTERCARD", last4: "4321")
         )
-        #expect(named.0.intervalAndCard(Self.run(.monthly), named.1) == "Monthly · Master 2049")
+        #expect(named.0.intervalAndCard(Self.run(.monthly), named.1) == "Monthly · Master 4321")
 
-        // The reported bug: this produced "Monthly · " — punctuation around nothing.
         let unnamed = Self.source(
             charge: Self.charge(transactionId: nil, storedLabel: ""), account: nil
         )

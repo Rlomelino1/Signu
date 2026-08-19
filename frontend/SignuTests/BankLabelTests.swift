@@ -2,18 +2,10 @@ import Testing
 import Foundation
 @testable import Signu
 
-// #1 from the first production run: the bank read "MeuPluggy", not "Nubank".
-// Connector 200 is Pluggy's own-accounts proxy, so `institution_name` names the
-// proxy rather than the bank — and the bank is one level down, in the account's
-// official name. These pin the derivation because it is the kind of rule that
-// looks obviously right and silently mislabels a real connector: the trims are
-// only correct for a proxy, so "leave a real connector alone" is as much of a
-// requirement as "derive for a proxy" and is tested first.
 
 @Suite("Bank label derivation (v43)")
 struct BankLabelTests {
 
-    // MARK: - The connector name wins when the connector is a real bank
 
     @Test("A real connector keeps its name, accounts notwithstanding")
     func realConnectorIsUntouched() {
@@ -22,12 +14,9 @@ struct BankLabelTests {
             institutionName: "Nubank",
             proxiedAccountNames: ["Nu Pagamentos S.A. - Instituição de Pagamento (Conta Pré-paga)"]
         )
-        // Deriving here would REPLACE the brand with a legal name — worse, and
-        // the reason membership of `proxyConnectorIds` gates the whole rule.
         #expect(label == "Nubank")
     }
 
-    // MARK: - The proxy defers to the account
 
     @Test("The MeuPluggy proxy is labelled from the account, trims and all")
     func proxyDerivesFromAccount() {
@@ -54,7 +43,6 @@ struct BankLabelTests {
         #expect(BankLabel.institution(from: "Itaú Unibanco S.A.") == "Itaú Unibanco S.A.")
     }
 
-    // MARK: - Falling back rather than inventing
 
     @Test("Nothing left after trimming is not a bank name")
     func trimmedToNothing() {
@@ -83,10 +71,7 @@ struct BankLabelTests {
         #expect(label == "MeuPluggy")
     }
 
-    // MARK: - What the payload layer feeds it
 
-    /// The smallest thing satisfying `SignuPayloadSource`, so `bankLabel` runs for
-    /// real rather than against a reimplementation of its filter.
     private struct StubSource: SignuPayloadSource {
         var today = Date(timeIntervalSince1970: 1_780_000_000)
         var now = Date(timeIntervalSince1970: 1_780_000_000)
@@ -123,9 +108,6 @@ struct BankLabelTests {
         let source = StubSource(
             connectionList: [connection],
             accountList: [
-                // This ledger's real card name. Ranking it last would still let it
-                // win a connection that holds nothing else, which is why the
-                // filter drops cards outright.
                 Self.account(connection.id, type: .creditCard, name: "platinum"),
                 Self.account(
                     connection.id, type: .checking,
@@ -139,11 +121,6 @@ struct BankLabelTests {
     @Test("The second bank behind the same proxy gets its own name")
     @MainActor
     func aggregatorHoldingASecondBank() {
-        // Production, verbatim, after the first connection the app ever created
-        // (2026-08-17): a second MeuPluggy item holding C6's accounts. The connector
-        // says "MeuPluggy" for both banks, so the label can only come from here — and
-        // the card is excluded, which matters because 'C6 STANDARD' would otherwise
-        // win alphabetically.
         let connection = Self.connection(institutionId: "200", name: "MeuPluggy")
         let source = StubSource(
             connectionList: [connection],
@@ -180,9 +157,6 @@ struct BankLabelTests {
                 ),
             ]
         )
-        // A second bank arrives as a second connection, so the filter by
-        // connectionId is what keeps two proxied banks from borrowing each
-        // other's name.
         #expect(source.bankLabel(nubank) == "MeuPluggy")
         #expect(source.bankLabel(other) == "Nu Pagamentos S.A.")
     }

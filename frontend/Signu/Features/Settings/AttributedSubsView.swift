@@ -19,7 +19,6 @@ struct AttributedSubsScreen: View {
     }
 }
 
-/// Attributed-subscriptions list (13a — mockup 21x). Fully read-only.
 struct AttributedSubsView: View {
     let payload: AttributedSubsPayload
     var onBack: () -> Void = {}
@@ -106,6 +105,6 @@ struct AttributedSubsView: View {
 
 #Preview("Attributed subs (13a)") {
     let provider = MockDataProvider()
-    let itau = provider.connectionList.first { $0.institutionName == "Itaú" }!
+    let itau = provider.connectionList.first { $0.institutionName == "Demo Bank" }!
     return AttributedSubsScreen(provider: provider, connectionId: itau.id)
 }

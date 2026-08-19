@@ -1,9 +1,5 @@
 import SwiftUI
 
-/// Drives the floating tab bar's Safari-style auto-hide (see the tab bar
-/// behavior contract in the data-model doc): visible by default, hidden on
-/// downward scroll, revealed by any upward scroll or reaching the very
-/// bottom. Unscrollable content never hides the bar.
 @Observable
 final class TabBarState {
     private(set) var hidden = false
@@ -11,7 +7,6 @@ final class TabBarState {
     @ObservationIgnored private var lastOffset: CGFloat = 0
     @ObservationIgnored private var synced = false
 
-    /// Call on tab switches — the new screen starts with the bar visible.
     func reset() {
         hidden = false
         synced = false
@@ -21,17 +16,14 @@ final class TabBarState {
         let maxOffset = contentHeight - viewportHeight
         defer { lastOffset = offset }
 
-        // Content too short to scroll: the bar must never be unreachable.
         guard maxOffset > 24 else {
             hidden = false
             return
         }
-        // First report after a reset only records the baseline.
         guard synced else {
             synced = true
             return
         }
-        // Near the top, or at the very bottom: always reveal.
         if offset <= 8 || offset >= maxOffset - 8 {
             hidden = false
             return
@@ -45,12 +37,6 @@ final class TabBarState {
     }
 }
 
-/// ScrollView for tab screens: reports scroll metrics to the shell's
-/// TabBarState when hosted in it; standalone (previews) it's inert.
-///
-/// Metrics come from KVO on the enclosing UIScrollView — the SwiftUI
-/// preference-key pipeline proved unreliable here (verified empirically:
-/// preferences from scroll content never re-propagated on scroll).
 struct SignuScrollView<Content: View>: View {
     var anchor: UnitPoint = .top
     @ViewBuilder var content: () -> Content
@@ -74,9 +60,6 @@ struct SignuScrollView<Content: View>: View {
     }
 }
 
-/// Invisible view that finds its enclosing UIScrollView and observes
-/// contentOffset/contentSize. Reports offsets normalized so 0 = top and
-/// (contentHeight - viewportHeight) = bottom, insets included.
 private struct ScrollViewObserver: UIViewRepresentable {
     let onChange: (CGFloat, CGFloat, CGFloat) -> Void
 
@@ -121,9 +104,6 @@ private struct ScrollViewObserver: UIViewRepresentable {
             guard let scroll = candidate as? UIScrollView, scroll !== observedScrollView else { return }
             observedScrollView = scroll
 
-            // Typed `@MainActor`, which makes it Sendable and so legal to capture
-            // in KVO's `@Sendable` handler — a plain closure over `self` and
-            // `scroll` is not, and warns under Swift 6.
             let report: @MainActor () -> Void = { [weak self, weak scroll] in
                 guard let self, let scroll else { return }
                 let insets = scroll.adjustedContentInset
@@ -133,10 +113,6 @@ private struct ScrollViewObserver: UIViewRepresentable {
                     scroll.bounds.height
                 )
             }
-            // `assumeIsolated`, not a hop: `contentOffset` and `contentSize` are
-            // main-thread-only UIKit properties, so the handler already runs there.
-            // A `Task { @MainActor }` would defer the report by a turn and make the
-            // tab bar lag the scroll it is supposed to track.
             observations = [
                 scroll.observe(\.contentOffset, options: [.initial]) { _, _ in
                     MainActor.assumeIsolated { report() }

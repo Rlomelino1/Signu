@@ -4,20 +4,12 @@ struct ConnectionDetailScreen: View {
     let provider: SignuDataProviding
     let connectionId: UUID
     var onBack: () -> Void = {}
-    /// Reported after a successful re-authentication, so Settings stops
-    /// rendering the state this link was in before it.
     var onReconnected: () -> Void = {}
 
     @State private var payload: ConnectionDetailPayload?
     @State private var showRemove = false
     @State private var attributedId: UUID?
-    /// The removal's failure has to render here rather than in the shell: this
-    /// screen is a full-screen cover, and an alert attached below it never
-    /// appears.
     @State private var removeError: String?
-    /// 12b presents the connect flow itself. It cannot delegate that upwards: a
-    /// full-screen cover will not present another cover, so a request to the
-    /// shell arrives and does nothing.
     @State private var connectTarget: ConnectTarget?
 
     var body: some View {
@@ -37,11 +29,6 @@ struct ConnectionDetailScreen: View {
         .task { payload = try? await provider.connectionDetailPayload(connectionId: connectionId) }
         .sheet(isPresented: $showRemove) {
             if let payload {
-                // The sheet's radio choice travels with the tap. It has to: the
-                // Edge Function deletes attributed subscriptions BEFORE the
-                // connection, because attribution runs through
-                // `charge.transaction_id` and the connection's own deletion NULLs
-                // it. Asked afterwards, the question has no answer left.
                 RemoveBankSheet(institutionName: payload.institutionName, count: payload.summaryCount) { keepHistory in
                     Task {
                         do {
@@ -50,7 +37,7 @@ struct ConnectionDetailScreen: View {
                                 deleteHistory: !keepHistory
                             )
                             showRemove = false
-                            onBack()   // link removed → back to Settings
+                            onBack()
                         } catch {
                             showRemove = false
                             removeError = error.localizedDescription
@@ -73,8 +60,6 @@ struct ConnectionDetailScreen: View {
             AttributedSubsScreen(provider: provider, connectionId: id, onBack: { attributedId = nil })
         }
         .connectBankCover(provider: provider, target: $connectTarget) {
-            // Re-read before reporting: the item's status and consent date have
-            // just changed, and this screen renders both.
             Task {
                 payload = try? await provider.connectionDetailPayload(connectionId: connectionId)
                 onReconnected()
@@ -83,7 +68,6 @@ struct ConnectionDetailScreen: View {
     }
 }
 
-/// Connection detail (12b — mockup 21v).
 struct ConnectionDetailView: View {
     let payload: ConnectionDetailPayload
     var onBack: () -> Void = {}
@@ -186,7 +170,6 @@ struct ConnectionDetailView: View {
             }
             .padding(16)
             .background(SignuColor.sunken.opacity(0.7), in: RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous))
-            // As everywhere else: the fill is painted, not hit-tested.
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -205,7 +188,6 @@ struct ConnectionDetailView: View {
     }
 }
 
-/// Small brand badge for a card row ("VISA" / "MC" / "ELO").
 struct CardBadge: View {
     let mark: String
 
@@ -232,12 +214,9 @@ struct CardBadge: View {
     }
 }
 
-/// Remove-bank sheet (12c — mockup 21w). History choice captured up front.
 struct RemoveBankSheet: View {
     let institutionName: String
     let count: Int
-    /// Carries the history choice, because the caller cannot ask for it later —
-    /// see the sequencing rule at the call site.
     var onRemove: (Bool) -> Void = { _ in }
 
     @State private var keepHistory = true
@@ -302,9 +281,6 @@ struct RemoveBankSheet: View {
                 RoundedRectangle(cornerRadius: SignuMetric.tileRadius, style: .continuous)
                     .strokeBorder(selected ? SignuColor.ink : SignuColor.hairline, lineWidth: selected ? 1.5 : 1)
             }
-            // 12c's history choice decides whether data is deleted. A radio the
-            // user believes they selected, that did not select, is the worst
-            // possible place for this bug.
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -313,14 +289,14 @@ struct RemoveBankSheet: View {
 
 #Preview("Connection detail (12b)") {
     let provider = MockDataProvider()
-    let itau = provider.connectionList.first { $0.institutionName == "Itaú" }!
+    let itau = provider.connectionList.first { $0.institutionName == "Demo Bank" }!
     return ConnectionDetailScreen(provider: provider, connectionId: itau.id)
 }
 
 #Preview("Remove bank sheet (12c)") {
     SignuColor.paper.ignoresSafeArea()
         .sheet(isPresented: .constant(true)) {
-            RemoveBankSheet(institutionName: "Itaú", count: 6)
+            RemoveBankSheet(institutionName: "Demo Bank", count: 6)
                 .presentationDetents([.height(560)])
         }
 }

@@ -1,28 +1,3 @@
-// auth.ts — who is calling, and what they are allowed to touch.
-//
-// The three jobs that came before this (pluggy-sync, run-detection,
-// send-reminders) are machine-invoked and authenticate with a shared
-// `x-sync-secret`. The four action functions are the first ones a *user* calls,
-// from the app, carrying their own JWT — so identity has to be resolved rather
-// than assumed, and this module is where that happens once.
-//
-// THE INVERSION THAT MATTERS
-//
-// The read path deliberately sends NO `user_id` predicate: RLS already scopes
-// every SELECT to the caller, and a client-side filter would be a second, weaker
-// copy of the same rule (v29). Here the rule is the exact opposite, for the same
-// underlying reason — the enforcing layer changed. `service_role` carries
-// `rolbypassrls`, so no policy stands between these functions and every user's
-// rows. Scoping stops being the database's job the moment we pick up that key,
-// and becomes this file's.
-//
-// So: the caller comes from the JWT and NEVER from the request body, and every
-// row a function is about to write is proved to belong to that caller first. A
-// body-supplied user id would be an authorization bug with a friendly name.
-//
-// No CORS preflight handling here on purpose: the only caller is the iOS app,
-// which is not a browser, and a permissive `Access-Control-Allow-Origin` added
-// "just in case" would hand these four writes to any web page that learns a URL.
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 
@@ -32,20 +7,6 @@ export type CallerResult =
   | { ok: true; caller: Caller }
   | { ok: false; status: number; error: string }
 
-/**
- * Resolve the calling user from the `Authorization: Bearer <jwt>` header.
- *
- * Validated against the auth server through an anon-key client carrying the
- * caller's own header — the token is never handed to a service-role client, and
- * it is never decoded locally either. A locally-decoded JWT is a signature we
- * chose to trust; `getUser()` is one the auth server confirms, and it also
- * refuses a token belonging to an account that has since been deleted, which is
- * a real state here because one of these four functions deletes accounts.
- *
- * The platform gateway also verifies the JWT before invoking the function.
- * This is not redundant with that: the gateway answers "is this a valid token",
- * and the write path needs "whose".
- */
 export async function resolveCaller(req: Request): Promise<CallerResult> {
   const header = req.headers.get('Authorization') ?? ''
   const token = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : ''
