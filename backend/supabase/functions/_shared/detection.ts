@@ -472,6 +472,106 @@ function backfillR2(run: ProtoRun, group: TxRow[], claimed: Set<string>): void {
   }
 }
 
+// ------------------------------------------------------------------------- R5
+//
+// A cancelled run holds AT MOST ONE charge dated after its `cancelled_date`.
+// Claiming that charge extends paid-through by one interval; a SECOND matching
+// charge un-claims it, and the post-cancellation charges anchor a new run through
+// standard R1 -- a resubscription, not a resurrection.
+//
+// This is the only place a charge ever moves between runs, and it is the reason
+// `matchRuns` resolves identity by descending overlap: the cancelled run overlaps
+// itself on many charges while the new run overlaps it on one, so the cancelled run
+// keeps its id and the resubscription is correctly new.
+//
+// The cap is measured from `cancelled_date`, which is an assertion, and never from
+// the run's last claimed charge -- that version ratchets forward one charge per
+// sync, which is the unlimited-swallowing bug wearing a limit. Every part of this is
+// a derivation from (raw, assertions, today), so incremental sync and full replay
+// converge on identical state.
+
+/** The live transaction ids a stored run holds. Frozen charges are excluded for the
+ *  same reason `matchRuns` excludes them: no raw backing, no identity evidence. */
+function claimedIds(runId: string, storedCharges: StoredCharge[]): Set<string> {
+  const out = new Set<string>()
+  for (const c of storedCharges) {
+    if (c.run_id === runId && c.transaction_id !== null) out.add(c.transaction_id)
+  }
+  return out
+}
+
+/** R5 — trailing charge on cancelled runs. Applied to `protos` in place; returns
+ *  what fired, because a rule that silently never fires reads as a rule that works
+ *  and this project has now paid for that lesson three times. */
+function trailingR5(
+  protos: ProtoRun[],
+  claimed: Set<string>,
+  cancelledRuns: StoredRun[],
+  storedCharges: StoredCharge[],
+): { trailing: number; unclaimed: number } {
+  let trailing = 0
+  let unclaimed = 0
+
+  for (const run of cancelledRuns) {
+    const cancelledDate = run.cancelled_date
+    if (!cancelledDate) continue
+    const ids = claimedIds(run.id, storedCharges)
+    if (ids.size === 0) continue
+
+    // Which proto IS this cancelled run, by the same greedy-overlap rule `matchRuns`
+    // applies later. Resolved here rather than reusing that pass because the split
+    // has to happen before identity is assigned: matching first would hand the
+    // over-extended proto the cancelled run's id and there would be nothing left to
+    // split off.
+    let host: ProtoRun | undefined
+    let bestOverlap = 0
+    for (const p of protos) {
+      const overlap = p.charges.reduce((n, c) => n + (ids.has(c.id) ? 1 : 0), 0)
+      if (overlap > bestOverlap) {
+        host = p
+        bestOverlap = overlap
+      }
+    }
+    if (!host) continue
+
+    const after = host.charges.filter((c) => c.date > cancelledDate)
+    if (after.length === 0) continue
+
+    const keep = host.charges.filter((c) => c.date <= cancelledDate)
+    // Nothing survives the cancellation date, so the pre-cancellation charges were
+    // withdrawn out from under the run. Truncating would leave a proto with no
+    // charges at all; leave this one to the normal delete-and-rederive path.
+    if (keep.length === 0) continue
+
+    if (after.length === 1) {
+      trailing++
+      continue
+    }
+
+    // A resubscription exists only if the post-cancellation charges anchor on their
+    // own, through the same R1 as any other run. When they cannot -- a price change
+    // between them means no same-amount pair -- the cap decides instead: the run
+    // keeps its one trailing charge and the rest go back to being unclaimed charges.
+    // Better one truthful trailing charge than a resubscription the evidence does not
+    // support. "Strict to create."
+    const fresh = anchorR1(after)
+    if (fresh.length === 0) {
+      host.charges = [...keep, after[0]]
+      for (const c of after.slice(1)) claimed.delete(c.id)
+      trailing++
+      continue
+    }
+
+    host.charges = keep
+    const anchored = new Set(fresh.flatMap((f) => f.charges.map((c) => c.id)))
+    for (const c of after) if (!anchored.has(c.id)) claimed.delete(c.id)
+    protos.push(...fresh)
+    unclaimed++
+  }
+
+  return { trailing, unclaimed }
+}
+
 // ------------------------------------------------------------------- lifecycle
 
 function lifecycle(
@@ -561,11 +661,18 @@ function applyAssertions(
     // next_expected_date stays null so a cancelled run never appears in "Coming
     // up" and can never trip overdue.
     if (stored.status === 'cancelled') {
+      // Paid-through is DERIVED, not frozen: R5's trailing charge extends it by an
+      // interval and un-claiming has to restore it. Both are `last claimed charge +
+      // one interval` -- the same expression `cancellation()` writes in the first
+      // place -- so nothing has to remember the pre-trailing value and replay cannot
+      // ratchet it forward. Freezing the stored value made the paid-through date
+      // depend on sync history rather than on the data.
+      const last = desired.charges[desired.charges.length - 1]
       return {
         ...desired,
         status: 'cancelled',
         cancelled_date: stored.cancelled_date,
-        end_date: stored.end_date,
+        end_date: last ? addInterval(last.date, desired.billing_interval) : stored.end_date,
         next_expected_date: null,
         detected_by: stored.detected_by,
       }
@@ -658,6 +765,8 @@ export function detect(input: EngineInput): DesiredState {
   let r1Runs = 0
   let r3Runs = 0
   let r4Runs = 0
+  let r5Trailing = 0
+  let r5Unclaimed = 0
 
   // Deterministic group order, so output ordering is stable run to run.
   for (const merchant of [...groups.keys()].sort()) {
@@ -675,6 +784,19 @@ export function detect(input: EngineInput): DesiredState {
     const protos = anchorR1(group)
     protos.forEach((p) => p.charges.forEach((c) => claimed.add(c.id)))
     protos.forEach((p) => backfillR2(p, group, claimed))
+
+    // R5 last of the auto rules, over finished protos: continuation built them blind
+    // to cancellation, and this is where a cancelled run gives back what it should
+    // never have swallowed. Cannot run before R1 -- there is no run to cap yet -- and
+    // must run before the R3/R4 gates, which only fire when nothing was detected.
+    const r5 = trailingR5(
+      protos,
+      claimed,
+      candidateStoredRuns.filter((r) => r.status === 'cancelled'),
+      input.charges,
+    )
+    r5Trailing += r5.trailing
+    r5Unclaimed += r5.unclaimed
 
     if (protos.length === 0) {
       const leftover = group.filter((c) => !claimed.has(c.id))
@@ -766,7 +888,14 @@ export function detect(input: EngineInput): DesiredState {
   return {
     subscriptions: mergeByDedupeKey(subscriptions),
     delete_run_ids,
-    diagnostics: { ...diagnostics, r1_runs: r1Runs, r3_runs: r3Runs, r4_runs: r4Runs },
+    diagnostics: {
+      ...diagnostics,
+      r1_runs: r1Runs,
+      r3_runs: r3Runs,
+      r4_runs: r4Runs,
+      r5_trailing: r5Trailing,
+      r5_unclaimed: r5Unclaimed,
+    },
   }
 }
 

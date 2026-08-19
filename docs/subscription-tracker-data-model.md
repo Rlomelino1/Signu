@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-18** (v69) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-19** (v70) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -215,6 +215,43 @@ A cancelled run may claim **at most one** continuation charge — `merchant_key`
 - Stated as a **replay rule** on purpose: incremental sync and full replay must converge on identical state.
 
 > **Note:** this is the **only** place a charge ever moves between runs — un-claiming is a required engine capability; replayability is what makes it safe.
+
+**Implemented in v70**, fourteen spec versions after it was first described. Three
+decisions the statement above left open, all forced by replayability:
+
+- **The cap is measured from `cancelled_date`, never from the run's last claimed
+  charge.** `cancelled_date` is an assertion; the last claimed charge is derived, and
+  it moves the instant a trailing charge is claimed — so a cap anchored on it ratchets
+  forward one charge per sync, which is the unlimited-swallowing bug wearing a limit.
+  As implemented: **a cancelled run holds at most one charge dated after its
+  `cancelled_date`**, and that charge still has to be a normal R1 continuation, which
+  is what supplies the "within one cadence" half.
+- **Paid-through is derived on every pass, never frozen.** `applyAssertions` returned
+  the *stored* `end_date` for a cancelled run. Recomputing it as `last claimed charge +
+  one interval` — the same expression `cancellation()` writes in the first place — is
+  what makes both the extension and the restoration free: nothing has to remember the
+  pre-trailing value. Freezing it was also independently wrong. Two passes over
+  identical raw data disagreed about paid-through depending on whether a charge had
+  been seen before, so the stored date was a function of sync history rather than of
+  the data. The test that caught it compares the incremental and replay paths directly.
+- **The un-claim requires a real anchor.** *"Both charges anchor a new run via standard
+  R1"* is a precondition, not a consequence: standard R1 requires the **same** money, so
+  two post-cancellation charges at different amounts cannot anchor anything. When they
+  cannot, the cap decides instead — the run keeps its one trailing charge and the rest
+  go back to being unclaimed charges. Un-claiming regardless would leave real charges
+  attached to no run at all, and a screen that says less than the data supports is the
+  one outcome this project refuses.
+
+**No migration.** The un-claim moves a charge between runs and Migration #15's applier
+already does precisely that — `on conflict (transaction_id) do update set run_id =
+excluded.run_id`, with the prune scoped to the run and tested against the whole
+payload's wanted set *"so a re-parent is a move, not a delete"*. A charge the cap
+releases is pruned from the run on the first pass. Both halves were built in v61 for a
+rule that did not exist.
+
+**Diagnostics `r5_trailing` and `r5_unclaimed`** are reported beside
+`r1_runs`/`r3_runs`/`r4_runs`. A rule that silently never fires reads as a rule that
+works, and R5 is the third time that has cost this project something.
 
 ### R4 billing interval (locked 2026-07-15)
 
@@ -743,8 +780,24 @@ Documented in the database itself by **Migration #18** (comment only), because
 
 ### Scope limits, stated
 
-- **~~R4 does not fire~~ — CLOSED in v63.** All five rules are now live. Kept here
-  because the shape of the gap is worth remembering: R4 was contract-only from v11
+- **~~R5 is claimed but absent~~ — CLOSED in v70.** The same failure as R4 below and
+  worse, because the documentation asserted the opposite rather than staying silent.
+  From **v5** to **v69** this document and Migration #8's header both stated that the
+  engine ships R5. `detection.ts` never contained any part of it — no one-charge cap,
+  no paid-through extension, no un-claiming — and no test named it. v63's *"all five
+  rules are now live"* inherited the claim while closing R4, which is how a false
+  status survived the very release that audited the rules. Meanwhile the READER
+  shipped in v5: the detail timeline has rendered *"Charged · after cancellation"* for
+  a state nothing produced.
+  **What ran instead was not nothing, which is why nobody noticed.** R1's continuation
+  loop is blind to cancellation, so a cancelled run quietly swallowed every
+  post-cancellation charge — unlimited in number, with no paid-through extension and
+  no un-claim. The timeline therefore looked plausible while being wrong in three
+  ways at once.
+  *Third instance of one shape*: `card_label` was a reader with no writer (v60),
+  `purchase_date` a writer with no reader (v67), R5 a renderer with no producer.
+- **~~R4 does not fire~~ — CLOSED in v63.** Kept here because the shape of the gap is
+  worth remembering: R4 was contract-only from v11
   because MERCHANT_CATALOG did not exist, and *still* did not fire after v38 created
   and seeded the table, because nothing taught the engine to read it. Two different
   blockers, eleven spec versions apart, behind one symptom — and the sentence this
@@ -1730,6 +1783,35 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v70** — R5 SHIPS, FOURTEEN VERSIONS AFTER IT WAS DOCUMENTED (2026-08-19).
+  **No migration.** `_shared/detection.ts` gains `trailingR5` and loses a frozen
+  `end_date`; eight tests.
+  **The claim was the bug.** Every version from v5 said the engine ships R5 and no
+  version of the engine ever did. Found by reading `detection.ts` against the rules
+  table rather than against itself — the only R5 in the file was a comment in
+  `matchRuns` explaining that the greedy-overlap ordering exists *for* R5's un-claim,
+  which is infrastructure built for a rule nobody wrote.
+  **The old behaviour was plausible, not absent.** R1's continuation loop knows
+  nothing about cancellation, so a cancelled run appended post-cancellation charges
+  without limit, never extended paid-through, and never un-claimed. The detail screen
+  rendered those charges under *"Charged · after cancellation"* — correct-looking copy
+  over three wrong facts.
+  **Two decisions are load-bearing and neither is in the original rule statement**:
+  the cap is measured from `cancelled_date` (an assertion) and not from the last
+  claimed charge (derived, and it moves), or the limit ratchets one charge per sync;
+  and paid-through is recomputed every pass instead of frozen, which is what lets the
+  un-claim restore the original date without storing it. Freezing it was already
+  wrong on its own — incremental sync and full replay disagreed about paid-through
+  over identical raw data, and one test now compares those two paths directly.
+  **The un-claim needed the ambiguity resolved.** "Both charges anchor a new run via
+  standard R1" is a precondition: R1 needs the same money, so a price change between
+  two post-cancellation charges anchors nothing. In that case the cap holds and the
+  run keeps one trailing charge, rather than un-claiming into charges that belong to
+  no run.
+  **Migration #8's header still says the engine ships R5.** Left as written: an
+  applied migration is a historical record and `db push` compares versions, not
+  contents, so correcting a comment there buys nothing and risks drift.
 
 - **v69** — ACTIONS PINNED TO COMMIT SHAs (2026-08-18). **No migration.** Seven `uses:`
   references, no behaviour change.

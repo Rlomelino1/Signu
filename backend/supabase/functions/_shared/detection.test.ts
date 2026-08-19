@@ -965,3 +965,230 @@ Deno.test('a cancelled R4 is likewise continued', () => {
   assertEquals(out.delete_run_ids, [])
   assertEquals(out.subscriptions[0].runs[0].status, 'cancelled')
 })
+
+// ------------------------------------------------- R5 trailing charge (v70)
+//
+// R5 was listed as shipping from v11 and never built. The engine's actual
+// behaviour: `anchorR1`'s continuation loop knows nothing about cancellation, so a
+// cancelled run swallows post-cancellation charges without limit, never extends
+// paid-through, and never un-claims. Meanwhile the READER exists — the detail
+// timeline renders "Charged · after cancellation" for a state nothing produced.
+//
+// The rule, from the data model: a cancelled run holds AT MOST ONE charge dated
+// after its `cancelled_date`; claiming it recomputes paid-through; a second
+// matching charge one cadence later un-claims the trailing one and both anchor a
+// NEW run as plain R1 — a resubscription, not a resurrection.
+//
+// The cap is measured from `cancelled_date` — an assertion, never a derived value —
+// because a cap measured from the run's last claimed charge ratchets forward one
+// charge per sync, which is the unlimited bug wearing a limit.
+
+/** A cancelled run and everything that landed after it. The stored side is the run
+ *  as the last cycle left it: `claimed` names the post-cancellation transactions it
+ *  already holds and `endDate` the paid-through it recorded, because R5 has to
+ *  converge on the same state whether a charge is seen for the first time or the
+ *  tenth. Defaults are the untouched cancellation: two charges, paid through the
+ *  interval after the second. */
+function cancelledCase(opts: {
+  today: string
+  after?: TxRow[]
+  claimed?: string[]
+  endDate?: string
+}) {
+  const x1 = row({ id: 'x1', provider_tx_id: 'x1', date: '2026-01-10', amount: 39.9 })
+  const x2 = row({ id: 'x2', provider_tx_id: 'x2', date: '2026-02-09', amount: 39.9 })
+  const after = opts.after ?? []
+  const claimed = opts.claimed ?? []
+  const held = [x1, x2, ...after.filter((r) => claimed.includes(r.id))]
+  return {
+    today: opts.today,
+    rows: [x1, x2, ...after],
+    subscriptions: [{
+      id: 'sub-1',
+      dedupe_key: 'ACME STREAMING',
+      merchant_key: 'ACME STREAMING',
+      service_name: 'Acme',
+      identification: 'user_confirmed',
+      ignored: false,
+    }],
+    runs: [{
+      id: 'run-1',
+      subscription_id: 'sub-1',
+      start_date: '2026-01-10',
+      end_date: opts.endDate ?? '2026-03-09',
+      billing_interval: 'monthly' as const,
+      status: 'cancelled',
+      detected_by: 'R1',
+      cancelled_date: '2026-02-15',
+      next_expected_date: null,
+    }],
+    charges: held.map((r, i) => ({
+      id: `c${i + 1}`,
+      run_id: 'run-1',
+      transaction_id: r.id,
+      date: r.date,
+      amount: r.amount,
+      currency: r.currency,
+      amount_in_account_currency: null,
+      card_label: null,
+    })),
+  }
+}
+
+Deno.test('R5: a cancelled run claims ONE trailing charge and extends paid-through', () => {
+  const x3 = row({ id: 'x3', provider_tx_id: 'x3', date: '2026-03-11', amount: 39.9 })
+  const out = detect(cancelledCase({ today: '2026-03-20', after: [x3] }))
+
+  assertEquals(out.subscriptions.length, 1, 'a trailing charge is not a new subscription')
+  const run = out.subscriptions[0].runs[0]
+  assertEquals(run.stored_run_id, 'run-1')
+  assertEquals(run.status, 'cancelled', 'a trailing charge never revives a cancelled run')
+  assertEquals(run.cancelled_date, '2026-02-15')
+  assertEquals(run.charges.map((c) => c.transaction_id), ['x1', 'x2', 'x3'])
+  assertEquals(run.end_date, '2026-04-11', 'paid-through = trailing charge + one interval')
+  assertEquals(run.next_expected_date, null, 'cancelled runs stay out of Coming up')
+  assertEquals(out.delete_run_ids, [])
+})
+
+Deno.test('R5: the trailing charge is amount-flexible, like any continuation', () => {
+  const x3 = row({ id: 'x3', provider_tx_id: 'x3', date: '2026-03-11', amount: 44.9 })
+  const out = detect(cancelledCase({ today: '2026-03-20', after: [x3] }))
+
+  const run = out.subscriptions[0].runs[0]
+  assertEquals(run.charges.map((c) => c.transaction_id), ['x1', 'x2', 'x3'])
+  assertEquals(run.end_date, '2026-04-11', 'a price change does not change paid-through')
+})
+
+Deno.test('R5: replay does not ratchet paid-through forward', () => {
+  // The trap in "recomputes end_date": extending the STORED end_date by an interval
+  // walks paid-through into the future one sync at a time. Paid-through is derived
+  // from the trailing charge, so the tenth pass says exactly what the first said.
+  const x3 = row({ id: 'x3', provider_tx_id: 'x3', date: '2026-03-11', amount: 39.9 })
+  const out = detect(
+    cancelledCase({ today: '2026-03-25', after: [x3], claimed: ['x3'], endDate: '2026-04-11' }),
+  )
+
+  const run = out.subscriptions[0].runs[0]
+  assertEquals(run.end_date, '2026-04-11')
+  assertEquals(run.charges.length, 3)
+})
+
+Deno.test('R5: the cap is ONE — a cancelled run does not keep swallowing charges', () => {
+  // x4 is a continuation by cadence (Apr 10 against an expected Apr 11) and
+  // continuation is amount-flexible, so today's engine appends it and every charge
+  // after it. It cannot anchor a NEW run either — R1 needs the SAME money and 44.90
+  // is not 39.90 — so the un-claim below does not apply and the cap decides: the run
+  // keeps its one trailing charge, x4 stays unclaimed.
+  const x3 = row({ id: 'x3', provider_tx_id: 'x3', date: '2026-03-11', amount: 39.9 })
+  const x4 = row({ id: 'x4', provider_tx_id: 'x4', date: '2026-04-10', amount: 44.9 })
+  const out = detect(
+    cancelledCase({ today: '2026-04-20', after: [x3, x4], claimed: ['x3'], endDate: '2026-04-11' }),
+  )
+
+  assertEquals(out.subscriptions.length, 1)
+  assertEquals(out.subscriptions[0].runs.length, 1, 'one unanchorable charge is not a run')
+  const run = out.subscriptions[0].runs[0]
+  assertEquals(run.charges.map((c) => c.transaction_id), ['x1', 'x2', 'x3'])
+  assertEquals(run.end_date, '2026-04-11', 'paid-through follows the trailing charge, not x4')
+})
+
+Deno.test('R5: a SECOND matching charge un-claims the trailing one and anchors a new run', () => {
+  const x3 = row({ id: 'x3', provider_tx_id: 'x3', date: '2026-03-11', amount: 39.9 })
+  const x4 = row({ id: 'x4', provider_tx_id: 'x4', date: '2026-04-10', amount: 39.9 })
+  const out = detect(
+    cancelledCase({ today: '2026-04-20', after: [x3, x4], claimed: ['x3'], endDate: '2026-04-11' }),
+  )
+
+  // Two runs at one merchant is what dedupe_key ordinals exist for, assigned by
+  // ascending first-charge date so a recompute can never renumber them.
+  assertEquals(out.subscriptions.map((s) => s.dedupe_key), ['ACME STREAMING', 'ACME STREAMING:2'])
+
+  const cancelled = out.subscriptions[0].runs[0]
+  assertEquals(cancelled.stored_run_id, 'run-1', 'highest overlap keeps the identity')
+  assertEquals(cancelled.status, 'cancelled')
+  assertEquals(cancelled.cancelled_date, '2026-02-15')
+  assertEquals(cancelled.charges.map((c) => c.transaction_id), ['x1', 'x2'], 'the trailing charge left')
+  assertEquals(
+    cancelled.end_date,
+    '2026-03-09',
+    'the original paid-through is restored by derivation, not by remembering it',
+  )
+
+  const fresh = out.subscriptions[1].runs[0]
+  assertEquals(fresh.stored_run_id, null, 'a resubscription is a new run, not a resurrection')
+  assertEquals(fresh.detected_by, 'R1')
+  assertEquals(fresh.status, 'active')
+  assertEquals(fresh.charges.map((c) => c.transaction_id), ['x3', 'x4'])
+  assertEquals(fresh.start_date, '2026-03-11')
+  assertEquals(fresh.next_expected_date, '2026-05-10')
+  assertEquals(out.delete_run_ids, [], 'nothing is deleted here; a charge moved')
+})
+
+Deno.test('R5: the un-claim converges whether the pair arrives together or apart', () => {
+  // Stated as a replay rule on purpose. Incremental sync sees x3 alone, claims it,
+  // then sees x4 next month; a full replay sees both at once against a run that never
+  // held either. Identical state, and the two fixtures disagree about the stored
+  // paid-through precisely so that a frozen end_date cannot pass this.
+  const pair = () => [
+    row({ id: 'x3', provider_tx_id: 'x3', date: '2026-03-11', amount: 39.9 }),
+    row({ id: 'x4', provider_tx_id: 'x4', date: '2026-04-10', amount: 39.9 }),
+  ]
+  const incremental = detect(
+    cancelledCase({ today: '2026-04-20', after: pair(), claimed: ['x3'], endDate: '2026-04-11' }),
+  )
+  const replay = detect(cancelledCase({ today: '2026-04-20', after: pair() }))
+
+  assertEquals(JSON.stringify(replay.subscriptions), JSON.stringify(incremental.subscriptions))
+})
+
+Deno.test('R5: beyond one cadence, a post-cancel charge just waits for R1', () => {
+  const x3 = row({ id: 'x3', provider_tx_id: 'x3', date: '2026-06-15', amount: 39.9 })
+  const out = detect(cancelledCase({ today: '2026-06-20', after: [x3] }))
+
+  assertEquals(out.subscriptions.length, 1)
+  const run = out.subscriptions[0].runs[0]
+  assertEquals(run.charges.map((c) => c.transaction_id), ['x1', 'x2'], 'not a trailing charge')
+  assertEquals(run.end_date, '2026-03-09', 'paid-through untouched')
+})
+
+Deno.test('R5 is cancelled-only: an uncancelled run still continues without limit', () => {
+  // The cap keys off `cancelled_date`, null here, so nothing in R5 can reach a run
+  // the user never cancelled. Four monthly charges, one run — unchanged.
+  const out = detect({
+    today: '2026-04-20',
+    rows: [
+      row({ id: 'a1', provider_tx_id: 'a1', date: '2026-01-10', amount: 39.9 }),
+      row({ id: 'a2', provider_tx_id: 'a2', date: '2026-02-09', amount: 39.9 }),
+      row({ id: 'a3', provider_tx_id: 'a3', date: '2026-03-11', amount: 39.9 }),
+      row({ id: 'a4', provider_tx_id: 'a4', date: '2026-04-10', amount: 39.9 }),
+    ],
+    subscriptions: [{
+      id: 'sub-a',
+      dedupe_key: 'ACME STREAMING',
+      merchant_key: 'ACME STREAMING',
+      service_name: 'Acme',
+      identification: 'auto',
+      ignored: false,
+    }],
+    runs: [{
+      id: 'run-a',
+      subscription_id: 'sub-a',
+      start_date: '2026-01-10',
+      end_date: null,
+      billing_interval: 'monthly',
+      status: 'active',
+      detected_by: 'R1',
+      cancelled_date: null,
+      next_expected_date: '2026-03-09',
+    }],
+    charges: [
+      { id: 'ca1', run_id: 'run-a', transaction_id: 'a1', date: '2026-01-10', amount: 39.9, currency: 'BRL', amount_in_account_currency: null, card_label: null },
+      { id: 'ca2', run_id: 'run-a', transaction_id: 'a2', date: '2026-02-09', amount: 39.9, currency: 'BRL', amount_in_account_currency: null, card_label: null },
+    ],
+  })
+
+  assertEquals(out.subscriptions.length, 1)
+  assertEquals(out.subscriptions[0].runs.length, 1)
+  assertEquals(out.subscriptions[0].runs[0].charges.length, 4)
+  assertEquals(out.subscriptions[0].runs[0].status, 'active')
+})
