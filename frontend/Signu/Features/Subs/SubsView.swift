@@ -9,6 +9,13 @@ struct SubsScreen: View {
     var scrollAnchor: UnitPoint = .top
 
     @State private var payload: SubsPayload?
+    /// Why the load failed, when it did.
+    ///
+    /// Subs rendered `Color.clear` for both "still loading" and "the read threw"
+    /// long after Home stopped doing so — same bug, one screen over, and on the tab
+    /// that lists everything the user tracks. Pull-to-refresh made it reachable
+    /// without a broken session: one failed re-read emptied a working list.
+    @State private var failure: String?
 
     var body: some View {
         Group {
@@ -17,21 +24,51 @@ struct SubsScreen: View {
                     payload: payload, actions: actions, filter: initialFilter,
                     sortByCost: initialSortByCost, scrollAnchor: scrollAnchor
                 )
+            } else if let failure {
+                LoadFailureView(message: failure) { await load() }
             } else {
                 Color.clear
             }
         }
-        .task {
-            payload = try? await provider.subsPayload()
-        }
+        .task { await load() }
+        // Same shape as Home, deliberately: the verdict is ignored because the user
+        // asked, the error is not, and a failed re-read keeps whatever is already on
+        // screen instead of emptying the list.
         .refreshable {
-            try? await provider.refresh()
-            payload = try? await provider.subsPayload()
+            do {
+                try await provider.refresh()
+            } catch {
+                actions.onLoadFailed(error.localizedDescription)
+            }
+            await load()
+        }
+    }
+}
+
+extension SubsScreen {
+    /// One loader for the first read and for every retry, so the failure state and
+    /// the success state cannot drift apart. Mirrors `HomeScreen.load()`, including
+    /// the routing rule — two screens reading the same graph must not disagree about
+    /// what a failure looks like.
+    fileprivate func load() async {
+        do {
+            payload = try await provider.subsPayload()
+            failure = nil
+        } catch {
+            switch LoadFailureRoute.of(hasPayload: payload != nil) {
+            case .replaceScreen:
+                payload = nil
+                failure = error.localizedDescription
+            case .reportOnly:
+                actions.onLoadFailed(error.localizedDescription)
+            }
         }
     }
 }
 
 struct SubsActions {
+    /// See `HomeActions.onLoadFailed`.
+    var onLoadFailed: (String) -> Void = { _ in }
     var onSelectSubscription: (UUID) -> Void = { _ in }
     var onReviewSuggestion: (UUID) -> Void = { _ in }   // run id → 9a
     var onSearch: () -> Void = {}

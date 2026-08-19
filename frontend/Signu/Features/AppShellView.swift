@@ -115,6 +115,7 @@ struct AppShellView: View {
                 switch selectedTab {
                 case .home:
                     HomeScreen(provider: provider, actions: HomeActions(
+                        onLoadFailed: { actionError = $0 },
                         // The needs-action banner's Fix (12b's other entry point):
                         // re-authenticating is the same widget opened on an existing
                         // item, so it is the same flow with an id.
@@ -130,6 +131,7 @@ struct AppShellView: View {
                     SubsScreen(
                         provider: provider,
                         actions: SubsActions(
+                            onLoadFailed: { actionError = $0 },
                             onSelectSubscription: { detailSubscriptionId = $0 },
                             onReviewSuggestion: { _ in showReview = true },
                             onSearch: { showSearch = true }
@@ -142,6 +144,7 @@ struct AppShellView: View {
                     SubsScreen(
                         provider: provider,
                         actions: SubsActions(
+                            onLoadFailed: { actionError = $0 },
                             onSelectSubscription: { detailSubscriptionId = $0 },
                             onReviewSuggestion: { _ in showReview = true },
                             onSearch: { showSearch = true }
@@ -416,6 +419,12 @@ struct AppShellView: View {
         // failure has nowhere to be noticed. The message is the server's own
         // ("R4 confirmation must state monthly or annual"), not a generic
         // apology, because it is the only thing that says what to do next.
+        //
+        // A failed pull-to-refresh joins them for the same reason rather than a new
+        // one. It is the other failure with nowhere to be noticed: the screen keeps
+        // its last good data, which is correct and also indistinguishable from a
+        // refresh that worked. One channel, one meaning -- "the thing you asked for
+        // did not happen" -- and the message still carries what to do next.
         .alert(
             "That didn't go through",
             isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
