@@ -28,11 +28,23 @@ struct HomeScreen: View {
         }
         .task { await load() }
         // Pull-to-refresh, on the screen most likely to be open when the daily
-        // sync lands. The `refresh()` verdict is ignored on purpose: the user
-        // asked, so the payload is re-read either way and the gesture never
-        // appears to do nothing.
+        // sync lands. The `refresh()` VERDICT is still ignored on purpose: the user
+        // asked, so the payload is re-read either way and the gesture never appears
+        // to do nothing.
+        //
+        // The ERROR is no longer ignored, which is what `try?` was quietly doing.
+        // A pull with no network threw inside `refresh()`, the throw was discarded,
+        // `load()` then re-read the cache that `reload()` had failed to replace, and
+        // the same stale rows came back with a completed spinner over them. A gesture
+        // that appears to have worked is worse than one that appears to do nothing:
+        // the freshness label was the only thing telling the truth, and only to
+        // someone who thought to read it.
         .refreshable {
-            try? await provider.refresh()
+            do {
+                try await provider.refresh()
+            } catch {
+                actions.onLoadFailed(error.localizedDescription)
+            }
             await load()
         }
     }
@@ -41,13 +53,23 @@ struct HomeScreen: View {
 extension HomeScreen {
     /// One loader for the first read and for every retry, so the failure state
     /// and the success state cannot drift apart.
+    ///
+    /// A failed re-read never trades a payload for an error screen — see
+    /// `LoadFailureRoute`. Unconditionally clearing `payload` here was safe while
+    /// this only ran on first load and became wrong the moment pull-to-refresh
+    /// called it: one bad re-read would replace a working Home with a retry button.
     fileprivate func load() async {
         do {
             payload = try await provider.homePayload()
             failure = nil
         } catch {
-            payload = nil
-            failure = error.localizedDescription
+            switch LoadFailureRoute.of(hasPayload: payload != nil) {
+            case .replaceScreen:
+                payload = nil
+                failure = error.localizedDescription
+            case .reportOnly:
+                actions.onLoadFailed(error.localizedDescription)
+            }
         }
     }
 }
@@ -55,6 +77,10 @@ extension HomeScreen {
 /// Navigation hooks — wired up as their destinations land (banner → 12b,
 /// review → 9a, subscription → detail).
 struct HomeActions {
+    /// A read that failed with something already on screen. Routed to the shell's
+    /// alert rather than handled here, for the reason the shell's alert exists at
+    /// all: a failure with nowhere to be noticed has to be said out loud somewhere.
+    var onLoadFailed: (String) -> Void = { _ in }
     var onFixConnection: (UUID) -> Void = { _ in }
     var onReview: () -> Void = {}
     var onCalendar: () -> Void = {}

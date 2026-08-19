@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-19** (v71) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-19** (v72) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1813,6 +1813,45 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v72** — PULL-TO-REFRESH TOLD THE TRUTH ABOUT FAILING (2026-08-19). **No
+  migration.** Two `.refreshable` handlers, `SubsScreen`'s missing failure state, one
+  shared routing rule, two tests.
+  **v40's fix was applied to one screen.** *"A failed read must not look like no
+  data"* closed the blank-Home case by giving `HomeScreen` a `failure` state and
+  `LoadFailureView`. `SubsScreen` went on rendering `Color.clear` for both "still
+  loading" and "the read threw" — the same bug, one screen over, on the tab that lists
+  everything the user tracks. Pull-to-refresh made it reachable without a broken
+  session: one failed re-read emptied a working list.
+  **`try?` was discarding the error, not the verdict.** The comment at the Home call
+  site says the `refresh()` Bool is ignored deliberately — the user asked, so the
+  payload is re-read either way — and that part stands. But `try?` also swallowed the
+  throw, so a pull with no network threw inside `refresh()`, `load()` re-read the cache
+  that `reload()` had failed to replace, and the same stale rows came back under a
+  completed spinner. **A gesture that appears to have worked is worse than one that
+  appears to do nothing**, and the freshness label was the only thing telling the
+  truth — to whoever thought to read it.
+  **Fixing the swallow exposed the harder question**, which is now one rule in one
+  place (`LoadFailureRoute`): what should a failed read do to a screen that already has
+  good data on it? `load()` cleared `payload` unconditionally, which was safe while it
+  only ran on first load and became wrong the moment pull-to-refresh called it — one
+  bad re-read would trade a working screen for a retry button. With nothing on screen
+  the error IS the screen; with something on screen the data stays and the failure is
+  reported instead, because a failure view would say LESS than what is already
+  displayed supports.
+  **Reported through the shell alert that already exists** rather than new UI. Its
+  stated reason — *"a failure has nowhere to be noticed"* — is exactly the
+  pull-to-refresh case: the screen keeps its last good data, which is correct and also
+  indistinguishable from a refresh that worked. One channel, one meaning.
+  **Two `try?` sites were named in the punch list and both are fixed; the remaining
+  ones are a different class and are deliberately untouched.** The foreground refresh
+  uses the verdict on purpose, and `ConnectionDetailView` / `AttributedSubsScreen`
+  still carry v40's shape on secondary screens — recorded here rather than widened into
+  this change.
+  **Verification is honest about its limit**: the routing rule is unit-tested, the
+  build is warning-free at both sites, and the full suite passes — but this project has
+  no view-test harness, so the wiring itself is verified by the build and by running
+  the app, not by a test.
 
 - **v71** — AN EMPTY RESPONSE IS NO LONGER TAKEN AS TRUTH (2026-08-19). **No
   migration.** New `_shared/sync.ts` + `_shared/sync.test.ts`, the withdrawal block in

@@ -13,6 +13,28 @@ import SwiftUI
 /// developer, and "Something went wrong" would delete the only useful part —
 /// the same reasoning the connect flow and the four Edge Function actions use
 /// when they surface a server's message verbatim.
+/// Where a failed read goes, given what is already on screen.
+///
+/// One rule in one place because the two screens used to disagree about it. Home
+/// gained a failure state; Subs kept rendering `Color.clear` for both "still
+/// loading" and "the read threw", which is the exact bug the view above exists to
+/// end. And neither screen had an answer for the harder case: a read that fails
+/// while something good is already showing.
+enum LoadFailureRoute: Equatable {
+    /// Nothing is on screen, so the error IS the screen — `LoadFailureView`, with
+    /// its retry.
+    case replaceScreen
+    /// Something is on screen. Keep it and report the error elsewhere: a failure
+    /// view would say LESS than the data already showing supports, and a
+    /// pull-to-refresh that empties a working screen is a worse outcome than the
+    /// failure it set out to report.
+    case reportOnly
+
+    static func of(hasPayload: Bool) -> LoadFailureRoute {
+        hasPayload ? .reportOnly : .replaceScreen
+    }
+}
+
 struct LoadFailureView: View {
     let message: String
     /// Async, so the retry can await the reload and the button reflects it.
