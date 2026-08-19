@@ -7,14 +7,42 @@ export type CallerResult =
   | { ok: true; caller: Caller }
   | { ok: false; status: number; error: string }
 
+export type VerificationKey = { key: string; source: 'publishable' | 'anon' | 'none' }
+
+export function verificationKey(
+  env: { SUPABASE_ANON_KEY?: string; SUPABASE_PUBLISHABLE_KEYS?: string },
+): VerificationKey {
+  const publishable = firstPublishable(env.SUPABASE_PUBLISHABLE_KEYS ?? '')
+  if (publishable) return { key: publishable, source: 'publishable' }
+  const anon = (env.SUPABASE_ANON_KEY ?? '').trim()
+  if (anon) return { key: anon, source: 'anon' }
+  return { key: '', source: 'none' }
+}
+
+function firstPublishable(raw: string): string | null {
+  const match = raw.match(/sb_publishable_[A-Za-z0-9_-]+/)
+  return match ? match[0] : null
+}
+
+let reportedSource = false
+
 export async function resolveCaller(req: Request): Promise<CallerResult> {
   const header = req.headers.get('Authorization') ?? ''
   const token = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : ''
   if (!token) return { ok: false, status: 401, error: 'missing bearer token' }
 
+  const verifier = verificationKey({
+    SUPABASE_ANON_KEY: Deno.env.get('SUPABASE_ANON_KEY'),
+    SUPABASE_PUBLISHABLE_KEYS: Deno.env.get('SUPABASE_PUBLISHABLE_KEYS'),
+  })
+  if (!reportedSource) {
+    reportedSource = true
+    console.log(`resolveCaller verifying with the ${verifier.source} API key`)
+  }
+
   const anon = createClient(
     Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
+    verifier.key,
     {
       auth: { persistSession: false },
       global: { headers: { Authorization: `Bearer ${token}` } },

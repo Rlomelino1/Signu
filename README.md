@@ -386,6 +386,17 @@ production happened to hold rather than one the repo stated. A blanket
 `supabase functions deploy` reads each declared value, which is why it could never flip
 them by accident — the exposure was the scoped path.
 
+**How the six verify their caller, and why it survives a key migration.** `resolveCaller`
+builds a client from an API key and calls `getUser()` with the caller's token, so a caller
+holding only the project's public API key resolves to no user and gets 401 — that second
+gate, not `verify_jwt`, is what makes the public key useless against these six. It prefers
+an injected **publishable** key (`sb_publishable_…`, found by scanning
+`SUPABASE_PUBLISHABLE_KEYS`, whose container shape is undocumented) and falls back to
+`SUPABASE_ANON_KEY`, so disabling the legacy key cannot break authentication. It logs which
+source it used, once per instance, so that can be confirmed from the function logs before
+the legacy key is switched off. A secret key can never be selected: the scan matches only
+the publishable prefix.
+
 **`register-connection`'s duplicate check** deserves its own note. It compares the
 **accounts** an incoming item exposes, keyed `type:last4` — not the provider's account
 id (per-item, so it would match nothing) and not the display name (which the provider
