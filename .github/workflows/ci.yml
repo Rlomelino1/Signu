@@ -188,6 +188,10 @@ jobs:
           echo "all=false" >> "$GITHUB_OUTPUT"
           echo "slugs=$SLUGS" >> "$GITHUB_OUTPUT"
 
+      - name: Note deploy start
+        id: t0
+        run: echo "ms=$(python3 -c 'import time; print(int(time.time() * 1000))')" >> "$GITHUB_OUTPUT"
+
       - name: Deploy functions
         working-directory: backend
         run: |
@@ -203,6 +207,64 @@ jobs:
           else
             echo "no function changed; nothing to deploy"
           fi
+
+      - name: Verify functions shipped
+        working-directory: backend
+        run: |
+          set -eo pipefail
+          supabase functions list --output-format json > /tmp/functions.json
+          python3 - '${{ steps.t0.outputs.ms }}' '${{ steps.scope.outputs.slugs }}' <<'PY'
+          import json, os, re, sys
+
+          started = int(sys.argv[1])
+          changed = sys.argv[2].split()
+
+          payload = json.load(open('/tmp/functions.json'))
+          rows = payload['functions'] if isinstance(payload, dict) else payload
+          remote = {f['slug']: f for f in rows}
+
+          root = 'supabase/functions'
+          local = sorted(d for d in os.listdir(root)
+                         if not d.startswith('_') and os.path.isdir(os.path.join(root, d)))
+
+          declared = {}
+          for slug, body in re.findall(r'\[functions\.([^\]]+)\]([^\[]*)', open('supabase/config.toml').read()):
+              m = re.search(r'verify_jwt\s*=\s*(true|false)', body)
+              declared[slug] = (m.group(1) == 'true') if m else True
+
+          problems = []
+          for slug in local:
+              f = remote.get(slug)
+              if f is None:
+                  problems.append(slug + ': in the repo but NOT deployed')
+                  continue
+              want = declared.get(slug, True)
+              print('%-22s v%-4s verify_jwt=%-5s updated_at=%s'
+                    % (slug, f['version'], f['verify_jwt'], f['updated_at']))
+              if f['status'] != 'ACTIVE':
+                  problems.append('%s: status %s, expected ACTIVE' % (slug, f['status']))
+              if f['verify_jwt'] != want:
+                  problems.append('%s: verify_jwt is %s remotely but config.toml declares %s'
+                                  % (slug, f['verify_jwt'], want))
+
+          for slug in changed:
+              f = remote.get(slug)
+              if f is not None and f['updated_at'] < started:
+                  problems.append('%s: its sources changed in this push, but the deployed bundle '
+                                  'predates this deploy' % slug)
+
+          for slug in sorted(set(remote) - set(local)):
+              print('note: %s is deployed but has no directory in this repo' % slug)
+
+          if problems:
+              print('')
+              print('FUNCTION VERIFICATION FAILED')
+              for p in problems:
+                  print('  ' + p)
+              sys.exit(1)
+          print('')
+          print('%d functions present, ACTIVE, and matching their declared verify_jwt' % len(local))
+          PY
 
       - name: Verify every migration is applied remotely
         working-directory: backend
