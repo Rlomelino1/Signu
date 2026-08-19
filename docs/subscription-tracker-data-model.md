@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-19** (v75) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-19** (v76) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1851,6 +1851,35 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v76** — CALLER VERIFICATION NO LONGER DEPENDS ON THE LEGACY KEY (2026-08-19). **No
+  migration.** `_shared/auth.ts` plus its first test file.
+  **Why now.** The project's legacy `anon` key was committed to this public repo on
+  2026-08-11 and removed on 2026-08-19, so it is treated as compromised and is being
+  retired in favour of a publishable key (`sb_publishable_…`). The client swapped over
+  first; disabling the legacy key is the last step, and `resolveCaller` was the one thing
+  standing in the way.
+  **The trap it removes.** `resolveCaller` built its verification client from
+  `SUPABASE_ANON_KEY`, and that call is what makes the six user-facing functions safe: it
+  runs `getUser()` with the caller's token, so a caller holding only the project's public
+  key resolves to no user and gets a 401. `verify_jwt` alone would NOT do that — at the
+  platform level the public key is a structurally valid JWT. So if disabling the legacy key
+  had stopped that injected value working, all six would have started answering
+  `401 'not authenticated'` for real users, with no code change and nothing failing in CI.
+  **The fix prefers a publishable key and falls back to the anon key**, which means the
+  worst case is exactly today's behaviour. The container shape of
+  `SUPABASE_PUBLISHABLE_KEYS` is not documented and cannot be read from outside the
+  runtime, so selection is a scan for the publishable prefix over the raw value: that
+  handles a bare key, a delimited list, either JSON shape, and any container not invented
+  yet, and it cannot select a secret key because the prefix differs. Six tests pin it,
+  including that a `sb_secret_…` value is never chosen.
+  **It says which key it used.** One log line per instance names the source
+  (`publishable` / `anon` / `none`) and never the value, so the function logs can confirm
+  the publishable path is live *before* the legacy key is switched off.
+  **Verified**: the publishable key is accepted by the project (`/auth/v1/settings` → 200),
+  and an authenticated PostgREST write through it landed and survived a server re-read. The
+  data path is proven; the six functions are proven by code reading plus these tests, and
+  want one real tap-through after this deploys.
 
 - **v75** — A DEPLOY NOW PROVES WHAT IT SHIPPED (2026-08-19). **No migration.** One
   `config.toml` block, one `ci.yml` step.
