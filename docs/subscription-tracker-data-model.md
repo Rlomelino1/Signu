@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-19** (v73) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-19** (v74) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1851,6 +1851,42 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v74** — A NEWER MERGE NO LONGER CANCELS THE DEPLOY (2026-08-19). **No migration.**
+  One line of `ci.yml`, plus the comment explaining what it cost.
+  **v71 merged and never reached production, with three green checkmarks above it.** The
+  workflow declared `concurrency: cancel-in-progress: true` for every ref, so when v72
+  merged eleven minutes later the newer push cancelled v71's still-running job mid-`iOS
+  build`; `deploy` declares `needs: [ios, schema, detection]` and was cancelled with it.
+  The deploy job's own `cancel-in-progress: false` could not help — that only serialises
+  runs already inside the `production-deploy` group and says nothing about the workflow
+  being cancelled out from under it.
+  **The second half is what made it silent, and it is the interesting half.** `db push`
+  is unconditional and applies every pending migration, so a skipped MIGRATION heals on
+  the next deploy. The function deploy is scoped to what changed since the previous
+  commit, so v72's run diffed only v72's own commit, found no function changed, and
+  correctly deployed nothing. `_shared/sync.ts` — the guard that stops an empty provider
+  response from deleting every non-frozen run — sat on `main` undeployed while every
+  signal read healthy. **This is the failure the scoping step's own comment set out to
+  prevent** (*"narrow scoping here would silently leave old copies of detection.ts …
+  running in production"*), reached by a route that comment did not consider: not a
+  scoping mistake, a run that never happened.
+  **Fix**: `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}`. Superseded PR
+  runs are still cancelled, where a superseded run is genuine waste; a run on `main` is
+  never cancelled, because there it is the only thing that puts a merge into production.
+  Two quick merges now cost two full runs, which is the intended trade.
+  **Residual risk, named rather than engineered away**: GitHub does not document the
+  `production-deploy` group as FIFO, so two deploys queued together could in principle
+  land out of order and leave the older bundle deployed. The next merge redeploys and any
+  `_shared/` change deploys every function, so the window closes on its own.
+  **Not adopted**: moving `deploy` into a `workflow_run` workflow, which would survive
+  cancellation but reintroduces exactly what the deploy job's comment rejected — a
+  workflow that has to infer which run it is reacting to and can fire for another branch.
+  `needs` stays the gate.
+  **Worth stating for the next reader**: the recovery was to re-run the cancelled run
+  rather than to deploy by hand. Its event payload still carries the right `before`, so
+  the scoping step sees `_shared/` changed and deploys every function — and deploying
+  from a laptop would have bypassed the green gate this pipeline exists to be.
 
 - **v73** — THE CONSENT FIELD IS BLANK, AND THAT IS THE HONEST ANSWER (2026-08-19).
   **No migration. Documentation only — no behaviour changed.**
