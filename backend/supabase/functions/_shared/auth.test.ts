@@ -81,3 +81,21 @@ Deno.test('the write key survives any container shape, like the verification key
 Deno.test('nothing injected for writes is reported rather than guessed', () => {
   assertEquals(writeKey({}), { key: '', source: 'none' })
 })
+
+Deno.test('an explicitly set key wins over the injected variable', () => {
+  const other = 'sb_publishable_INJECTEDNOTCHOSEN'
+  const v = verificationKey({
+    SUPABASE_ANON_KEY: ANON, SUPABASE_PUBLISHABLE_KEYS: other, SIGNU_PUBLISHABLE_KEY: PUB,
+  })
+  assertEquals(v, { key: PUB, source: 'publishable' })
+  const w = writeKey({
+    SUPABASE_SERVICE_ROLE_KEY: SERVICE, SUPABASE_SECRET_KEYS: 'sb_secret_INJECTEDNOTCHOSEN',
+    SIGNU_SECRET_KEY: SECRET,
+  })
+  assertEquals(w, { key: SECRET, source: 'secret' })
+})
+
+Deno.test('an explicit key of the WRONG type is ignored, not used', () => {
+  assertEquals(verificationKey({ SUPABASE_ANON_KEY: ANON, SIGNU_PUBLISHABLE_KEY: SECRET }).source, 'anon')
+  assertEquals(writeKey({ SUPABASE_SERVICE_ROLE_KEY: SERVICE, SIGNU_SECRET_KEY: PUB }).source, 'service_role')
+})
