@@ -5,6 +5,7 @@ import {
 } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 import { accountType, lastFour } from '../_shared/accounts.ts'
 import { withdrawalDecision } from '../_shared/sync.ts'
+import { writeApiKey } from '../_shared/auth.ts'
 
 const PLUGGY = 'https://api.pluggy.ai'
 
@@ -508,9 +509,7 @@ Deno.serve(async (req: Request) => {
 
   const db = createClient(
     Deno.env.get('SUPABASE_URL')!,
-    // Service role: all writes go through Edge Functions and bypass RLS, so
-    // sync never pays the RLS join cost (Migration #1 posture).
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    writeApiKey(),
     { auth: { persistSession: false } },
   )
 

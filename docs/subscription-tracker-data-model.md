@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-19** (v76) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-19** (v77) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1851,6 +1851,26 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v77** — THE WRITE PATH LEAVES THE LEGACY KEY TOO (2026-08-19). **No migration.**
+  `_shared/auth.ts` plus the three cron functions; six more tests.
+  **v76 solved half the problem, on a wrong assumption.** It removed `resolveCaller`'s
+  dependency on `SUPABASE_ANON_KEY` so the leaked legacy anon key could be retired — but the
+  dashboard has no per-key disable. One button, *"Disable JWT-based API keys"*, retires
+  `anon` **and** `service_role` together, and `service_role` is what every write in the
+  system runs on: `serviceClient()` for the six user-facing functions, plus `pluggy-sync`,
+  `run-detection` and `send-reminders` directly. Pressing it after v76 would have stopped the
+  daily sync, detection, reminders, bank connection and all four user-asserted writes.
+  **`writeApiKey()` mirrors `verificationKey()`**: prefer an injected secret key
+  (`sb_secret_…`), fall back to `SUPABASE_SERVICE_ROLE_KEY`, so the worst case is today's
+  behaviour, and log the source once per instance without ever logging the value.
+  **Two cross-selection properties are now pinned by tests** because getting either backwards
+  would be severe in opposite directions: a **publishable** key can never be selected to
+  write (it would fail closed, but silently), and a **secret** key can never be selected to
+  verify a caller (it would authenticate everyone, since a secret key bypasses RLS). Both are
+  prefix scans over the raw injected value, so neither can pick the other's prefix.
+  **The three cron functions each built their own client** and did not import `_shared/auth.ts`
+  at all, which is why the key appeared in four places rather than one. They now import it.
 
 - **v76** — CALLER VERIFICATION NO LONGER DEPENDS ON THE LEGACY KEY (2026-08-19). **No
   migration.** `_shared/auth.ts` plus its first test file.

@@ -12,16 +12,42 @@ export type VerificationKey = { key: string; source: 'publishable' | 'anon' | 'n
 export function verificationKey(
   env: { SUPABASE_ANON_KEY?: string; SUPABASE_PUBLISHABLE_KEYS?: string },
 ): VerificationKey {
-  const publishable = firstPublishable(env.SUPABASE_PUBLISHABLE_KEYS ?? '')
+  const publishable = firstWithPrefix(env.SUPABASE_PUBLISHABLE_KEYS ?? '', 'sb_publishable_')
   if (publishable) return { key: publishable, source: 'publishable' }
   const anon = (env.SUPABASE_ANON_KEY ?? '').trim()
   if (anon) return { key: anon, source: 'anon' }
   return { key: '', source: 'none' }
 }
 
-function firstPublishable(raw: string): string | null {
-  const match = raw.match(/sb_publishable_[A-Za-z0-9_-]+/)
+function firstWithPrefix(raw: string, prefix: string): string | null {
+  const match = raw.match(new RegExp(prefix + '[A-Za-z0-9_-]+'))
   return match ? match[0] : null
+}
+
+export type WriteKey = { key: string; source: 'secret' | 'service_role' | 'none' }
+
+export function writeKey(
+  env: { SUPABASE_SERVICE_ROLE_KEY?: string; SUPABASE_SECRET_KEYS?: string },
+): WriteKey {
+  const secret = firstWithPrefix(env.SUPABASE_SECRET_KEYS ?? '', 'sb_secret_')
+  if (secret) return { key: secret, source: 'secret' }
+  const legacy = (env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim()
+  if (legacy) return { key: legacy, source: 'service_role' }
+  return { key: '', source: 'none' }
+}
+
+let reportedWriteSource = false
+
+export function writeApiKey(): string {
+  const chosen = writeKey({
+    SUPABASE_SERVICE_ROLE_KEY: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),
+    SUPABASE_SECRET_KEYS: Deno.env.get('SUPABASE_SECRET_KEYS'),
+  })
+  if (!reportedWriteSource) {
+    reportedWriteSource = true
+    console.log(`write client using the ${chosen.source} API key`)
+  }
+  return chosen.key
 }
 
 let reportedSource = false
@@ -64,7 +90,7 @@ export async function resolveCaller(req: Request): Promise<CallerResult> {
 export function serviceClient(): SupabaseClient {
   return createClient(
     Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    writeApiKey(),
     { auth: { persistSession: false } },
   )
 }
