@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-19** (v70) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-19** (v71) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -595,6 +595,36 @@ reappears under the same `provider_tx_id` is un-withdrawn by the next re-scan.
 withdraw the entire pre-window history on every run, since it is absent from a
 365-day response by construction. This is the one place where getting the scope
 wrong hides transactions from detection rather than merely adding noise.
+
+**An empty feed is refused, not obeyed (v71).** A revoked Open Finance consent answers
+200 with zero transactions rather than an error, and read literally that withdraws
+every in-window row — which empties the candidate set and lets `delete_run_ids` remove
+every non-frozen run, taking run-level assertions with it while subscription-level ones
+survive. Re-running does not repair it: *"re-runs repair"* is a promise about derived
+state, and an assertion is not derived. So withdrawal is a **decision** rather than a
+subtraction: `withdrawalDecision` in `_shared/sync.ts` answers `withdraw` / `noop` /
+`refuse`, and an empty feed against held rows is refused. Nothing is withdrawn, the
+connection fails with the held-row count in `last_sync_error`, and `last_synced_at`
+does not advance — the freshness label must not claim a successful read of a response
+we rejected. Same reasoning v61 applied to the applier's prune, which
+`delete_run_ids` bypasses; that bypass is why the guard sits this far upstream.
+
+- **An empty feed with nothing held is ordinary** — a new account, or a genuinely quiet
+  window — and stays a no-op. Conflating the two would make first sync on a fresh
+  connection report a failure.
+- **Truncation is checked first**, because a truncated feed can also arrive empty, and
+  then incompleteness is the honest explanation rather than a revoked consent.
+- **Only total silence is refused.** One row where two hundred were held is trusted:
+  no threshold separates a partial revocation from a quiet month without inventing a
+  number. Stated so the narrowness reads as a decision, not an oversight.
+
+**The rule lives in `_shared/` for a specific reason.** CI runs `deno test
+backend/supabase/functions/_shared/` and nothing else, so a rule written inside
+`pluggy-sync/index.ts` is a rule no gate can check — and this one decides whether a
+year of user assertions survives a bad response. `_shared/sync.ts` is the fourth
+module in the "a decision is a value, not a write" family, after `detection.ts`,
+`reminders.ts` and `actions.ts`. `deno check` names files individually, so it needed a
+line in `ci.yml`; `deno test` is directory-scoped and picked the suite up for free.
 
 ---
 
@@ -1783,6 +1813,40 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v71** — AN EMPTY RESPONSE IS NO LONGER TAKEN AS TRUTH (2026-08-19). **No
+  migration.** New `_shared/sync.ts` + `_shared/sync.test.ts`, the withdrawal block in
+  `pluggy-sync` reduced to load-decide-write, one line in `ci.yml`.
+  **The failure this closes was written down in v65 and left standing.** A revoked Open
+  Finance consent returns *empty data rather than an error* — 200, well-formed body,
+  zero transactions. Withdrawn detection inferred from absence, so an empty feed marked
+  **every** in-window row `withdrawn_at`; detection then saw zero candidates, and
+  `delete_run_ids` became every non-frozen run. What is lost there is **run-level
+  assertions** — confirmed R3/R4 suggestions and user-marked cancellations — while
+  subscription-level ones (nickname, category, `remind_before_days`, `ignored`) survive.
+  A later sync un-withdraws the rows and detection re-anchors them, but the rebuilt runs
+  are new rows with new ids, so those decisions do not come back.
+  **Refusal, not correction.** The guard claims nothing about whether the rows still
+  exist at the bank; it declines to treat silence as evidence. An empty feed against
+  held rows fails the connection, which is deliberately three things at once: nothing is
+  withdrawn because the throw precedes the write, `last_synced_at` does not advance so
+  the freshness label cannot claim a read we rejected, and the per-connection catch puts
+  the count in `last_sync_error` where the app can render it. Other connections still
+  sync — one bad item must not abort the others.
+  **Two boundaries are stated rather than implied.** An empty feed with nothing held is
+  ordinary and stays a no-op, or first sync on a quiet account would report a failure.
+  And only a *fully* empty feed is refused: one row where two hundred were held is
+  trusted, because no threshold separates a partial revocation from a quiet month
+  without inventing a number.
+  **It moved into `_shared/` because CI cannot see anywhere else.** `deno test` runs
+  `_shared/` and nothing else, so written inline this was the one rule in the system
+  that could destroy user assertions and could not be gated. Seven tests, and the old
+  inline rule was extracted verbatim first to confirm they falsify it — an empty feed
+  against three held rows withdrew all three.
+  **Still unreproduced against a real revoked consent**, and it cannot be reproduced on
+  the current plan: MeuPluggy is not an Open Finance connector. The guard is written
+  from the documented behaviour and the traced code path, which is why it refuses rather
+  than trying to repair.
 
 - **v70** — R5 SHIPS, FOURTEEN VERSIONS AFTER IT WAS DOCUMENTED (2026-08-19).
   **No migration.** `_shared/detection.ts` gains `trailingR5` and loses a frozen
