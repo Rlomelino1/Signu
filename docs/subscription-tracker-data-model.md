@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-18** (v68) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-18** (v69) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1730,6 +1730,28 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v69** — ACTIONS PINNED TO COMMIT SHAs (2026-08-18). **No migration.** Seven `uses:`
+  references, no behaviour change.
+  **The `deploy` job runs third-party code with production credentials in its
+  environment.** `SUPABASE_ACCESS_TOKEN` is a PAT, and Supabase documents that a PAT
+  *"carries the same privileges as your user account"* — no scoping, including deleting
+  the project. Every action in a job step sees that env.
+  **`@v4` and `@v1` are mutable, and one of them is not even a tag.**
+  `actions/checkout@v4` is a tag the owner can move; `supabase/setup-cli@v1` is a
+  **branch** (`refs/heads/v1`), as is `denoland/setup-deno@v2`. So the code CI executes
+  could change without this repository changing, which is the only realistic path by
+  which those secrets leak with nobody here doing anything wrong. Fork PRs cannot read
+  secrets and the deploy job only fires on `push` to `main`, so the supply chain was
+  what remained.
+  **Pinned to the commits those refs resolved to today**: checkout `v4.4.0`, setup-cli
+  `v1.7.1`, setup-deno `v2.0.5`, with the version kept in a trailing comment so a human
+  can still read the file. `supabase/setup-cli` has a v3 line available; staying on
+  v1.7.1 pins **current behaviour** rather than bundling an upgrade into a security
+  change.
+  **All seven references pinned, not just the deploy job's two.** A file where some
+  actions are pinned and others are not invites the reading that the unpinned ones were
+  judged safe, when the truth would be that nobody got to them.
 
 - **v68** — THE DEAD "TRY AGAIN" BUTTON (2026-08-18). **No migration.** One entry in
   `ConnectErrorCopy.known`, two tests.
