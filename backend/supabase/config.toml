@@ -210,3 +210,6 @@ verify_jwt = false
 
 [functions.run-detection]
 verify_jwt = false
+
+[functions.send-reminders]
+verify_jwt = false

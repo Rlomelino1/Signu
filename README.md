@@ -376,13 +376,15 @@ the caller is a machine and the function gates on `x-sync-secret` itself.
 | `remove-connection` | true | The app — delete a bank link, preserving history via the frozen region. |
 | `delete-account` | true | The app — delete the account and all its data. |
 
-**Invariant worth stating explicitly:** `verify_jwt` is a per-function deploy property
-taken from `config.toml`, and `config.toml` declares it only for `pluggy-sync` and
-`run-detection`. `send-reminders` runs with `verify_jwt = false` in production but has
-no block declaring it, so a future scoped redeploy of that function would take the CLI
-default of `true` and silently 401 every 16:30 firing. A blanket
-`supabase functions deploy` reads each function's declared value, which is why it cannot
-flip the cron-called ones by accident — but the undeclared one is a real gap.
+**`verify_jwt` must be declared for every machine-called function.** It is a
+per-function deploy property read from `config.toml`, and the CLI's default is `true`. An
+undeclared cron-called function is therefore one scoped `functions deploy <slug>` away
+from silently 401ing every firing — while `pg_cron` still reports success, because it
+reports the queueing of the request and not its status. All three of the `false` ones are
+now declared; `send-reminders` was undeclared until v75 and had been running on a value
+production happened to hold rather than one the repo stated. A blanket
+`supabase functions deploy` reads each declared value, which is why it could never flip
+them by accident — the exposure was the scoped path.
 
 **`register-connection`'s duplicate check** deserves its own note. It compares the
 **accounts** an incoming item exposes, keyed `type:last4` — not the provider's account
@@ -658,9 +660,20 @@ Its event payload still carries the right base commit, so scoping deploys correc
 a laptop deploy bypasses the green gate the pipeline exists to be. Verify from the log
 that it printed `Deployed Functions on project …`.
 
-**Nothing verifies that a deploy shipped the functions it should have.** Migrations have
-`migration list` as a post-check; functions have no equivalent. That gap is how the
-skipped deploy above went unnoticed.
+**Functions are verified after deploying, the way migrations are.** `Verify functions
+shipped` reads `supabase functions list` and fails the deploy when a function directory in
+the repo has no deployed counterpart, when a deployed function is not `ACTIVE`, when its
+remote `verify_jwt` disagrees with what `config.toml` declares, or when a function whose
+own sources changed in this push carries a bundle older than the deploy that just ran. It
+prints every slug's version, `verify_jwt` and `updated_at` either way, so a post-mortem
+starts from what is actually deployed rather than from what the log claims. A function
+deployed but absent from the repo is reported as a note, not a failure.
+
+**What it deliberately cannot catch:** staleness after an *unchanged* bundle. The CLI skips
+uploading when content has not changed, so `updated_at` legitimately stays old, and the
+check only asserts freshness for slugs whose sources changed in the same push. The
+stranded-deploy case — a run cancelled before its deploy ever started — is closed by the
+concurrency rule above, not by this step.
 
 ### `supabase config push` is forbidden
 

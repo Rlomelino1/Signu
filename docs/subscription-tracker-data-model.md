@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-19** (v74) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-19** (v75) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1851,6 +1851,35 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v75** — A DEPLOY NOW PROVES WHAT IT SHIPPED (2026-08-19). **No migration.** One
+  `config.toml` block, one `ci.yml` step.
+  **`send-reminders` was running on a value production happened to hold.** `verify_jwt` is
+  a per-function deploy property read from `config.toml` and the CLI's default is `true`;
+  `config.toml` declared it only for `pluggy-sync` and `run-detection`. Production had
+  `send-reminders` at `false` — confirmed against `supabase functions list` — so it worked,
+  but one scoped `functions deploy send-reminders` would have taken the default and made
+  every 16:30 firing 401. **And `pg_cron` would have reported success**, because it reports
+  the queueing of the POST rather than its status: the exact shape of the three-day silent
+  403 that v42 chased. A blanket deploy reads each declared value and so could never have
+  flipped it; the exposure was the scoped path only. The fix declares what production
+  already runs rather than changing it.
+  **Functions now get the check migrations already had.** `migration list` exists because
+  this project decided to trust the ledger less than the database; the function deploy had
+  no equivalent, which is how v71's guard sat undeployed behind three green checkmarks.
+  `Verify functions shipped` fails the deploy when a function in the repo has no deployed
+  counterpart, when one is not `ACTIVE`, when remote `verify_jwt` disagrees with
+  `config.toml`, or when a function whose own sources changed in the push carries a bundle
+  older than the deploy that just ran. It prints slug, version, `verify_jwt` and
+  `updated_at` for all of them either way.
+  **Its limits are stated rather than implied.** The CLI skips uploading an unchanged
+  bundle, so `updated_at` legitimately stays old and freshness is asserted only for slugs
+  whose sources changed in the same push. The stranded-deploy case — a run cancelled before
+  its deploy started — is closed by v74's concurrency rule, not by this step. A function
+  deployed but absent from the repo is a note, not a failure, because deleting a function
+  from the repo does not delete it from the project.
+  **Verified against live production before committing**: all nine functions present,
+  `ACTIVE`, and matching their declared `verify_jwt`.
 
 - **v74** — A NEWER MERGE NO LONGER CANCELS THE DEPLOY (2026-08-19). **No migration.**
   One line of `ci.yml`, plus the comment explaining what it cost.
