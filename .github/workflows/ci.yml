@@ -5,9 +5,40 @@ on:
   push:
     branches: [main]
 
+# Superseded PR runs are cancelled; runs on `main` are NOT (v74).
+#
+# `cancel-in-progress: true` for every ref cost a production deploy on 2026-08-19 and
+# did it silently. v71 merged, its run started, v72 merged eleven minutes later, and
+# the newer push cancelled the older run mid-`iOS build`. `deploy` declares
+# `needs: [ios, schema, detection]`, so it was cancelled with it -- and the deploy
+# job's own `cancel-in-progress: false` could not help, because that only serialises
+# runs already inside the `production-deploy` group and says nothing about the
+# workflow being cancelled out from under it.
+#
+# The second half is what made it silent. `db push` is unconditional and applies every
+# pending migration, so a skipped migration self-heals on the next deploy. The FUNCTION
+# deploy is scoped to what changed since the previous commit, so v72's run diffed only
+# v72's own commit, found no function changed, and correctly deployed nothing. v71's
+# `_shared/sync.ts` -- the guard that stops an empty provider response from deleting
+# every non-frozen run -- sat on `main`, undeployed, with three green checkmarks above
+# it. This is the exact failure the scoping step's own comment set out to prevent,
+# reached by a route that comment did not consider.
+#
+# So: keep cancelling on PR branches, where a superseded run is genuinely waste, and
+# never cancel on `main`, where a run is the only thing that puts a merge into
+# production. Two quick merges now cost two full runs. That is the intended trade --
+# CI minutes are cheap and this project has now paid twice for a deploy that reported
+# success while shipping nothing.
+#
+# Deploys still serialise: the `deploy` job's `production-deploy` group with
+# `cancel-in-progress: false` queues them rather than running two `db push`es at once.
+# Residual risk, accepted and named: GitHub does not document that group as FIFO, so
+# two deploys queued together could in principle land out of order and leave the older
+# bundle deployed. The next merge redeploys, and any `_shared/` change deploys every
+# function, so the window closes on its own rather than needing a lock.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Third-party actions are pinned to COMMIT SHAs, not tags (v69).
 #
