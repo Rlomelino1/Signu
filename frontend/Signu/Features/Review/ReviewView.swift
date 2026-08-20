@@ -6,22 +6,39 @@ struct ReviewScreen: View {
     var autoPresentIntervalForR4 = false
 
     @State private var payload: ReviewPayload?
+    @State private var failure: String?
 
     var body: some View {
         Group {
             if let payload {
                 ReviewView(payload: payload, actions: actions, autoPresentIntervalForR4: autoPresentIntervalForR4)
+            } else if let failure {
+                LoadFailureView(message: failure) { await load() }
             } else {
                 Color.clear
             }
         }
-        .task {
-            payload = try? await provider.reviewPayload()
+        .task { await load() }
+    }
+
+    private func load() async {
+        do {
+            payload = try await provider.reviewPayload()
+            failure = nil
+        } catch {
+            switch LoadFailureRoute.of(hasPayload: payload != nil) {
+            case .replaceScreen:
+                payload = nil
+                failure = error.localizedDescription
+            case .reportOnly:
+                actions.onLoadFailed(error.localizedDescription)
+            }
         }
     }
 }
 
 struct ReviewActions {
+    var onLoadFailed: (String) -> Void = { _ in }
     var onBack: () -> Void = {}
     var onTrack: (UUID, BillingInterval?) -> Void = { _, _ in }
     var onDismiss: (UUID) -> Void = { _ in }

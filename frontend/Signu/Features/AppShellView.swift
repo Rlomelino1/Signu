@@ -100,6 +100,7 @@ struct AppShellView: View {
                     #endif
                 case .settings:
                     SettingsScreen(provider: provider, actions: SettingsActions(
+                        onLoadFailed: { actionError = $0 },
                         onSelectBank: { settingsConnectionId = $0 },
                         onEditProfile: { editingProfile = true },
                         onConnectBank: { connectTarget = ConnectTarget(connectionId: nil) },
@@ -164,6 +165,7 @@ struct AppShellView: View {
             ReviewScreen(
                 provider: provider,
                 actions: ReviewActions(
+                    onLoadFailed: { actionError = $0 },
                     onBack: { showReview = false },
                     onTrack: { runId, interval in
                         act { try await provider.confirmSuggestion(runId: runId, billingInterval: interval) }
@@ -246,7 +248,8 @@ struct AppShellView: View {
                     showSearch = false
                     showReview = true
                 },
-                onBack: { showSearch = false }
+                onBack: { showSearch = false },
+                onLoadFailed: { actionError = $0 }
             )
             .environment(logos)
         }
@@ -257,7 +260,8 @@ struct AppShellView: View {
                     showCalendar = false
                     detailSubscriptionId = id
                 },
-                onBack: { showCalendar = false }
+                onBack: { showCalendar = false },
+                onLoadFailed: { actionError = $0 }
             )
             .environment(logos)
         }
@@ -273,7 +277,11 @@ struct AppShellView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $editingProfile) {
-            EditProfileSheet(provider: provider, onChanged: { dataVersion += 1 })
+            EditProfileSheet(
+                provider: provider,
+                onChanged: { dataVersion += 1 },
+                onLoadFailed: { actionError = $0 }
+            )
                 .environment(avatars)
                 .presentationDetents([.height(460)])
                 .presentationDragIndicator(.visible)

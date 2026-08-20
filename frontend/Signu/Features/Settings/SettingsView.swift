@@ -5,20 +5,39 @@ struct SettingsScreen: View {
     var actions = SettingsActions()
 
     @State private var payload: SettingsPayload?
+    @State private var failure: String?
 
     var body: some View {
         Group {
             if let payload {
                 SettingsView(payload: payload, actions: actions)
+            } else if let failure {
+                LoadFailureView(message: failure) { await load() }
             } else {
                 Color.clear
             }
         }
-        .task { payload = try? await provider.settingsPayload() }
+        .task { await load() }
+    }
+
+    private func load() async {
+        do {
+            payload = try await provider.settingsPayload()
+            failure = nil
+        } catch {
+            switch LoadFailureRoute.of(hasPayload: payload != nil) {
+            case .replaceScreen:
+                payload = nil
+                failure = error.localizedDescription
+            case .reportOnly:
+                actions.onLoadFailed(error.localizedDescription)
+            }
+        }
     }
 }
 
 struct SettingsActions {
+    var onLoadFailed: (String) -> Void = { _ in }
     var onSelectBank: (UUID) -> Void = { _ in }
     var onEditProfile: () -> Void = {}
     var onConnectBank: () -> Void = {}

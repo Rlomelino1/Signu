@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-20** (v82) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-20** (v83) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1851,6 +1851,29 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v83** — THE FAILURE-HONESTY FAMILY IS CLOSED (2026-08-20). **No migration.** The five
+  screens v82 named: `SettingsView`, `CalendarView`, `SearchView`, `ReviewView`,
+  `EditProfileView`.
+  All five followed `LoadFailureRoute` mechanically, but two had their own shape worth
+  recording.
+  **Search never went blank, which made it the most misleading of the set.** With no payload
+  its results list is empty, so it rendered *"Nothing to search yet."* — a claim about the
+  user's data, stated confidently, when the truth was that the read failed. A blank screen at
+  least looks broken. This is the same class as v65's freshness label: a UI that cannot
+  express "I don't know" will say something false instead.
+  **Calendar steps between months**, so it is the first screen where the `reportOnly` half of
+  the rule matters in normal use rather than in theory: a failed step keeps the month already
+  on screen and reports, instead of blanking a calendar the user is reading. Its loader takes
+  the month as a parameter so the retry button re-requests the same month rather than
+  silently jumping back to today.
+  **The edit-profile sheet had a second bug in `write()`**: after a successful save it did
+  `profile = try? await provider.profile()`, so a failed reload nil'd the profile and blanked
+  the sheet — a save that worked looking like a crash. It goes through `load()` now.
+  **What stays `try?` on purpose, and why the list ends here**: the avatar and logo-catalog
+  prefetches degrade to monograms, the suggestion badge falls back to `0`, and the foreground
+  refresh ignores its verdict by design. `grep` for the payload-assignment shape now returns
+  exactly one line — the avatar prefetch — and that one is correct.
 
 - **v82** — THE TWO SETTINGS SUB-SCREENS, AND A CORRECTED COUNT (2026-08-20). **No
   migration.** `ConnectionDetailScreen` and `AttributedSubsScreen`.
