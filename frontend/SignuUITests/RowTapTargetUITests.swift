@@ -15,24 +15,30 @@ final class RowTapTargetUITests: XCTestCase {
             .map { $0.frame }
     }
 
-    private func centreIsUnderChrome(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+    private func tapCentre(_ app: XCUIApplication, _ element: XCUIElement) {
         let frame = element.frame
         let centre = CGPoint(x: frame.midX, y: frame.midY)
-        return chromeFrames(app).contains { $0.contains(centre) }
-    }
 
-    private func tapCentre(_ app: XCUIApplication, _ element: XCUIElement) {
-        var attempts = 0
-        while centreIsUnderChrome(app, element), attempts < 4 {
-            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
-            let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
-            from.press(forDuration: 0.05, thenDragTo: to)
-            attempts += 1
+        print("DIAGTAP label=\(element.label) frame=\(frame) hittable=\(element.isHittable)")
+        for name in ["Home", "Subs", "Settings"] {
+            let b = app.buttons[name]
+            print("DIAGTAP chrome \(name) exists=\(b.exists) hittable=\(b.isHittable) frame=\(b.exists ? "\(b.frame)" : "-")")
         }
-        XCTAssertFalse(centreIsUnderChrome(app, element),
-                       "could not scroll the row clear of the floating tab bar, so a "
-                       + "centre tap would land on the chrome and prove nothing")
-        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        print("DIAGTAP occluded=\(chromeFrames(app).contains { $0.contains(centre) })")
+
+        guard let chrome = chromeFrames(app).first(where: { $0.contains(centre) }) else {
+            element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            return
+        }
+
+        let clearHeight = chrome.minY - frame.minY
+        XCTAssertGreaterThan(clearHeight, 8,
+                             "the row sits almost entirely behind the floating tab bar, "
+                             + "so no tap inside it could prove the body is live")
+
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: frame.midX, dy: frame.minY + clearHeight / 2))
+            .tap()
     }
 
     private func button(_ app: XCUIApplication, containing text: String) -> XCUIElement {
