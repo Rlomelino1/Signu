@@ -355,22 +355,29 @@ Deno.test('a user-renamed service_name is frozen', () => {
 })
 
 
-Deno.test('lifecycle: active -> overdue -> ended at +10, end_date paid-through', () => {
+Deno.test('lifecycle: the grace runs from expected + MATCH_WINDOW, so dead is +13', () => {
   const rows = [
     row({ date: '2026-01-10', amount: 39.9 }),
     row({ date: '2026-02-09', amount: 39.9 }),
   ]
   const expected = addMonths('2026-02-09', 1)
-  const active = detect({ today: '2026-03-01', rows, ...EMPTY })
-  assertEquals(active.subscriptions[0].runs[0].status, 'active')
-
-  const overdue = detect({ today: '2026-03-16', rows, ...EMPTY })
-  assertEquals(overdue.subscriptions[0].runs[0].status, 'overdue')
-
-  const ended = detect({ today: '2026-04-01', rows, ...EMPTY })
-  assertEquals(ended.subscriptions[0].runs[0].status, 'ended')
-  assertEquals(ended.subscriptions[0].runs[0].end_date, expected, 'paid-through, not last charge')
+  assertEquals(expected, '2026-03-09')
   assertEquals(daysBetween('2026-02-09', expected), 28)
+
+  const statusOn = (today: string) =>
+    detect({ today, rows, ...EMPTY }).subscriptions[0].runs[0].status
+
+  assertEquals(statusOn('2026-03-01'), 'active', 'before the expected date')
+  assertEquals(statusOn('2026-03-12'), 'active', 'expected +3 is still inside the match window')
+  assertEquals(statusOn('2026-03-13'), 'overdue', 'expected +4 is the first overdue day')
+  assertEquals(statusOn('2026-03-22'), 'overdue', 'expected +13 is the LAST overdue day')
+  assertEquals(statusOn('2026-03-23'), 'ended', 'expected +14 is the first dead day')
+
+  const ended = detect({ today: '2026-03-23', rows, ...EMPTY }).subscriptions[0].runs[0]
+  assertEquals(ended.end_date, expected, 'paid-through, not last charge')
+
+  const previous = detect({ today: '2026-04-01', rows, ...EMPTY }).subscriptions[0].runs[0]
+  assertEquals(previous.status, 'ended', 'and it stays ended')
 })
 
 Deno.test('addMonths clamps rather than overflowing the month', () => {
