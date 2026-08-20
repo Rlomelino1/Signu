@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-19** (v78) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-20** (v79) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1851,6 +1851,31 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v79** — FINISHING THE COMMENT STRIP THAT REPORTED ITSELF COMPLETE (2026-08-20). **No
+  migration.** 762 comment lines from 18 TypeScript files.
+  **v-collapse claimed "0 comment lines remaining" and it was false.** 556 comment lines
+  survived in every one of the 23 `.ts` files — `detection.ts` (128), `detection.test.ts`
+  (138), `pluggy-sync` (93) among them — while Swift, SQL, YAML and TOML were genuinely
+  clean. Nothing was corrupted; the claim was simply wrong, and the README meanwhile said
+  the reasoning now lived only in itself.
+  **One bug, and it was specific.** The scanner pushed a code frame on a template
+  literal's `${` but only ever popped on `)`. Swift's `\(…)` interpolation therefore closed
+  correctly and TypeScript's `${…}` never did, so a template's CLOSING backtick was read as
+  OPENING a new literal — swallowing everything up to the next backtick, which is usually
+  inline code in a later comment. That is why the failure was total for `.ts` and absent
+  everywhere else. Fixed by balancing `([{` against `)]}`, and the regex character-class
+  scan is now bounded to one line so it cannot swallow lines either.
+  **The deeper failure was the verification, not the scanner.** The strip was checked by
+  asserting that every string literal was byte-identical before and after — using the same
+  scanner for both sides. A check that shares the transformation's blind spot can only
+  confirm the tool's own worldview. The one-line `grep -cE '^[[:space:]]*//'` that found the
+  survivors took seconds and shares nothing with it.
+  **So this strip is verified three independent ways**: a naive line-start grep across every
+  file (only the `.sh` shebang remains); a diff-shape assertion driven by `git diff` rather
+  than the scanner, requiring every removed line to be a comment and every modified line to
+  differ only by an excised comment (762 removed, 7 added, 0 unexplained); and the parsers
+  themselves — `deno check`, `deno lint`, 148 tests.
 
 - **v78** — KEY SELECTION BECOMES VERIFIABLE RATHER THAN INFERRED (2026-08-19). **No
   migration.** Two more env lookups and two tests.

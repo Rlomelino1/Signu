@@ -114,25 +114,15 @@ function toSaoPauloDate(iso: string | null | undefined): string | null {
   return `${p.year}-${p.month}-${p.day}`
 }
 
-// --------------------------------------------------------------------- helpers
 
-/** Case + whitespace only. v21 forbids stripping trailing digits: a
- *  digit-stripping pass merged two unrelated `LS...` transactions and merged
- *  nothing else. Fragmentation is by descriptor VARIANT, which string surgery
- *  cannot fix and merchant_key (CNPJ-first) solves at detection time. */
 function normalizeMerchant(raw: string): string {
   return raw.replace(/\s+/g, ' ').trim().toUpperCase()
 }
 
-/** businessName arrives as '' on 4 of 66 card rows carrying a merchant object.
- *  Coerced so `is not null` means what it says (v21). */
 function blankToNull(v: unknown): string | null {
   return typeof v === 'string' && v.trim() !== '' ? v : null
 }
 
-/** Compares SHA-256 digests rather than the raw strings, so neither the content
- *  nor the LENGTH of the expected secret leaks through timing. Fixed-width
- *  inputs are what make the constant-time loop actually constant-time. */
 async function secretsMatch(given: string, expected: string): Promise<boolean> {
   const enc = new TextEncoder()
   const [a, b] = await Promise.all([
@@ -170,13 +160,6 @@ async function pluggy<T>(
   return (await res.json()) as T
 }
 
-// ------------------------------------------------------------------- mappings
-//
-// Two traps here, both easy to get backwards, because the CHECK constraints are
-// inconsistent with each other:
-//   transaction.status  CHECK ('pending','posted')   -- lowercase
-//   transaction.type    CHECK ('DEBIT','CREDIT')     -- uppercase
-// Pluggy sends BOTH uppercase, so status is lowercased and type passes through.
 
 function mapTxStatus(s: unknown): string {
   const v = String(s ?? '').toUpperCase()
@@ -191,16 +174,7 @@ function mapTxType(t: unknown): string {
   throw new SyncError(`unmapped Pluggy transaction type: ${JSON.stringify(t)}`)
 }
 
-/** Both mappings now live in `_shared/accounts.ts` (v53), against this file's own
- *  precedent of keeping private copies. The reason is specific: the duplicate check
- *  in `register-connection` compares the accounts of a new item against the rows
- *  THIS function wrote, so the two must agree about `type` and `last4`. A drifting
- *  copy there fails open and silently — the check would simply stop matching. */
 
-/** Pluggy item status -> connection.status
- *  CHECK ('active','needs_action','expired','disconnected').
- *  Conservative: anything needing the user becomes needs_action rather than
- *  being optimistically called active. */
 function mapConnectionStatus(item: PluggyItem): string {
   const s = String(item?.status ?? '').toUpperCase()
   const consent = item?.consentExpiresAt ? new Date(item.consentExpiresAt) : null
@@ -214,8 +188,6 @@ function mapConnectionStatus(item: PluggyItem): string {
     case 'LOGIN_ERROR':
       return 'needs_action'
     case 'OUTDATED':
-      // Auto-sync retries OUTDATED up to 5 times before dropping the item;
-      // it is a transient execution failure, not a user-actionable state.
       return String(item?.executionStatus ?? '').toUpperCase() === 'SUCCESS'
         ? 'active'
         : 'needs_action'
@@ -224,9 +196,7 @@ function mapConnectionStatus(item: PluggyItem): string {
   }
 }
 
-// ----------------------------------------------------------------- transactions
 
-/** Page /v2/transactions to exhaustion for one account. */
 async function fetchTransactions(
   accountId: string,
   apiKey: string,
@@ -249,9 +219,6 @@ async function fetchTransactions(
     const next = page.next
     if (!next) break
 
-    // `next` is documented as a bare query string ("?accountId=...&after=<c>")
-    // but has also been seen as a full URL. URL-parse handles both; passing the
-    // whole string through as `after` yields 400 Invalid cursor.
     const q = String(next).includes('?') ? String(next).split('?')[1] : String(next)
     cursor = new URLSearchParams(q).get('after')
     if (!cursor) break
@@ -273,40 +240,23 @@ function toTransactionRow(accountRowId: string, t: PluggyTransaction): Transacti
     status: mapTxStatus(t.status),
     type: mapTxType(t.type),
     date,
-    // Stored exactly as Pluggy sends it, sign included. Card dialect is
-    // positive = new charge; bank dialect is negative = outflow. Detection
-    // keys direction off `type`, never off sign, and compares magnitudes.
     amount: t.amount,
     currency: String(t.currencyCode ?? '').toUpperCase(),
-    // Stored exactly as sent: null when the transaction is already in the
-    // account's currency, where `amount` IS the account-currency figure. Both
-    // are kept because neither reconstructs the other -- the implied FX rate
-    // moves per transaction -- and because R1 needs the stable transaction
-    // amount while totals need this one (v26).
     amount_in_account_currency: t.amountInAccountCurrency ?? null,
     raw_description: raw,
     normalized_merchant: normalizeMerchant(raw),
     provider_category: t.category ?? null,
 
-    // ---- v20 additive columns ----
-    // A row present in the feed is by definition not withdrawn. Stated
-    // explicitly rather than left alone, so a row that reappears under the same
-    // provider_tx_id is un-withdrawn by the next re-scan.
     withdrawn_at: null,
     installment_number: ccm.installmentNumber ?? null,
     total_installments: ccm.totalInstallments ?? null,
     purchase_date: toSaoPauloDate(ccm.purchaseDate),
-    // Stored RAW, including the 'NA' sentinel. Interpretation is a denylist
-    // living in detection, because this field is populated on 164/165 card rows
-    // and only its VALUE discriminates — never its presence (v21).
     fee_type_additional_info: ccm.feeTypeAdditionalInfo ?? null,
-    // From businessName, NOT `name`: `name` is present on 5 of 258 rows (v21).
     provider_merchant_name: blankToNull(merchant.businessName),
     provider_merchant_cnpj: blankToNull(merchant.cnpj),
   }
 }
 
-// ------------------------------------------------------------------ per-account
 
 async function syncAccount(
   db: SupabaseClient,
@@ -323,8 +273,6 @@ async function syncAccount(
 
   const mapped = rows.map((t) => toTransactionRow(accountRowId, t))
 
-  // Upsert in chunks. UNIQUE (account_id, provider_tx_id) makes this idempotent,
-  // which is what lets the whole window be re-scanned every run.
   for (let i = 0; i < mapped.length; i += 500) {
     const { error } = await db
       .from('transaction')
@@ -332,20 +280,6 @@ async function syncAccount(
     if (error) throw new SyncError(`upsert transaction: ${error.message}`)
   }
 
-  // ---- withdrawn detection ----
-  // Pluggy's id is a content hash, not a surrogate key: a hash-breaking content
-  // change OR a 1-3 day bank drop deletes the row and creates a new one under a
-  // NEW id. We never hard-delete — the row is evidence for a replayable
-  // interpreted chain, and detection filters `withdrawn_at is null`.
-  //
-  // Scoped to `date >= windowStart` on purpose. Comparing against every stored
-  // row would withdraw the entire pre-window history on every run, since it is
-  // absent from a 365-day response by construction.
-  //
-  // The rule itself now lives in `_shared/sync.ts` and is tested there. It moved
-  // for one reason: CI runs `deno test _shared/` and nothing else, so as long as
-  // this decision was written inline it was the one rule in the system that could
-  // delete user assertions and could not be gated (v71).
   let withdrawn = 0
   const { data: held, error: hErr } = await db
     .from('transaction')
@@ -361,13 +295,6 @@ async function syncAccount(
     truncated,
   )
   if (verdict.kind === 'refuse') {
-    // Fails the CONNECTION rather than carrying on quietly. Three things follow
-    // from throwing here and all three are wanted: nothing is withdrawn, because
-    // the throw precedes the write; `last_synced_at` does not advance, so the
-    // freshness label cannot claim a successful read of a response we rejected;
-    // and the per-connection catch upstream puts the reason in `last_sync_error`,
-    // which is the only place a human or the app will see it. Other connections
-    // still sync -- one bad item must not abort the others.
     throw new SyncError(verdict.reason)
   }
   if (verdict.kind === 'withdraw') {
@@ -382,7 +309,6 @@ async function syncAccount(
   return { fetched: mapped.length, pages, truncated, withdrawn }
 }
 
-// --------------------------------------------------------------- per-connection
 
 async function syncConnection(db: SupabaseClient, conn: ConnectionRow, apiKey: string) {
   const windowStart = new Date(Date.now() - WINDOW_DAYS * 86_400_000)
@@ -402,7 +328,6 @@ async function syncConnection(db: SupabaseClient, conn: ConnectionRow, apiKey: s
   for (const acct of accounts.results ?? []) {
     const type = accountType(acct.subtype)
     if (!type) {
-      // Not modelled by bank_account's CHECK. Reported, never invented.
       skipped.push({ providerAccountId: acct.id, subtype: acct.subtype })
       continue
     }
@@ -414,19 +339,10 @@ async function syncConnection(db: SupabaseClient, conn: ConnectionRow, apiKey: s
           connection_id: conn.id,
           provider_account_id: String(acct.id),
           type,
-          // brand is documented "card network; null for non-cards" — it lives
-          // under creditData, which is absent entirely on checking accounts.
           brand: acct.creditData?.brand ?? null,
           last4: lastFour(acct.number),
-          // The unit for transaction.amount_in_account_currency. Without it
-          // "account currency" would be an assumption rather than a fact (v26).
           currency: acct.currencyCode ? String(acct.currencyCode).toUpperCase() : null,
-          // marketingName is the fuller label where present ('… (Conta
-          // Pré-paga)'); `name` alone is 'platinum' on the card, which reads as
-          // a tier rather than an account. Column is sync-owned and overwritable.
           official_name: acct.marketingName ?? acct.name ?? null,
-          // nickname is user-owned and deliberately absent from this payload:
-          // naming it here at all would risk a future upsert clobbering it.
           status: 'active',
         },
         { onConflict: 'connection_id,provider_account_id' },
@@ -452,13 +368,7 @@ async function syncConnection(db: SupabaseClient, conn: ConnectionRow, apiKey: s
       consent_expires_at: item.consentExpiresAt
         ? String(item.consentExpiresAt).slice(0, 10)
         : null,
-      // OUR clock: when this read finished. Kept as-is -- it is the honest answer
-      // to "when did Signu last look", which is a different question from "how old
-      // is the data" and is what a stalled cron shows up in.
       last_synced_at: new Date().toISOString(),
-      // PLUGGY's clock: when the provider last refreshed the item from the
-      // institution. Copied through, never computed, and null rather than
-      // substituted when the response omits it (v65).
       provider_updated_at: item.lastUpdatedAt ?? null,
       last_sync_error: null,
       institution_name: item.connector?.name ?? conn.institution_name,
@@ -469,11 +379,6 @@ async function syncConnection(db: SupabaseClient, conn: ConnectionRow, apiKey: s
   return {
     connectionId: conn.id,
     itemStatus: `${item.status}/${item.executionStatus}`,
-    // Both surfaced because a silent drop from auto-sync is a real failure mode:
-    // five consecutive failures and Pluggy stops updating the item with no
-    // further event. nextAutoSyncAt going null, or autoSyncDisabledAt becoming
-    // non-null, is the only warning. autoSyncDisabledAt is undocumented — it
-    // does not appear in the API reference and was found on a live payload.
     nextAutoSyncAt: item.nextAutoSyncAt ?? null,
     autoSyncDisabledAt: item.autoSyncDisabledAt ?? null,
     accounts: perAccount,
@@ -481,7 +386,6 @@ async function syncConnection(db: SupabaseClient, conn: ConnectionRow, apiKey: s
   }
 }
 
-// --------------------------------------------------------------------- handler
 
 Deno.serve(async (req: Request) => {
   const json = (body: unknown, status = 200) =>
@@ -492,9 +396,6 @@ Deno.serve(async (req: Request) => {
 
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
 
-  // Shared-secret gate. This URL is publicly addressable and a cron caller has
-  // no user session, so there is no JWT to verify (verify_jwt = false in
-  // config.toml). Constant-time compare.
   const expected = Deno.env.get('SYNC_SECRET')
   if (!expected) return json({ error: 'SYNC_SECRET not configured' }, 500)
   if (!(await secretsMatch(req.headers.get('x-sync-secret') ?? '', expected))) {
@@ -513,14 +414,8 @@ Deno.serve(async (req: Request) => {
     { auth: { persistSession: false } },
   )
 
-  // Optional narrowing, for replaying one connection without touching others.
-  let onlyConnectionId: string | null = null
-  try {
-    const body = await req.json()
-    onlyConnectionId = body?.connectionId ?? null
-  } catch {
-    // no body is the normal cron case
-  }
+  const body = await req.json().catch(() => null)
+  const onlyConnectionId: string | null = body?.connectionId ?? null
 
   let query = db
     .from('connection')
@@ -542,8 +437,6 @@ Deno.serve(async (req: Request) => {
     })
     apiKey = auth?.apiKey
   } catch (e) {
-    // Credentials wrong or Pluggy down: fail the whole run cleanly rather than
-    // letting the throw escape as an opaque 500 with no body.
     return json({ error: e instanceof Error ? e.message : String(e) }, 502)
   }
   if (!apiKey) return json({ error: 'Pluggy /auth returned no apiKey' }, 502)
@@ -555,8 +448,6 @@ Deno.serve(async (req: Request) => {
     try {
       results.push(await syncConnection(db, conn, apiKey))
     } catch (e) {
-      // One bad connection must not abort the others, and the reason has to
-      // land somewhere durable rather than only in the response.
       const message = e instanceof Error ? e.message : String(e)
       failures.push({ connectionId: conn.id, error: message })
       await db
@@ -566,11 +457,6 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Chain into detection rather than scheduling it separately: an independently
-  // scheduled detection run can wake mid-sync and interpret a half-written raw
-  // chain. It would self-heal on the next run ("re-runs repair"), but producing
-  // knowingly-wrong state in the meantime is avoidable. Both functions stay
-  // independently invokable, which is what replay needs.
   let detection: unknown = 'not attempted'
   if (results.length) {
     try {

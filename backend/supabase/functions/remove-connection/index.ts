@@ -66,8 +66,6 @@ Deno.serve(async (req: Request) => {
       charges = (chargeRows ?? []) as AttrCharge[]
     }
 
-    // Only the transactions a latest charge actually points at — at most one per
-    // subscription, rather than every transaction the bank ever produced.
     const txIds = [...latestChargePerRun(charges).values()]
       .map((c) => c.transaction_id)
       .filter((id): id is string => id !== null)
@@ -93,13 +91,9 @@ Deno.serve(async (req: Request) => {
     })
   }
 
-  // ---- the deletes, in the one order that works ----
 
   let deletedSubscriptions = 0
   if (deleteHistory && attributed.length) {
-    // Cascades to subscription_run and to charge. The `user_id` predicate is
-    // redundant with where these ids came from and is here anyway: it is the
-    // last line before a DELETE that RLS is not standing behind.
     const { error: dErr } = await db
       .from('subscription')
       .delete()
@@ -109,8 +103,6 @@ Deno.serve(async (req: Request) => {
     deletedSubscriptions = attributed.length
   }
 
-  // Cascades to bank_account and transaction; surviving charges keep their date,
-  // amount, currency and card_label with `transaction_id` set to NULL.
   const { error: cErr } = await db
     .from('connection')
     .delete()
@@ -122,9 +114,6 @@ Deno.serve(async (req: Request) => {
     ok: true,
     connectionId,
     deleteHistory,
-    // The number the sheet promised. Reported back so a mismatch with what the
-    // user was shown is visible in a response rather than inferred later from a
-    // list that got shorter than expected.
     attributed: attributed.length,
     deletedSubscriptions,
     keptSubscriptions: deleteHistory ? 0 : attributed.length,

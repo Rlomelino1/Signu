@@ -645,6 +645,23 @@ session provider and the data provider can never disagree about which world a bu
 in. With the mock provider `refresh()` never throws, so failure paths are unreachable —
 a live build is the only way to exercise them.
 
+**Editor setup.** `.vscode/` enables the Deno language server for
+`./backend/supabase/functions` only, via `deno.enablePaths` rather than `deno.enable`.
+Without it the built-in TypeScript server checks those files against Node/browser globals
+and reports *"Cannot find name 'Deno'"* on every `Deno.env` call plus an unresolvable
+`https://` import — errors that are not real, since `deno check` and `deno lint` both pass.
+Enabling it repo-wide would point the wrong analyser at everything outside that directory,
+which is most of the repo. The `denoland.vscode-deno` recommendation exists because
+`enablePaths` needs a language server to point at.
+
+**What is ignored, and why the pattern rather than a list.** `.gitignore` covers `.env`
+and `.env.*` as a **class**. An earlier enumeration (`.env`, `.env.local`, `.env.*.local`)
+did not cover `.env.production`, which already existed on disk holding a live Pluggy client
+secret and the sync secret — one `git add -A` away from a public repo. Naming files leaves
+the same hole open for the next variant, so the rule is the class, with `!.env.example` as
+the single committed template. Also ignored for the same reason: `pluggy-probe-raw.json`,
+which is real transaction history, and `frontend/Signu/Config.plist` below.
+
 **Local configuration.** The project URL, the anon key and the logo.dev publishable key
 are read at launch from a `Config.plist` that is **not committed** — copy the template:
 

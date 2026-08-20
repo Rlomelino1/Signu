@@ -187,19 +187,13 @@ export function merchantKey(r: TxRow): string {
   return descriptor
 }
 
-// ------------------------------------------------------------------- ordering
-//
-// TOTAL order. Date alone is not total — Pluggy's within-day `order` field is
-// not stored — and an unstable sort makes anchor selection nondeterministic.
 
 export function compareRows(a: TxRow, b: TxRow): number {
   if (a.date !== b.date) return a.date < b.date ? -1 : 1
   return a.provider_tx_id < b.provider_tx_id ? -1 : a.provider_tx_id > b.provider_tx_id ? 1 : 0
 }
 
-// ----------------------------------------------------------------------- rules
 
-// Anchor band: doctrine's "monthly = 28-33d, +/-3d window".
 const MONTHLY_MIN = 25
 const MONTHLY_MAX = 36
 const MATCH_WINDOW = 3
@@ -213,8 +207,6 @@ interface ProtoRun {
   interval: Interval
 }
 
-/** R1 — anchor. Two charges, same merchant and SAME amount, one cadence apart.
- *  Continuation is amount-flexible so a price rise never splits a run. */
 function anchorR1(group: TxRow[]): ProtoRun[] {
   const runs: ProtoRun[] = []
   const claimed = new Set<string>()
@@ -226,15 +218,12 @@ function anchorR1(group: TxRow[]): ProtoRun[] {
       const gap = daysBetween(group[i].date, group[j].date)
       if (gap > MONTHLY_MAX) break
       if (gap < MONTHLY_MIN) continue
-      // Same money, not same number: one merchant bills in two currencies
-      // in real data, so an amount-only test anchors a phantom run (v25).
       if (!sameMoney(group[i], group[j])) continue
 
       const run: ProtoRun = { charges: [group[i], group[j]], detected_by: 'R1', interval: 'monthly' }
       claimed.add(group[i].id)
       claimed.add(group[j].id)
 
-      // Extend, amount-flexible, around each successive expected date.
       for (;;) {
         const last = run.charges[run.charges.length - 1]
         const expected = addInterval(last.date, run.interval)
@@ -255,13 +244,8 @@ function anchorR1(group: TxRow[]): ProtoRun[] {
   return runs
 }
 
-/** R3 — cadence beats amount. 3+ date-aligned charges with varying amounts.
- *  Alignment is >=80% within +/-3 days of the CIRCULAR median day-of-month; the
- *  loose reading fires on 26 Steam purchases spread over 16 days (v21). */
 function suggestR3(group: TxRow[]): ProtoRun | null {
   if (group.length < R3_MIN_CHARGES) return null
-  // Keyed on currency+cents so a cross-currency pair counts as two values
-  // rather than collapsing into one (v25).
   const amounts = new Set(group.map((c) => moneyKey(c)))
   if (amounts.size < 2) return null
 
@@ -273,39 +257,11 @@ function suggestR3(group: TxRow[]): ProtoRun | null {
   return { charges: [...group], detected_by: 'R3', interval: 'monthly' }
 }
 
-// ------------------------------------------------------------------------- R4
-//
-// The catalog fast path, contract-only since the engine was written (v11) and
-// unwired through v62 because MERCHANT_CATALOG did not exist, then because nothing
-// taught the engine to read it. Both blockers are gone.
-//
-// R4 exists for the case R1 and R3 structurally cannot reach: a subscription with
-// ONE charge so far. R1 needs two charges a cadence apart; R3 needs three. A user
-// who subscribes to Netflix today waits two months to see it — unless something
-// already knows that a charge from Netflix is never a one-off. That knowledge is
-// `brand_catalog.subscription_only`, and it is a claim about the MERCHANT.
 
-/** Case- and accent-insensitive, trimmed. Mirrors `BrandCatalog.normalise` in the
- *  client (`BrandCatalog.swift`), which folds case and diacritics and trims —
- *  nothing more. Note its doc comment claims punctuation-insensitivity it does not
- *  implement; this matches the CODE, because two implementations that disagree are
- *  worse than one that is less clever than its comment. */
 export function normaliseBrand(text: string): string {
-  // \u0300-\u036f is the combining-marks block: NFD splits 'ã' into 'a' + a
-  // combining tilde, and this drops the tilde. Written as escapes on purpose --
-  // literal combining characters in a source file are invisible and unreviewable.
   return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
 }
 
-/** Name first, patterns second, longest pattern wins — `BrandCatalog.entry`'s rule,
- *  reimplemented because Swift and TypeScript cannot share it.
- *
- *  `kind` is scoped to 'service' by every caller here and that is load-bearing, not
- *  tidiness: 'NU PAGAMENTOS' appears on Brazilian statements as the ACQUIRER, so an
- *  unscoped lookup would match the Nubank institution row for a subscription merely
- *  billed through Nubank. Institutions are seeded `subscription_only = false`, so
- *  today that is belt and braces — but a single future edit to that column would
- *  otherwise turn every Nubank-acquired charge into a suggested subscription. */
 export function catalogEntryFor(
   name: string | null,
   catalog: CatalogRow[],
@@ -318,9 +274,6 @@ export function catalogEntryFor(
   const exact = rows.find((c) => normaliseBrand(c.brand_name) === needle)
   if (exact) return exact
 
-  // Longest pattern first, so 'amazon prime' beats 'amazon' when both are present.
-  // Without the ordering the answer depends on row order, which is a database
-  // detail rather than a rule.
   let best: CatalogRow | null = null
   let bestLength = 0
   for (const row of rows) {
@@ -336,24 +289,6 @@ export function catalogEntryFor(
   return best
 }
 
-/** R4 — catalog fast path. One charge from a known subscription-only merchant is a
- *  'possible' run immediately. Suggest-only: `applyAssertions` forces the status, so
- *  nothing here can auto-activate a subscription.
- *
- *  THE INTERVAL IS PROVISIONAL AND THAT IS THE WHOLE DESIGN (spec, locked
- *  2026-07-15). A single charge cannot measure cadence, so the engine writes
- *  'monthly' to keep the column NOT NULL and `next_expected_date` renderable, and the
- *  confirm flow asks the user monthly-or-annual and overwrites it. R3 confirmations
- *  never ask, because three date-aligned charges already MEASURED the cadence.
- *
- *  Recognition is attempted against the merchant name first, then the normalized
- *  descriptor, then the raw one — most trustworthy to least, since `patterns` exists
- *  precisely to catch descriptors like 'trueline valve'. The FIRST string that
- *  resolves to any entry decides, and if that entry is not subscription-only the rule
- *  declines. It deliberately does NOT keep trying further strings hoping for a yes:
- *  the strongest available signal has already said this merchant's charges are not
- *  always subscriptions, and "ask every name until one agrees" is a false-positive
- *  generator. */
 function suggestR4(
   group: TxRow[],
   catalog: CatalogRow[],
@@ -370,42 +305,13 @@ function suggestR4(
   }
   if (!entry || !entry.subscription_only) return null
 
-  // Every charge in the group, not just the first. Usually there IS only one -- that
-  // is the case R4 exists for -- but when R1 and R3 have both declined a handful of
-  // charges from a merchant whose every charge is a subscription, they belong to one
-  // suggestion rather than being dropped on the floor. "Generous to extend."
   const proto: ProtoRun = { charges: [...group], detected_by: 'R4', interval: 'monthly' }
 
-  // FRESHNESS, AND IT GATES CREATION ONLY (v64).
-  //
-  // R4's first firing in production proposed a subscription whose single charge was
-  // FIVE MONTHS old: the derived lifecycle had already ended it, so the run carried an
-  // `end_date`, no `next_expected_date`, and an invitation to track something that was
-  // over. With a year of replayed history, every long-dead single charge from a catalog
-  // merchant becomes a standing suggestion, and a `possible` run is re-derived forever
-  // -- it never ages out on its own.
-  //
-  // `confirmedR4Exists` is why this is not simply "refuse ended runs". A CONFIRMED R4
-  // run that never receives a second charge must die THROUGH the lifecycle -- active,
-  // overdue, ended -- which the spec requires explicitly and a test pins. Declining to
-  // regenerate it would delete the run instead of ending it, and with it the user's
-  // confirmation. So: an assertion is always continued; a suggestion nobody has acted
-  // on is only ever CREATED while it could still be alive.
-  //
-  // A stale `possible` run left over from before this rule is not regenerated, so it
-  // leaves through `delete_run_ids` on the next pass. Suggestions clean themselves up;
-  // assertions never do.
   if (!confirmedR4Exists && lifecycle(proto, today).status === 'ended') return null
 
   return proto
 }
 
-/** R2 — backfill. On a confirmed run, claim an unclaimed same-merchant charge
- *  about one interval before the start, ANY amount, and correct start_date.
- *
- *  Not an event. Under recompute this is re-derived every run: confirmation
- *  state is preserved, so the precondition holds and the backfill re-applies,
- *  reproducing the same start_date. Nothing remembers that R2 fired (v24). */
 function backfillR2(run: ProtoRun, group: TxRow[], claimed: Set<string>): void {
   const first = run.charges[0]
   const expected = addInterval(first.date, run.interval, -1)
@@ -424,26 +330,7 @@ function backfillR2(run: ProtoRun, group: TxRow[], claimed: Set<string>): void {
   }
 }
 
-// ------------------------------------------------------------------------- R5
-//
-// A cancelled run holds AT MOST ONE charge dated after its `cancelled_date`.
-// Claiming that charge extends paid-through by one interval; a SECOND matching
-// charge un-claims it, and the post-cancellation charges anchor a new run through
-// standard R1 -- a resubscription, not a resurrection.
-//
-// This is the only place a charge ever moves between runs, and it is the reason
-// `matchRuns` resolves identity by descending overlap: the cancelled run overlaps
-// itself on many charges while the new run overlaps it on one, so the cancelled run
-// keeps its id and the resubscription is correctly new.
-//
-// The cap is measured from `cancelled_date`, which is an assertion, and never from
-// the run's last claimed charge -- that version ratchets forward one charge per
-// sync, which is the unlimited-swallowing bug wearing a limit. Every part of this is
-// a derivation from (raw, assertions, today), so incremental sync and full replay
-// converge on identical state.
 
-/** The live transaction ids a stored run holds. Frozen charges are excluded for the
- *  same reason `matchRuns` excludes them: no raw backing, no identity evidence. */
 function claimedIds(runId: string, storedCharges: StoredCharge[]): Set<string> {
   const out = new Set<string>()
   for (const c of storedCharges) {
@@ -452,9 +339,6 @@ function claimedIds(runId: string, storedCharges: StoredCharge[]): Set<string> {
   return out
 }
 
-/** R5 — trailing charge on cancelled runs. Applied to `protos` in place; returns
- *  what fired, because a rule that silently never fires reads as a rule that works
- *  and this project has now paid for that lesson three times. */
 function trailingR5(
   protos: ProtoRun[],
   claimed: Set<string>,
@@ -470,11 +354,6 @@ function trailingR5(
     const ids = claimedIds(run.id, storedCharges)
     if (ids.size === 0) continue
 
-    // Which proto IS this cancelled run, by the same greedy-overlap rule `matchRuns`
-    // applies later. Resolved here rather than reusing that pass because the split
-    // has to happen before identity is assigned: matching first would hand the
-    // over-extended proto the cancelled run's id and there would be nothing left to
-    // split off.
     let host: ProtoRun | undefined
     let bestOverlap = 0
     for (const p of protos) {
@@ -490,9 +369,6 @@ function trailingR5(
     if (after.length === 0) continue
 
     const keep = host.charges.filter((c) => c.date <= cancelledDate)
-    // Nothing survives the cancellation date, so the pre-cancellation charges were
-    // withdrawn out from under the run. Truncating would leave a proto with no
-    // charges at all; leave this one to the normal delete-and-rederive path.
     if (keep.length === 0) continue
 
     if (after.length === 1) {
@@ -500,12 +376,6 @@ function trailingR5(
       continue
     }
 
-    // A resubscription exists only if the post-cancellation charges anchor on their
-    // own, through the same R1 as any other run. When they cannot -- a price change
-    // between them means no same-amount pair -- the cap decides instead: the run
-    // keeps its one trailing charge and the rest go back to being unclaimed charges.
-    // Better one truthful trailing charge than a resubscription the evidence does not
-    // support. "Strict to create."
     const fresh = anchorR1(after)
     if (fresh.length === 0) {
       host.charges = [...keep, after[0]]
@@ -524,7 +394,6 @@ function trailingR5(
   return { trailing, unclaimed }
 }
 
-// ------------------------------------------------------------------- lifecycle
 
 function lifecycle(
   run: ProtoRun,
@@ -540,7 +409,6 @@ function lifecycle(
   if (daysBetween(overdueSince, today) <= OVERDUE_GRACE) {
     return { status: 'overdue', end_date: null, next_expected_date: expected }
   }
-  // end_date is paid-through: last charge + one interval, not the last charge.
   return { status: 'ended', end_date: expected, next_expected_date: null }
 }
 
@@ -549,16 +417,6 @@ function addDaysSafe(d: string, n: number): string {
   return new Date(Date.UTC(y, m - 1, day + n)).toISOString().slice(0, 10)
 }
 
-// --------------------------------------------------------------- run identity
-//
-// A stored run and a desired run are the same run when they share at least one
-// claimed transaction, matched GREEDILY BY DESCENDING OVERLAP. No stored anchor
-// column: a frozen derived pointer is what this project keeps refusing.
-//
-// R5 un-claiming is the case that needs the ordering. The trailing charge moves
-// to a new run, so the new run overlaps the cancelled run on exactly one charge
-// while the cancelled run overlaps itself on many. Highest overlap wins, so the
-// cancelled run keeps its identity and the new run is correctly new.
 
 export function matchRuns(
   desired: { charges: TxRow[] }[],
@@ -567,7 +425,7 @@ export function matchRuns(
 ): Map<number, string> {
   const byRun = new Map<string, Set<string>>()
   for (const c of storedCharges) {
-    if (c.transaction_id === null) continue // frozen: not identity evidence
+    if (c.transaction_id === null) continue
     if (!byRun.has(c.run_id)) byRun.set(c.run_id, new Set())
     byRun.get(c.run_id)!.add(c.transaction_id)
   }
@@ -584,8 +442,6 @@ export function matchRuns(
     }
   })
 
-  // Descending overlap, then stable by (desired index, run id) so equal overlaps
-  // resolve identically on every run.
   pairs.sort((a, b) =>
     b.overlap - a.overlap || a.di - b.di || (a.runId < b.runId ? -1 : 1)
   )
@@ -600,21 +456,13 @@ export function matchRuns(
   return out
 }
 
-// ------------------------------------------------------------------- assertions
 
-/** Which stored values survive a recompute. `detected_by` alone distinguishes a
- *  derived status from an asserted one, so no extra column is needed (v24). */
 function applyAssertions(
   desired: DesiredRun,
   stored: StoredRun | undefined,
 ): DesiredRun {
   if (stored) {
-    // A cancellation is a user assertion, preserved regardless of detected_by.
-    // next_expected_date stays null so a cancelled run never appears in "Coming
-    // up" and can never trip overdue.
     if (stored.status === 'cancelled') {
-      // Paid-through is DERIVED, not frozen: R5's trailing charge extends it by an
-      // interval and un-claiming has to restore it. Both are `last claimed charge +
       const last = desired.charges[desired.charges.length - 1]
       return {
         ...desired,
@@ -658,14 +506,10 @@ function dedupeKeys(merchant: string, runs: ProtoRun[]): string[] {
   return keys
 }
 
-// ----------------------------------------------------------------------- engine
 
 export function detect(input: EngineInput): DesiredState {
   const { candidates, diagnostics } = filterCandidates(input.rows)
 
-  // Account id -> 'Master 2049', for the charge snapshot (v60). Built once: a charge
-  // is labelled by the account its transaction sits on, and `TxRow` already carries
-  // `account_id`, so nothing new has to be threaded through the pass itself.
   const labels = new Map<string, string>()
   for (const a of input.accounts ?? []) {
     const label = cardLabel(a.brand, a.last4)
@@ -700,12 +544,9 @@ export function detect(input: EngineInput): DesiredState {
   let r5Trailing = 0
   let r5Unclaimed = 0
 
-  // Deterministic group order, so output ordering is stable run to run.
   for (const merchant of [...groups.keys()].sort()) {
     const group = groups.get(merchant)!.slice().sort(compareRows)
 
-    // Resolved before the rules, not after: R4 needs to know whether an assertion
-    // already exists for this merchant (see `suggestR4`).
     const storedSubs = storedByMerchant.get(merchant) ?? []
     const candidateStoredRuns = storedSubs.flatMap((s) => runsBySub.get(s.id) ?? [])
     const confirmedR4Exists = candidateStoredRuns.some(
@@ -717,10 +558,6 @@ export function detect(input: EngineInput): DesiredState {
     protos.forEach((p) => p.charges.forEach((c) => claimed.add(c.id)))
     protos.forEach((p) => backfillR2(p, group, claimed))
 
-    // R5 last of the auto rules, over finished protos: continuation built them blind
-    // to cancellation, and this is where a cancelled run gives back what it should
-    // never have swallowed. Cannot run before R1 -- there is no run to cap yet -- and
-    // must run before the R3/R4 gates, which only fire when nothing was detected.
     const r5 = trailingR5(
       protos,
       claimed,
@@ -735,13 +572,6 @@ export function detect(input: EngineInput): DesiredState {
       const s = suggestR3(leftover)
       if (s) protos.push(s)
     }
-    // R4 last, and only when nothing else claimed anything for this merchant. The
-    // ordering is the rule's precedence: a measured cadence always beats a catalog
-    // assumption, so R4 never competes with R1 or R3 -- it fills the gap where
-    // neither CAN fire. Deliberately scoped to "no runs at all for this merchant"
-    // rather than "unclaimed charges remain": a stray charge alongside a real run is
-    // R1 continuation's business, and a second 'possible' run for a merchant the user
-    // already tracks is noise. "Strict to create."
     if (protos.length === 0) {
       const s = suggestR4(group, input.catalog ?? [], input.today, confirmedR4Exists)
       if (s) protos.push(s)
@@ -777,9 +607,6 @@ export function detect(input: EngineInput): DesiredState {
           currency: c.currency,
           amount_in_account_currency:
             c.amount_in_account_currency === null ? null : num(c.amount_in_account_currency),
-          // The snapshot, taken from the account this transaction actually sits on
-          // (v60). Was hardcoded null since the engine was written, which left a
-          // column with a reader and no writer.
           card_label: labelFor(c.account_id),
         })),
       }
@@ -795,8 +622,6 @@ export function detect(input: EngineInput): DesiredState {
         stored_id: storedSub?.id ?? null,
         dedupe_key,
         merchant_key: merchant,
-        // Engine-seeded, frozen once the user renamed it. Resolved here rather
-        // than in the applier, which stays dumb.
         service_name:
           storedSub && storedSub.identification === 'user_renamed'
             ? storedSub.service_name
@@ -806,9 +631,6 @@ export function detect(input: EngineInput): DesiredState {
     })
   }
 
-  // A stored run whose every LIVE charge has vanished is deleted, even if it
-  // carried an assertion — its basis is gone. A run holding frozen charges
-  // always survives, because those are its basis.
   const frozenRunIds = new Set(
     input.charges.filter((c) => c.transaction_id === null).map((c) => c.run_id),
   )
@@ -839,7 +661,6 @@ function deriveServiceName(first: TxRow): string {
   return (first.provider_merchant_name ?? first.raw_description).trim().slice(0, 120)
 }
 
-/** One entry per dedupe_key, runs collected under it. */
 function mergeByDedupeKey(list: DesiredSubscription[]): DesiredSubscription[] {
   const out = new Map<string, DesiredSubscription>()
   for (const s of list) {

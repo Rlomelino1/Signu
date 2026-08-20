@@ -38,8 +38,6 @@ export async function pluggy<T>(
   })
   if (!res.ok) {
     const body = await res.text()
-    // Truncated, not summarised: Pluggy's errors name the actual problem
-    // ("itemId not found", a connector outage) and paraphrasing hides the fix.
     throw new PluggyError(
       `Pluggy ${init?.method ?? 'GET'} ${path} -> ${res.status}: ${body.slice(0, 400)}`,
       502,
@@ -48,8 +46,6 @@ export async function pluggy<T>(
   return (await res.json()) as T
 }
 
-/** Only the fields the connect flow reads. `clientUserId` is the load-bearing
- *  one — see register-connection, where it is the ownership proof. */
 export interface PluggyItem {
   id: string
   clientUserId?: string | null

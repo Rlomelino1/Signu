@@ -56,14 +56,6 @@ async function loadCandidates(db: SupabaseClient, userId: string): Promise<Remin
   const rows = (data ?? []) as unknown as Joined[]
   if (!rows.length) return []
 
-  // The amount shown is the latest charge of the run, already resolved into the
-  // account's currency (v26) — the same figure the app renders, so an email and
-  // the screen cannot disagree about a price.
-  // The account is reached through the transaction because that is a charge's
-  // only route to one, and the embed is deliberately NOT `!inner`: a charge whose
-  // raw backing was deleted has `transaction_id` null (v24's frozen region), and
-  // an inner join would drop it from the email entirely rather than show it with
-  // its stored currency.
   const { data: charges, error: cErr } = await db
     .from('charge')
     .select(
@@ -76,9 +68,7 @@ async function loadCandidates(db: SupabaseClient, userId: string): Promise<Remin
   const latest = new Map<string, { amount: number | string | null; currency: string | null }>()
   for (const c of (charges ?? []) as Array<Record<string, unknown>>) {
     const runId = c.run_id as string
-    if (latest.has(runId)) continue // ordered desc, so the first seen is the latest
-    // PostgREST nests both to-one embeds as objects, and `transaction` is null for
-    // an orphan -- both shapes verified against the live API, not assumed.
+    if (latest.has(runId)) continue
     const tx = c.transaction as { bank_account?: { currency?: string | null } | null } | null
     latest.set(runId, chargeMoney(c as unknown as ChargeMoneyRow, tx?.bank_account?.currency ?? null))
   }
@@ -106,8 +96,6 @@ function subject(due: DueReminder[]): string {
   return `${due.length} subscriptions renewing soon`
 }
 
-/** Plain text alongside the HTML. A reminder that only renders in a rich client
- *  is a reminder some clients silently drop. */
 function bodyText(due: DueReminder[]): string {
   const lines = due.map((d) => {
     const money = moneyText(d.amount, d.currency)
@@ -172,8 +160,6 @@ Deno.serve(async (req: Request) => {
     { auth: { persistSession: false } },
   )
 
-  // Resolved once and passed in, so a replay against a fixed date is
-  // reproducible — the same discipline as run-detection (v24).
   let today = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Sao_Paulo',
     year: 'numeric',
@@ -181,17 +167,10 @@ Deno.serve(async (req: Request) => {
     day: '2-digit',
   }).format(new Date())
   let onlyUserId: string | null = null
-  // `dryRun` sends nothing and records nothing, so the selection can be
-  // inspected on real data before any mail goes out.
-  let dryRun = false
-  try {
-    const body = await req.json()
-    onlyUserId = body?.userId ?? null
-    if (typeof body?.today === 'string') today = body.today
-    dryRun = body?.dryRun === true
-  } catch {
-    // no body is the normal cron case
-  }
+  const body = await req.json().catch(() => null)
+  onlyUserId = body?.userId ?? null
+  if (typeof body?.today === 'string') today = body.today
+  const dryRun = body?.dryRun === true
 
   if (!resendKey && !dryRun) {
     return json({ error: 'RESEND_API_KEY not configured' }, 500)
@@ -216,11 +195,6 @@ Deno.serve(async (req: Request) => {
       const candidates = await loadCandidates(db, p.id)
       const due = dueReminders(candidates, today)
 
-      // Resolved before the empty check on a dry run, so `dryRun` can answer "who
-      // would this reach?" even on a day nothing is due. That is the question the
-      // free-tier restriction turns on -- delivery works only while this address is
-      // the one that owns the Resend account -- and it should be answerable without
-      // waiting for a renewal to come round.
       if (!due.length && !dryRun) {
         results.push({ userId: p.id, due: 0 })
         continue
@@ -235,13 +209,8 @@ Deno.serve(async (req: Request) => {
         results.push({
           userId: p.id,
           to,
-          // How many runs were even looked at, so "due: 0" distinguishes "no
-          // subscriptions" from "subscriptions exist and none is due" without
-          // needing a second query to find out.
           candidates: candidates.length,
           due: due.length,
-          // Only when there is something to title. `subject([])` reads
-          // "0 subscriptions renewing soon", which is not wrong so much as absurd.
           subject: due.length ? subject(due) : null,
           reminders: due,
           note: 'dry run — nothing sent, nothing recorded',
@@ -266,14 +235,9 @@ Deno.serve(async (req: Request) => {
 
       const payload = await res.json().catch(() => ({}))
       if (!res.ok) {
-        // Surfaced verbatim rather than summarised: on the free tier the
-        // informative failure is "you can only send to your own address until a
-        // domain is verified", and paraphrasing it would hide the fix.
         throw new Error(`resend ${res.status}: ${JSON.stringify(payload)}`)
       }
 
-      // Only now. A send recorded before it succeeded would skip the renewal.
-      // One statement per run because each carries its own date.
       for (const d of due) {
         const { error: uErr2 } = await db
           .from('subscription_run')
@@ -288,7 +252,5 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // 207 when some users failed: a 200 would let a broken account hide behind a
-  // working one, which is the reporting failure the sync contract calls out.
   return json({ ok: failures.length === 0, today, dryRun, results, failures }, failures.length ? 207 : 200)
 })

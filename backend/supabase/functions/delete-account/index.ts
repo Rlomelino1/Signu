@@ -23,10 +23,5 @@ Deno.serve(async (req: Request) => {
   const { error } = await db.auth.admin.deleteUser(who.caller.id)
   if (error) return json({ error: `delete user: ${error.message}` }, 500)
 
-  // The client still has to end its session. The access token stays
-  // cryptographically valid until it expires — nothing revokes a signed JWT —
-  // but every request it makes now resolves to a user that no longer exists, so
-  // reads return nothing and these four functions return 401. Signing out is
-  // what makes the app agree with the database rather than what enforces it.
   return json({ ok: true, userId: who.caller.id, deleted: true })
 })
