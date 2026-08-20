@@ -69,6 +69,14 @@ granted), `sync.ts` (the withdrawal decision), `reminders.ts`, `accounts.ts`, `m
 CI while `deno test` is directory-scoped** — a new module is type-checked only once added
 to that list, but picked up as a test suite for free.
 
+**Remote dependencies are locked.** `backend/deno.lock` records an integrity hash per
+remote module, and both CI Deno steps pass `--lock`. It lives in `backend/` rather than
+beside the functions so the Supabase bundler can never pick it up — the lockfile is for
+CI's verification, not for the deploy. Worth knowing what it does and does not catch: a
+tampered hash fails `deno test` (exit 10, "Integrity check failed") because that actually
+executes the module, and passes `deno check`, which only pulls type declarations. The
+enforcement is real, and it lives in the test step.
+
 ---
 
 ## 3. The two chains, and the one place they meet

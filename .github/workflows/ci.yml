@@ -101,7 +101,7 @@ jobs:
 
       - name: Type-check
         run: |
-          deno check \
+          deno check --lock=backend/deno.lock \
             backend/supabase/functions/_shared/detection.ts \
             backend/supabase/functions/_shared/reminders.ts \
             backend/supabase/functions/_shared/actions.ts \
@@ -123,7 +123,7 @@ jobs:
         run: deno lint backend/supabase/functions
 
       - name: Test
-        run: deno test backend/supabase/functions/_shared/
+        run: deno test --lock=backend/deno.lock backend/supabase/functions/_shared/
 
   deploy:
     name: Deploy to production
