@@ -18,7 +18,7 @@ final class AuthGateUITests: XCTestCase {
 
     func testWrongPasswordShowsTheErrorBanner() {
         let app = signInScreen()
-        fillCredentials(app, email: "rafael.souza@example.com", password: "wrongpassword1A")
+        fillCredentials(app, email: "alex.rivera@example.test", password: "wrongpassword1A")
         app.buttons["Sign in"].tap()
 
         XCTAssertTrue(text(app, startingWith: "Couldn't sign in").waitForExistence(timeout: 5),
@@ -38,7 +38,7 @@ final class AuthGateUITests: XCTestCase {
 
     func testCorrectPasswordReachesTheAppShell() {
         let app = signInScreen()
-        fillCredentials(app, email: "rafael.souza@example.com", password: "Signu123")
+        fillCredentials(app, email: "alex.rivera@example.test", password: "Signu123")
         app.buttons["Sign in"].tap()
 
         XCTAssertTrue(app.buttons["Subs"].waitForExistence(timeout: 10),

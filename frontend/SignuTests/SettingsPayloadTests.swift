@@ -12,7 +12,7 @@ private struct StubSource: SignuPayloadSource {
         Profile(
             id: UUID(),
             displayName: "Alex Rivera",
-            email: "rafael.souza@example.com",
+            email: "alex.rivera@example.test",
             providers: providers,
             createdAt: Date(timeIntervalSince1970: 1_760_000_000)
         )

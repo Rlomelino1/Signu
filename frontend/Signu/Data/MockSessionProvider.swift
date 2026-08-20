@@ -24,7 +24,7 @@ final class MockSessionProvider: SessionProviding {
     private(set) var currentEmail: String?
     private var pendingConfirmationEmail: String?
 
-    init(scenario: Scenario = .signedOut, sessionEmail: String = "rafael.souza@example.com") {
+    init(scenario: Scenario = .signedOut, sessionEmail: String = "alex.rivera@example.test") {
         self.scenario = scenario
         self.sessionEmail = sessionEmail
     }

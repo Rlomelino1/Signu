@@ -231,10 +231,10 @@ struct NewPasswordView: View {
 
 #Preview("Sign in (17a)") { SignInView() }
 #Preview("Create account (17b)") { CreateAccountView() }
-#Preview("Confirm email (17c)") { ConfirmEmailView(email: "marina.duarte@example.com") }
+#Preview("Confirm email (17c)") { ConfirmEmailView(email: "sam.taylor@example.test") }
 #Preview("Forgot password (17d)") { ForgotPasswordView() }
 #Preview("Forgot password · expired link (17d)") { ForgotPasswordView(showExpiredLinkNotice: true) }
-#Preview("New password (17e)") { NewPasswordView(email: "marina.duarte@example.com") }
+#Preview("New password (17e)") { NewPasswordView(email: "sam.taylor@example.test") }
 
 #Preview("Sign in · wrong password (17a)") {
     SignInView(error: AuthError(message: SessionAuthError.invalidCredentials.signInMessage))
@@ -251,7 +251,7 @@ struct NewPasswordView: View {
 }
 #Preview("New password · failed (17e)") {
     NewPasswordView(
-        email: "marina.duarte@example.com",
+        email: "sam.taylor@example.test",
         error: AuthError(message: "Couldn't set your new password. Try again.")
     )
 }
