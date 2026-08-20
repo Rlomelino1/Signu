@@ -134,6 +134,16 @@ all five rules are live.
 | **R4 — catalog fast path** | suggest-only | One charge from a known subscription-only merchant ⇒ a `possible` run immediately. |
 | **R5 — trailing charge on cancelled runs** | auto | A cancelled run may claim **at most one** charge dated after its `cancelled_date`. |
 
+**The run lifecycle, and the composition that matters.** A run is `active` while today is
+within the ±3 matching window of its expected date; it goes `overdue` on the **fourth** day
+past expected; and the 10-day retry grace runs **from the end of the match window**, so it
+flips to `ended` on **expected + 14** with `end_date` left at paid-through. That
+composition — `deadAfterDays = matchWindowDays + overdueGraceDays` — is the whole subtlety:
+the client used to add 10 to the expected date and promise the user a deadline three days
+before the engine would act. The client now derives it from `RunLifecycle`, and the engine's
+boundary is pinned day-by-day in `detection.test.ts` rather than merely named in a test
+title.
+
 **R2 is not an event.** Doctrine says it fires "on confirmation", but under recompute
 the confirmation state is preserved, so the precondition still holds, so the backfill
 re-applies and reproduces the same `start_date`. Nothing needs to remember that R2 ran.
