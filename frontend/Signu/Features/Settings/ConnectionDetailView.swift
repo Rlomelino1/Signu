@@ -5,8 +5,10 @@ struct ConnectionDetailScreen: View {
     let connectionId: UUID
     var onBack: () -> Void = {}
     var onReconnected: () -> Void = {}
+    var onLoadFailed: (String) -> Void = { _ in }
 
     @State private var payload: ConnectionDetailPayload?
+    @State private var failure: String?
     @State private var showRemove = false
     @State private var attributedId: UUID?
     @State private var removeError: String?
@@ -22,11 +24,13 @@ struct ConnectionDetailScreen: View {
                     onRemove: { showRemove = true },
                     onReconnect: { connectTarget = ConnectTarget(connectionId: connectionId) }
                 )
+            } else if let failure {
+                LoadFailureView(message: failure) { await load() }
             } else {
                 Color.clear
             }
         }
-        .task { payload = try? await provider.connectionDetailPayload(connectionId: connectionId) }
+        .task { await load() }
         .sheet(isPresented: $showRemove) {
             if let payload {
                 RemoveBankSheet(institutionName: payload.institutionName, count: payload.summaryCount) { keepHistory in
@@ -57,12 +61,34 @@ struct ConnectionDetailScreen: View {
             Text(removeError ?? "")
         }
         .fullScreenCover(item: $attributedId) { id in
-            AttributedSubsScreen(provider: provider, connectionId: id, onBack: { attributedId = nil })
+            AttributedSubsScreen(
+                provider: provider,
+                connectionId: id,
+                onBack: { attributedId = nil },
+                onLoadFailed: onLoadFailed
+            )
         }
         .connectBankCover(provider: provider, target: $connectTarget) {
             Task {
-                payload = try? await provider.connectionDetailPayload(connectionId: connectionId)
+                await load()
                 onReconnected()
+            }
+        }
+    }
+}
+
+extension ConnectionDetailScreen {
+    fileprivate func load() async {
+        do {
+            payload = try await provider.connectionDetailPayload(connectionId: connectionId)
+            failure = nil
+        } catch {
+            switch LoadFailureRoute.of(hasPayload: payload != nil) {
+            case .replaceScreen:
+                payload = nil
+                failure = error.localizedDescription
+            case .reportOnly:
+                onLoadFailed(error.localizedDescription)
             }
         }
     }

@@ -4,18 +4,37 @@ struct AttributedSubsScreen: View {
     let provider: SignuDataProviding
     let connectionId: UUID
     var onBack: () -> Void = {}
+    var onLoadFailed: (String) -> Void = { _ in }
 
     @State private var payload: AttributedSubsPayload?
+    @State private var failure: String?
 
     var body: some View {
         Group {
             if let payload {
                 AttributedSubsView(payload: payload, onBack: onBack)
+            } else if let failure {
+                LoadFailureView(message: failure) { await load() }
             } else {
                 Color.clear
             }
         }
-        .task { payload = try? await provider.attributedSubsPayload(connectionId: connectionId) }
+        .task { await load() }
+    }
+
+    private func load() async {
+        do {
+            payload = try await provider.attributedSubsPayload(connectionId: connectionId)
+            failure = nil
+        } catch {
+            switch LoadFailureRoute.of(hasPayload: payload != nil) {
+            case .replaceScreen:
+                payload = nil
+                failure = error.localizedDescription
+            case .reportOnly:
+                onLoadFailed(error.localizedDescription)
+            }
+        }
     }
 }
 
