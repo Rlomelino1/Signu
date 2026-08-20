@@ -8,37 +8,31 @@ final class RowTapTargetUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func chromeFrames(_ app: XCUIApplication) -> [CGRect] {
-        ["Home", "Subs", "Settings"]
+    private func chromeTop(_ app: XCUIApplication) -> CGFloat {
+        let tops = ["Home", "Subs", "Settings"]
             .map { app.buttons[$0] }
             .filter { $0.isHittable }
-            .map { $0.frame }
+            .map { $0.frame.minY }
+        return tops.min() ?? .greatestFiniteMagnitude
+    }
+
+    private func centreIsInChromeBand(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+        element.frame.midY >= chromeTop(app) - 4
     }
 
     private func tapCentre(_ app: XCUIApplication, _ element: XCUIElement) {
-        let frame = element.frame
-        let centre = CGPoint(x: frame.midX, y: frame.midY)
-
-        print("DIAGTAP label=\(element.label) frame=\(frame) hittable=\(element.isHittable)")
-        for name in ["Home", "Subs", "Settings"] {
-            let b = app.buttons[name]
-            print("DIAGTAP chrome \(name) exists=\(b.exists) hittable=\(b.isHittable) frame=\(b.exists ? "\(b.frame)" : "-")")
+        var scrolls = 0
+        while centreIsInChromeBand(app, element), scrolls < 8 {
+            app.swipeUp()
+            scrolls += 1
         }
-        print("DIAGTAP occluded=\(chromeFrames(app).contains { $0.contains(centre) })")
-
-        guard let chrome = chromeFrames(app).first(where: { $0.contains(centre) }) else {
-            element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            return
-        }
-
-        let clearHeight = chrome.minY - frame.minY
-        XCTAssertGreaterThan(clearHeight, 8,
-                             "the row sits almost entirely behind the floating tab bar, "
-                             + "so no tap inside it could prove the body is live")
-
-        app.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: frame.midX, dy: frame.minY + clearHeight / 2))
-            .tap()
+        print("DIAGTAP label=\(element.label) frame=\(element.frame) "
+              + "chromeTop=\(chromeTop(app)) scrolls=\(scrolls)")
+        XCTAssertFalse(centreIsInChromeBand(app, element),
+                       "the row's middle stayed inside the floating tab bar's band after "
+                       + "\(scrolls) swipes, so a centre tap would hit the chrome and "
+                       + "prove nothing about the row")
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
     private func button(_ app: XCUIApplication, containing text: String) -> XCUIElement {
@@ -122,11 +116,6 @@ final class RowTapTargetUITests: XCTestCase {
 
         let row = button(app, containing: "Delete account")
         XCTAssertTrue(row.waitForExistence(timeout: 15), "Settings must offer Delete account")
-        var scrolls = 0
-        while !row.isHittable, scrolls < 8 {
-            app.swipeUp()
-            scrolls += 1
-        }
         tapCentre(app, row)
 
         XCTAssertTrue(app.staticTexts["Delete your account?"].waitForExistence(timeout: 10),
