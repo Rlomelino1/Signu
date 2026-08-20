@@ -12,7 +12,7 @@ concurrency:
 jobs:
   ios:
     name: iOS build
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -33,15 +33,29 @@ jobs:
 
       - name: Test
         run: |
-          UDID=$(xcrun simctl list devices available \
-            | awk '/^-- iOS/ {ios = 1; next}
-                   /^-- / {ios = 0}
-                   ios && /iPhone/ {
-                     match($0, /[0-9A-F-]{36}/)
-                     print substr($0, RSTART, RLENGTH); exit
-                   }')
-          test -n "$UDID" || { echo "no available iPhone simulator"; exit 1; }
-          echo "Testing on $UDID"
+          set -eo pipefail
+
+          SEL=$(xcrun simctl list devices available --json | jq -c '
+            [ .devices | to_entries[]
+              | select(.key | test("SimRuntime\\.iOS-[0-9]+-[0-9]+$"))
+              | (.key | capture("iOS-(?<maj>[0-9]+)-(?<min>[0-9]+)")) as $v
+              | .value[]
+              | select(.isAvailable) | select(.name | test("^iPhone"))
+              | { major: ($v.maj | tonumber), minor: ($v.min | tonumber),
+                  udid: .udid, name: .name } ]
+            | sort_by(.major, .minor) | last // empty')
+
+          test -n "$SEL" || { echo "::error::no available iPhone simulator"; exit 1; }
+
+          UDID=$(jq -r .udid <<<"$SEL")
+          MAJOR=$(jq -r .major <<<"$SEL")
+          echo "Testing on $(jq -r '"\(.name) iOS \(.major).\(.minor)"' <<<"$SEL")"
+
+          if [ "$MAJOR" -lt 26 ]; then
+            echo "::error::the newest simulator here is iOS $MAJOR, but the app ships against iOS 26; a layout regression that only appears on the shipping runtime would pass unnoticed. See README section 13."
+            exit 1
+          fi
+
           xcodebuild test \
             -project frontend/Signu.xcodeproj \
             -scheme Signu \
