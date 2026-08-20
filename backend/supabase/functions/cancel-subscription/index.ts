@@ -9,11 +9,10 @@ Deno.serve(async (req: Request) => {
   if (!who.ok) return json({ error: who.error }, who.status)
 
   let subscriptionId: string | null = null
-  let today = todayInSaoPaulo()
+  const today = todayInSaoPaulo()
   try {
     const body = await req.json()
     subscriptionId = typeof body?.subscriptionId === 'string' ? body.subscriptionId : null
-    if (typeof body?.today === 'string') today = body.today
   } catch {
     return json({ error: 'body must be JSON' }, 400)
   }

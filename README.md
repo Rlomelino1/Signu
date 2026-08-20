@@ -269,6 +269,14 @@ an independently scheduled detection run can wake mid-sync and interpret a half-
 raw chain. Both stay independently invokable, which is what replay needs.
 `send-reminders` runs at **16:30 UTC**.
 
+**`today` is a parameter of the engine, not of the API.** `run-detection` and
+`send-reminders` accept it in the body on purpose: they sit behind the shared secret, and
+an operator replaying a past day is the affordance that makes the engine replayable.
+`cancel-subscription` does not, even though it once did. It is reached by an ordinary
+authenticated user, and the value it would set — `cancelled_date` — is an *assertion the
+engine preserves and never recomputes*, so a wrong date there is permanent in a way that
+ordinary client input is not. It now reads the clock itself.
+
 **Every call to Pluggy's data endpoints is a GET** — `/items/{id}`, `/accounts`,
 `/v2/transactions` — and the sync never issues `PATCH /items/{id}`. So it reads
 whatever Pluggy already holds and cannot make Pluggy look again. The transactions
@@ -398,7 +406,7 @@ the caller is a machine and the function gates on `x-sync-secret` itself.
 | `connect-token` | true | The app, to mint a Pluggy connect token for the widget. |
 | `register-connection` | true | The app, after the widget succeeds: creates the `connection` row and refuses duplicates. |
 | `confirm-suggestion` | true | The app — *Track it* on an R3/R4 suggestion. |
-| `cancel-subscription` | true | The app — *Mark cancelled*. |
+| `cancel-subscription` | true | The app — *Mark cancelled*. Ignores a caller-supplied `today`. |
 | `remove-connection` | true | The app — delete a bank link, preserving history via the frozen region. |
 | `delete-account` | true | The app — delete the account and all its data. |
 
