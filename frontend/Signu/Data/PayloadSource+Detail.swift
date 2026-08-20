@@ -121,7 +121,7 @@ extension SignuPayloadSource {
                         amountText: nil, tone: .warning, marker: .ring
                     )))
                 }
-                let endedDate = cal.date(byAdding: .day, value: 10, to: endDate)!
+                let endedDate = cal.date(byAdding: .day, value: RunLifecycle.deadAfterDays, to: endDate)!
                 dated.append((endedDate, TimelineEvent(
                     id: UUID(), title: "Ended · charges stopped",
                     dateText: "\(SignuFormat.timelineDate(endedDate, referenceYear: refYear)) · paid through \(SignuFormat.monthDay(endDate))",
@@ -199,7 +199,9 @@ extension SignuPayloadSource {
 
     private func deadDate(of run: SubscriptionRun, calendar: Calendar) -> Date? {
         switch run.status {
-        case .ended: run.endDate.flatMap { calendar.date(byAdding: .day, value: 10, to: $0) }
+        case .ended: run.endDate.flatMap {
+            calendar.date(byAdding: .day, value: RunLifecycle.deadAfterDays, to: $0)
+        }
         case .cancelled: run.cancelledDate
         default: nil
         }
@@ -209,7 +211,9 @@ extension SignuPayloadSource {
         switch run.status {
         case .overdue:
             guard let next = run.nextExpectedDate,
-                  let deadline = calendar.date(byAdding: .day, value: 10, to: next) else { return nil }
+                  let deadline = calendar.date(
+                    byAdding: .day, value: RunLifecycle.deadAfterDays, to: next
+                  ) else { return nil }
             return "Expected \(SignuFormat.brl(lastCharge.amount)) on \(SignuFormat.monthDayShort(next)) — nothing yet.\nIf no charge arrives by \(SignuFormat.monthDayShort(deadline)), we'll mark this run ended."
         case .cancelled:
             guard let cd = run.cancelledDate, let end = run.endDate else { return nil }

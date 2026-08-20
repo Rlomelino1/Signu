@@ -6,6 +6,12 @@ enum BillingInterval: String, Codable {
     case annual
 }
 
+enum RunLifecycle {
+    static let matchWindowDays = 3
+    static let overdueGraceDays = 10
+    static let deadAfterDays = matchWindowDays + overdueGraceDays
+}
+
 enum RunStatus: String, Codable {
     case possible
     case active

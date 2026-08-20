@@ -88,7 +88,7 @@ Deno.serve(async (req: Request) => {
         await pluggy(`/items/${itemId}`, apiKey, { method: 'DELETE' })
       } catch (error) {
         console.log(
-          `orphan cleanup failed for item ${itemId}: ${
+          `orphan cleanup failed; the refusal below still stands: ${
             error instanceof Error ? error.message : String(error)
           }`,
         )
@@ -116,7 +116,10 @@ Deno.serve(async (req: Request) => {
     )
     .select('id, institution_name')
     .single()
-  if (error) return json({ error: `upsert connection: ${error.message}` }, 500)
+  if (error) {
+    console.log(`register-connection upsert connection failed: ${error.message}`)
+    return json({ error: 'could not save the bank connection' }, 500)
+  }
 
   const secret = Deno.env.get('SYNC_SECRET')
   let sync: unknown = 'started'
