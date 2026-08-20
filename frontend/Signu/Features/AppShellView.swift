@@ -181,8 +181,9 @@ struct AppShellView: View {
         }
         .fullScreenCover(item: $detailSubscriptionId) { id in
             DetailScreen(
-                loader: { try? await provider.detailPayload(subscriptionId: id) },
+                loader: { try await provider.detailPayload(subscriptionId: id) },
                 actions: DetailActions(
+                    onLoadFailed: { actionError = $0 },
                     onBack: { detailSubscriptionId = nil },
                     onRename: { name in
                         do {

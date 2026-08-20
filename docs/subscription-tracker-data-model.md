@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-20** (v80) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-20** (v81) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1851,6 +1851,27 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v81** — THE DETAIL SCREEN CAN SAY THAT IT FAILED (2026-08-20). **No migration.**
+  `DetailScreen` gains a failure state; its loader becomes throwing.
+  **v40's bug, one screen over.** `DetailScreen` rendered `Color.clear` for both "still
+  loading" and "the read threw", which is exactly what v40 fixed for Home and v72 fixed for
+  Subs. Tapping a subscription with a broken read gave a blank sheet and a back button.
+  **The type was the bug.** `loader` was `(() async -> DetailPayload?)?` — non-throwing,
+  returning an optional — so the call site had to write `try? await provider.detailPayload(…)`
+  and the error was destroyed *before the screen could ever see it*. No amount of view code
+  could have surfaced a failure through that signature. Making the loader throwing is what
+  made the rule applicable, and the call site simply drops its `try?`.
+  **It follows `LoadFailureRoute` like the other two**: nothing on screen ⇒ the failure view
+  with a retry; a payload already showing ⇒ keep it and report through the shell alert. The
+  post-rename and post-category reloads now go through the same `load()` rather than
+  assigning `loaded = await loader?()` directly, so a failed reload keeps the payload
+  instead of blanking the sheet the user is looking at.
+  **Non-throwing closures satisfy a throwing function type**, so the `--detail=` screenshot
+  harness and both SwiftUI previews compile unchanged — the signature change cost nothing at
+  the three call sites that cannot fail.
+  **Remaining in this family**: `ConnectionDetailScreen` and `AttributedSubsScreen` still
+  carry the old shape. 201 iOS tests pass, unchanged in count.
 
 - **v80** — A SETTING THAT DID NOT SAVE NO LONGER LOOKS SAVED (2026-08-20). **No
   migration.** Six call sites in `AppShellView`.
