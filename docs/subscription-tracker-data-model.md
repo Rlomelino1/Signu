@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-20** (v79) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-20** (v80) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1851,6 +1851,25 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v80** — A SETTING THAT DID NOT SAVE NO LONGER LOOKS SAVED (2026-08-20). **No
+  migration.** Six call sites in `AppShellView`.
+  **The last of the `try?` family**, and the one with the most misleading symptom. Setting a
+  nickname, a category, `ignored`, or a reminder is a direct column-scoped `UPDATE` — not an
+  Edge Function — and every one of the six call sites was `try? await`, so a rejected write
+  said nothing at all.
+  **What made it worse than a plain silent failure**: `SupabaseDataProvider.update()` sets
+  `loaded = false` only *after* a successful write, so a failure leaves the cache intact and
+  the next read returns the **old** value. The screen therefore looks like it obeyed. That is
+  why the reminder toggle could not be used to test anything: off-then-on returns to the
+  original value, so a total failure and a complete success render identically.
+  **Fixed by reusing `act()`**, the helper the four Edge Function writes already use, so
+  failures reach the *"That didn't go through"* alert through one channel rather than a
+  second mechanism. The two call sites that are already `async` catch inline for the same
+  effect, and now bump `dataVersion` **only after** the write lands — previously a failed
+  rename still advanced it, triggering a re-read that quietly restored the old name.
+  **Same doctrine as v72, on writes rather than reads**: a failed operation must never be
+  indistinguishable from a successful one. 201 iOS tests pass, unchanged in count.
 
 - **v79** — FINISHING THE COMMENT STRIP THAT REPORTED ITSELF COMPLETE (2026-08-20). **No
   migration.** 762 comment lines from 18 TypeScript files.

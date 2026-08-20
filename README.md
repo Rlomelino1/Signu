@@ -549,6 +549,14 @@ state no screen is showing, and a failed pull-to-refresh leaves the last good da
 screen — correct, and indistinguishable from a refresh that worked. One channel, one
 meaning: *the thing you asked for did not happen.*
 
+**The six client-owned column writes use that same channel.** Setting a nickname, a
+category, `ignored`, or a reminder is a direct column-scoped `UPDATE`, and each used to be
+`try? await`, so a rejected write left the old value rendering with nothing said. Worse for
+diagnosis than a visible error: the provider only invalidates its cache **on success**, so
+a failed write leaves the stale value in place and the screen looks like it obeyed. They now
+route through the same alert, and the two that are already async only bump `dataVersion`
+once the write has actually landed.
+
 **Pull-to-refresh ignores the refresh verdict but never the error.** The verdict (did
 anything change?) is ignored because the user asked, so the payload is re-read either way
 and the gesture never appears to do nothing. Swallowing the *error* produced a gesture
