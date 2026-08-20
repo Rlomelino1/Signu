@@ -3,22 +3,48 @@ const PLUGGY = 'https://api.pluggy.ai'
 
 export class PluggyError extends Error {
   readonly status: number
-  constructor(message: string, status: number) {
+  readonly upstreamStatus?: number
+  constructor(message: string, status: number, upstreamStatus?: number) {
     super(message)
     this.status = status
+    this.upstreamStatus = upstreamStatus
   }
 }
 
-export async function pluggyApiKey(): Promise<string> {
-  const clientId = Deno.env.get('PLUGGY_CLIENT_ID')
-  const clientSecret = Deno.env.get('PLUGGY_CLIENT_SECRET')
+export interface PluggyCredentials {
+  clientId?: string
+  clientSecret?: string
+}
+
+export function pluggyEnvCredentials(): PluggyCredentials {
+  return {
+    clientId: Deno.env.get('PLUGGY_CLIENT_ID'),
+    clientSecret: Deno.env.get('PLUGGY_CLIENT_SECRET'),
+  }
+}
+
+export async function pluggyApiKey(
+  creds: PluggyCredentials = pluggyEnvCredentials(),
+): Promise<string> {
+  const { clientId, clientSecret } = creds
   if (!clientId || !clientSecret) {
     throw new PluggyError('PLUGGY_CLIENT_ID / PLUGGY_CLIENT_SECRET not configured', 500)
   }
-  const auth = await pluggy<{ apiKey?: string }>('/auth', null, {
-    method: 'POST',
-    body: JSON.stringify({ clientId, clientSecret }),
-  })
+  let auth: { apiKey?: string }
+  try {
+    auth = await pluggy<{ apiKey?: string }>('/auth', null, {
+      method: 'POST',
+      body: JSON.stringify({ clientId, clientSecret }),
+    })
+  } catch (error) {
+    const upstream = error instanceof PluggyError ? error.upstreamStatus : undefined
+    throw new PluggyError(
+      `Pluggy POST /auth -> ${upstream ?? 'no response'}: response body withheld, ` +
+        'because this request carried the client secret and a gateway may echo it back',
+      502,
+      upstream,
+    )
+  }
   if (!auth?.apiKey) throw new PluggyError('Pluggy /auth returned no apiKey', 502)
   return auth.apiKey
 }
@@ -41,6 +67,7 @@ export async function pluggy<T>(
     throw new PluggyError(
       `Pluggy ${init?.method ?? 'GET'} ${path} -> ${res.status}: ${body.slice(0, 400)}`,
       502,
+      res.status,
     )
   }
   return (await res.json()) as T

@@ -282,6 +282,14 @@ layer 3. Measured end-to-end latency from charge date to the row existing locall
 subscription as overdue while the money has already left the card — upstream latency made
 visible, not a defect, and it self-heals next pass.
 
+**A failed `POST /auth` reports its status and withholds its body.** Every other Pluggy
+failure interpolates up to 400 characters of the upstream response into the thrown
+message, which is logged; `/auth` is the one request whose *own* body carries
+`PLUGGY_CLIENT_SECRET`, and a gateway that echoes the request it rejected would put that
+secret in the log. So that one call keeps the upstream status — the actual diagnostic —
+and drops the text. `PluggyError.upstreamStatus` exists to make that possible: `status`
+is what Signu returns to its caller and is always 502, which is not the same fact.
+
 **Webhooks are deliberately not built.** They fire when *Pluggy* updates an item, and an
 item can update with nothing new — so a webhook would deliver an empty event on time.
 There is also no webhook signature, so authenticating a public endpoint would rest on a
