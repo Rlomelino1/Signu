@@ -542,9 +542,18 @@ the data already displayed supports.
 Detail earns its own note. Its loader was typed `() async -> Payload?`, so the error was
 destroyed at the call site before the screen could see it — a nil arrived and rendered as
 `Color.clear`, identical to still-loading. Making the loader **throwing** is what let the
-rule apply at all: the type was the bug. The two Settings sub-screens
-(`ConnectionDetailScreen`, `AttributedSubsScreen`) still carry the old shape and are the
-remainder of this family.
+rule apply at all: the type was the bug.
+
+`ConnectionDetailScreen` and `AttributedSubsScreen` follow it too, and report through their
+caller's channel rather than growing alerts of their own — so a nested failure still reaches
+the one shell alert. **Five screens still carry the old shape**: `SettingsView`,
+`CalendarView`, `SearchView`, `ReviewView` and `EditProfileView`, each a one-line
+`.task { payload = try? await … }` that renders `Color.clear` on failure.
+
+Distinguish those from the calls that are *deliberately* silent, because they are not the
+same defect: the logo-catalog and avatar prefetches degrade to monograms, the suggestion
+badge falls back to `0`, and the **foreground** refresh ignores its verdict on purpose.
+Losing a best-effort enhancement is not the same as showing a blank screen.
 
 **Messages are the underlying error's own words**, not a paraphrase. The reader of this
 deployment is also its developer, and "Something went wrong" deletes the only useful

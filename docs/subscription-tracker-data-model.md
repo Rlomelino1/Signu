@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-20** (v81) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-20** (v82) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1851,6 +1851,28 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v82** — THE TWO SETTINGS SUB-SCREENS, AND A CORRECTED COUNT (2026-08-20). **No
+  migration.** `ConnectionDetailScreen` and `AttributedSubsScreen`.
+  Both rendered `Color.clear` for a failed read, same as v40/v72/v81. Both now follow
+  `LoadFailureRoute`: nothing on screen ⇒ the failure view with a retry, a payload already
+  showing ⇒ keep it and report.
+  **They report through their caller's channel rather than growing their own alerts.**
+  `AttributedSubsScreen` hands its failures to `ConnectionDetailScreen`, which hands them to
+  the shell — so a nested failure still lands in the one *"That didn't go through"* alert
+  instead of a second mechanism appearing beside it. Two alerts on one view also compete in
+  SwiftUI, which is a reason beyond tidiness.
+  **The post-reconnect reload was its own small bug**: it assigned
+  `payload = try? await …` directly, so a reload failure after a *successful* reconnect
+  blanked the screen. It goes through `load()` now, which keeps the payload.
+  **The count in v81 was wrong and is corrected here.** These were described as "the last
+  two in this family". They are not. Five screens still carry the identical one-line shape:
+  `SettingsView`, `CalendarView`, `SearchView`, `ReviewView`, `EditProfileView`.
+  **What is NOT in that list, and must not be swept into it**: the logo-catalog and avatar
+  prefetches (degrade to monograms), the suggestion badge (`?? 0`), and the foreground
+  refresh verdict (ignored by design, per v72). Losing a best-effort enhancement is not the
+  same defect as showing a blank screen, and treating them alike would make the real list
+  look longer than it is.
 
 - **v81** — THE DETAIL SCREEN CAN SAY THAT IT FAILED (2026-08-20). **No migration.**
   `DetailScreen` gains a failure state; its loader becomes throwing.

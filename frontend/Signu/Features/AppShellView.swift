@@ -229,7 +229,8 @@ struct AppShellView: View {
                 onReconnected: {
                     settingsConnectionId = nil
                     dataVersion += 1
-                }
+                },
+                onLoadFailed: { actionError = $0 }
             )
             .environment(logos)
         }
