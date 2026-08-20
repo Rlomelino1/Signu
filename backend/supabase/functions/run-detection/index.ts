@@ -51,9 +51,6 @@ Deno.serve(async (req: Request) => {
     { auth: { persistSession: false } },
   )
 
-  // `today` is resolved ONCE here and passed in. No rule reads a clock, so a
-  // replay is deterministic given (raw, assertions, today) — and "identical
-  // state" means same-day identical (v24).
   let today = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Sao_Paulo',
     year: 'numeric',
@@ -64,10 +61,8 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json()
     onlyUserId = body?.userId ?? null
-    // Overridable so a replay can be reproduced against a fixed date.
     if (typeof body?.today === 'string') today = body.today
   } catch {
-    // no body is the normal post-sync case
   }
 
   const { data: profiles, error: pErr } = onlyUserId
@@ -76,15 +71,6 @@ Deno.serve(async (req: Request) => {
   if (pErr) return json({ error: `select profiles: ${pErr.message}` }, 500)
   if (!profiles?.length) return json({ ok: true, note: 'no users', results: [] })
 
-  // R4's catalog (v63). Read ONCE, outside the per-user loop, because it is
-  // reference data: identical for every account, and the same user-independence the
-  // client's logo prefetch is built on (v38).
-  //
-  // A failed read is FATAL rather than degrading to "R4 off". Detection quietly
-  // losing a rule is the kind of silence this codebase keeps paying for -- an empty
-  // catalog and an unreadable one produce identical output, and only one of them is
-  // correct. The column list is minimal on purpose: `domain` and `category` are the
-  // client's business and the engine has no use for them.
   const { data: catalogRows, error: catErr } = await db
     .from('brand_catalog')
     .select('brand_name, patterns, subscription_only, kind')
@@ -105,8 +91,6 @@ Deno.serve(async (req: Request) => {
       ] = await Promise.all([
         db.from('subscription').select('id, dedupe_key, merchant_key, service_name, identification, ignored').eq('user_id', p.id),
         db.from('subscription_run').select('id, subscription_id, start_date, end_date, billing_interval, status, detected_by, cancelled_date, next_expected_date, subscription!inner(user_id)').eq('subscription.user_id', p.id),
-        // For `charge.card_label` (v60). Scoped through the connection like every other
-        // read here; the service role bypasses RLS, so this filter IS the scoping.
         db.from('bank_account').select('id, brand, last4, connection!inner(user_id)').eq('connection.user_id', p.id),
       ])
       if (sErr) throw new Error(`select subscription: ${sErr.message}`)
@@ -134,8 +118,6 @@ Deno.serve(async (req: Request) => {
         catalog,
       })
 
-      // Single transactional write. Everything above is a read; everything the
-      // applier writes was decided by the pure core.
       const { data: applied, error: aErr } = await db.rpc('apply_detection', {
         p_user_id: p.id,
         p_desired: {

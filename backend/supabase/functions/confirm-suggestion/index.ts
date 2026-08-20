@@ -29,9 +29,6 @@ Deno.serve(async (req: Request) => {
 
   const db = serviceClient()
 
-  // Ownership rides on the inner join, because a run has no `user_id` of its
-  // own: it is the caller's iff its subscription is. Service role bypasses RLS,
-  // so this predicate is the whole of the scoping — see _shared/auth.ts.
   const { data, error } = await db
     .from('subscription_run')
     .select(
@@ -52,11 +49,6 @@ Deno.serve(async (req: Request) => {
 
   const w = decision.write
 
-  // The run first, deliberately. There is no transaction across two PostgREST
-  // calls, so one of them can land alone — and if it is going to, it should be
-  // the one that matters. A confirmed run with `identification` still 'auto'
-  // tracks correctly and is repaired by the next tap; the reverse pair would
-  // claim the user confirmed something that is still sitting in review.
   const { error: rErr } = await db.from('subscription_run').update(w.run).eq('id', w.runId)
   if (rErr) return json({ error: `update subscription_run: ${rErr.message}` }, 500)
 
@@ -74,8 +66,6 @@ Deno.serve(async (req: Request) => {
     subscriptionId: w.subscriptionId,
     status: w.run.status,
     billingInterval: w.run.billing_interval ?? row.billing_interval,
-    // Null when the subscription was already `user_renamed` — reported rather
-    // than hidden, so a caller can see that the stronger assertion stood.
     identification: w.subscription?.identification ?? null,
   })
 })

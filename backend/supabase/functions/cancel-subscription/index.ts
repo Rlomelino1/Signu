@@ -35,9 +35,6 @@ Deno.serve(async (req: Request) => {
   const run = (runs ?? [])[0] as CancelRun | undefined
   if (!run) return json({ error: 'subscription has no runs' }, 409)
 
-  // Paid-through is measured from the last charge that actually landed, so the
-  // date the app renders comes from evidence rather than from when the user got
-  // round to telling us.
   const { data: charges, error: cErr } = await db
     .from('charge')
     .select('date')
@@ -64,9 +61,6 @@ Deno.serve(async (req: Request) => {
     runId: w.runId,
     status: w.run.status,
     cancelledDate: w.run.cancelled_date,
-    // The date the detail screen renders as "paid through". Returned because it
-    // is derived here and the client would otherwise have to re-derive it or
-    // wait for a refetch to find out what it just agreed to.
     endDate: w.run.end_date,
   })
 })
