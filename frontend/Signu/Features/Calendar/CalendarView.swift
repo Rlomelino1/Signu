@@ -5,9 +5,11 @@ struct CalendarScreen: View {
     var onSelectSubscription: (UUID) -> Void = { _ in }
     var onBack: () -> Void = {}
     var startingMonthOffset: Int = 0
+    var onLoadFailed: (String) -> Void = { _ in }
 
     @State private var monthStart: Date?
     @State private var payload: CalendarPayload?
+    @State private var failure: String?
     @State private var selectedDay: Int?
 
     var body: some View {
@@ -20,6 +22,8 @@ struct CalendarScreen: View {
                     onSelectSubscription: onSelectSubscription,
                     onStep: { months in step(months, from: payload) }
                 )
+            } else if let failure {
+                LoadFailureView(message: failure) { await load(monthContaining: monthStart) }
             } else {
                 Color.clear
             }
@@ -32,7 +36,7 @@ struct CalendarScreen: View {
                 )
                 ?? provider.today
             monthStart = start
-            payload = try? await provider.calendarPayload(monthContaining: start)
+            await load(monthContaining: start)
         }
     }
 
@@ -41,8 +45,24 @@ struct CalendarScreen: View {
         else { return }
         monthStart = next
         Task {
-            payload = try? await provider.calendarPayload(monthContaining: next)
+            await load(monthContaining: next)
             selectedDay = nil
+        }
+    }
+
+    private func load(monthContaining start: Date?) async {
+        guard let start else { return }
+        do {
+            payload = try await provider.calendarPayload(monthContaining: start)
+            failure = nil
+        } catch {
+            switch LoadFailureRoute.of(hasPayload: payload != nil) {
+            case .replaceScreen:
+                payload = nil
+                failure = error.localizedDescription
+            case .reportOnly:
+                onLoadFailed(error.localizedDescription)
+            }
         }
     }
 }

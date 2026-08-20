@@ -544,11 +544,16 @@ destroyed at the call site before the screen could see it — a nil arrived and 
 `Color.clear`, identical to still-loading. Making the loader **throwing** is what let the
 rule apply at all: the type was the bug.
 
-`ConnectionDetailScreen` and `AttributedSubsScreen` follow it too, and report through their
-caller's channel rather than growing alerts of their own — so a nested failure still reaches
-the one shell alert. **Five screens still carry the old shape**: `SettingsView`,
-`CalendarView`, `SearchView`, `ReviewView` and `EditProfileView`, each a one-line
-`.task { payload = try? await … }` that renders `Color.clear` on failure.
+**Every screen that loads a payload now follows it**: Home, Subs, subscription detail,
+connection detail, attributed subs, Settings, Calendar, Search, Review and the edit-profile
+sheet. Each reports through its caller's channel rather than growing an alert of its own, so
+a nested failure still reaches the one shell alert.
+
+Two of them are worth a note. **Search** never went blank — with no payload its results list
+is empty, so it said *"Nothing to search yet."*, which is a **claim about your data** rather
+than an admission that the read failed; that state now shows the failure. And **Calendar**
+steps between months, so a failed step keeps the month already on screen instead of blanking
+it, which is the `reportOnly` half of the rule doing the work it exists for.
 
 Distinguish those from the calls that are *deliberately* silent, because they are not the
 same defect: the logo-catalog and avatar prefetches degrade to monograms, the suggestion

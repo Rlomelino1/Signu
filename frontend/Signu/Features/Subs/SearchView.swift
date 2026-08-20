@@ -5,10 +5,27 @@ struct SearchScreen: View {
     var onSelectSubscription: (UUID) -> Void = { _ in }
     var onReviewSuggestion: (UUID) -> Void = { _ in }
     var onBack: () -> Void = {}
+    var onLoadFailed: (String) -> Void = { _ in }
 
     @State private var payload: SubsPayload?
+    @State private var failure: String?
     @State private var query = ""
     @FocusState private var focused: Bool
+
+    private func load() async {
+        do {
+            payload = try await provider.subsPayload()
+            failure = nil
+        } catch {
+            switch LoadFailureRoute.of(hasPayload: payload != nil) {
+            case .replaceScreen:
+                payload = nil
+                failure = error.localizedDescription
+            case .reportOnly:
+                onLoadFailed(error.localizedDescription)
+            }
+        }
+    }
 
     private var results: [SearchRow] {
         guard let payload else { return [] }
@@ -26,7 +43,9 @@ struct SearchScreen: View {
             }
             .padding(.top, 4)
 
-            if results.isEmpty {
+            if let failure, payload == nil {
+                LoadFailureView(message: failure) { await load() }
+            } else if results.isEmpty {
                 Text(query.isEmpty ? "Nothing to search yet." : "No subscription matches “\(query)”.")
                     .font(.signuBody)
                     .foregroundStyle(SignuColor.textSecondary)
@@ -57,7 +76,7 @@ struct SearchScreen: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(SignuColor.paper)
         .task {
-            if payload == nil { payload = try? await provider.subsPayload() }
+            if payload == nil { await load() }
             focused = true
         }
     }

@@ -4,9 +4,11 @@ import SwiftUI
 struct EditProfileSheet: View {
     let provider: SignuDataProviding
     var onChanged: () -> Void = {}
+    var onLoadFailed: (String) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
     @State private var profile: Profile?
+    @State private var failure: String?
 
     var body: some View {
         Group {
@@ -27,11 +29,13 @@ struct EditProfileSheet: View {
                     },
                     onClose: { dismiss() }
                 )
+            } else if let failure {
+                LoadFailureView(message: failure) { await load() }
             } else {
                 Color.clear
             }
         }
-        .task { profile = try? await provider.profile() }
+        .task { await load() }
     }
 
     private func initial(for profile: Profile) -> String {
@@ -42,11 +46,26 @@ struct EditProfileSheet: View {
     private func write(_ body: () async throws -> Void) async -> Bool {
         do {
             try await body()
-            profile = try? await provider.profile()
+            await load()
             onChanged()
             return true
         } catch {
             return false
+        }
+    }
+
+    private func load() async {
+        do {
+            profile = try await provider.profile()
+            failure = nil
+        } catch {
+            switch LoadFailureRoute.of(hasPayload: profile != nil) {
+            case .replaceScreen:
+                profile = nil
+                failure = error.localizedDescription
+            case .reportOnly:
+                onLoadFailed(error.localizedDescription)
+            }
         }
     }
 }
