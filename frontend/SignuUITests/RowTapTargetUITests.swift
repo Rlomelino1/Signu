@@ -26,8 +26,6 @@ final class RowTapTargetUITests: XCTestCase {
             app.swipeUp()
             scrolls += 1
         }
-        print("DIAGTAP label=\(element.label) frame=\(element.frame) "
-              + "chromeTop=\(chromeTop(app)) scrolls=\(scrolls)")
         XCTAssertFalse(centreIsInChromeBand(app, element),
                        "the row's middle stayed inside the floating tab bar's band after "
                        + "\(scrolls) swipes, so a centre tap would hit the chrome and "
