@@ -86,7 +86,13 @@ Deno.serve(async (req: Request) => {
       try {
         const apiKey = await pluggyApiKey()
         await pluggy(`/items/${itemId}`, apiKey, { method: 'DELETE' })
-      } catch {  }
+      } catch (error) {
+        console.log(
+          `orphan cleanup failed for item ${itemId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+      }
 
       return json({
         error: `${clash.label} is already connected through ${clash.institution}. `

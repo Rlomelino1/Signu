@@ -414,12 +414,8 @@ Deno.serve(async (req: Request) => {
     { auth: { persistSession: false } },
   )
 
-  let onlyConnectionId: string | null = null
-  try {
-    const body = await req.json()
-    onlyConnectionId = body?.connectionId ?? null
-  } catch {
-  }
+  const body = await req.json().catch(() => null)
+  const onlyConnectionId: string | null = body?.connectionId ?? null
 
   let query = db
     .from('connection')

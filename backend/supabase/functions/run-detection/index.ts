@@ -57,13 +57,9 @@ Deno.serve(async (req: Request) => {
     month: '2-digit',
     day: '2-digit',
   }).format(new Date())
-  let onlyUserId: string | null = null
-  try {
-    const body = await req.json()
-    onlyUserId = body?.userId ?? null
-    if (typeof body?.today === 'string') today = body.today
-  } catch {
-  }
+  const body = await req.json().catch(() => null)
+  const onlyUserId: string | null = body?.userId ?? null
+  if (typeof body?.today === 'string') today = body.today
 
   const { data: profiles, error: pErr } = onlyUserId
     ? await db.from('profiles').select('id').eq('id', onlyUserId)

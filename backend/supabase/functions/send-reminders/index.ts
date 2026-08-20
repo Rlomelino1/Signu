@@ -167,14 +167,10 @@ Deno.serve(async (req: Request) => {
     day: '2-digit',
   }).format(new Date())
   let onlyUserId: string | null = null
-  let dryRun = false
-  try {
-    const body = await req.json()
-    onlyUserId = body?.userId ?? null
-    if (typeof body?.today === 'string') today = body.today
-    dryRun = body?.dryRun === true
-  } catch {
-  }
+  const body = await req.json().catch(() => null)
+  onlyUserId = body?.userId ?? null
+  if (typeof body?.today === 'string') today = body.today
+  const dryRun = body?.dryRun === true
 
   if (!resendKey && !dryRun) {
     return json({ error: 'RESEND_API_KEY not configured' }, 500)
