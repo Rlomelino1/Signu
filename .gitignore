@@ -1,37 +1,13 @@
-# Supabase local state
 backend/supabase/.branches
 backend/supabase/.temp
-
-# CI warning-gate capture (written by the schema job, and by anyone running
-# that step's commands locally to reproduce it)
 backend/cli.log
-
-# Environment files
-#
-# Ignore every .env variant rather than enumerating them. The previous list
-# (.env, .env.local, .env.*.local) did NOT cover .env.production, and
-# backend/supabase/.env.production already existed on disk holding a live Pluggy
-# client secret and the SYNC_SECRET -- one `git add -A` from a public repo.
-# Enumerating filenames leaves the same hole open for the next variant
-# (.env.staging, .env.remote), so the pattern is the class.
 .env
 .env.*
-
-# ...except a committed template, which by convention holds only placeholders.
 !.env.example
-
-# macOS
 .DS_Store
-
-# Xcode
 frontend/**/xcuserdata/
 frontend/**/*.xcuserstate
 frontend/DerivedData/
 frontend/build/
-
-# Pluggy probe raw dump — real transaction history, never commit
 pluggy-probe-raw.json
-
-# Local app configuration: project URL and publishable keys. The committed
-# template is Config.example.plist.
 frontend/Signu/Config.plist

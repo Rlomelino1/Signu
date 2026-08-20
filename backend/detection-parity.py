@@ -52,9 +52,6 @@ DB_CONTAINER = os.environ.get("SIGNU_DB_CONTAINER", "supabase_db_backend")
 FUNCTIONS_URL = os.environ.get("SIGNU_FUNCTIONS_URL", "http://127.0.0.1:54321/functions/v1")
 TODAY = os.environ.get("SIGNU_TODAY", "2026-08-10")
 
-# The four numbers the two implementations must share, and the intermediate
-# exclusion counts, because a matching total with different exclusions would be
-# two errors cancelling.
 COMPARED = [
     "candidates",
     "excluded_credit",
@@ -118,7 +115,7 @@ def to_pluggy_shape(rows):
             "provider_tx_id": r["provider_tx_id"],
             "description": r["raw_description"],
             "descriptionRaw": r["raw_description"],
-            "date": f'{r["date"]}T12:00:00.000Z',   # noon, so no truncation shifts it
+            "date": f'{r["date"]}T12:00:00.000Z',
             "amount": float(r["amount"]),
             "currencyCode": r["currency"],
             "type": r["type"],

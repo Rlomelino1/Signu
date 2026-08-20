@@ -1,22 +1,7 @@
 {
-  // Edge Functions are Deno, not Node. Without this, VS Code's built-in
-  // TypeScript server checks them against Node/browser globals and reports
-  // false errors -- "Cannot find name 'Deno'. ts(2304)" on every Deno.env call,
-  // plus an unresolvable import for the https:// module specifier.
-  //
-  // Those errors are not real: `deno check` and `deno lint` both pass on
-  // pluggy-sync/index.ts, and the function has run successfully against the
-  // live Pluggy item.
-  //
-  // Scoped with enablePaths rather than enabled globally, on purpose: this repo
-  // is mostly Swift, and turning the Deno language server on repo-wide would
-  // mean the wrong analyzer for everything outside supabase/functions.
   "deno.enable": false,
   "deno.enablePaths": ["./backend/supabase/functions"],
   "deno.lint": true,
-
-  // Where Deno is enabled for a path, its language server takes over those
-  // files and the built-in TS server stands down, so the two do not both report.
   "[typescript]": {
     "editor.defaultFormatter": "denoland.vscode-deno"
   }

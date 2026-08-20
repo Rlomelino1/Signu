@@ -45,7 +45,6 @@ INSTALLMENT_FIELDS = [
 ]
 
 
-# ----------------------------------------------------------------- plumbing
 
 
 def load_env():
@@ -100,7 +99,6 @@ def get(path, api_key, **params):
     return request("GET", url, api_key=api_key)
 
 
-# ----------------------------------------------------------------- fetching
 
 
 def fetch_all_transactions(account_id, api_key, days):
@@ -124,10 +122,6 @@ def fetch_all_transactions(account_id, api_key, days):
         if not nxt:
             break
 
-        # `next` is documented as a bare query string
-        # ("?accountId=...&after=<cursor>") but has also been seen as a full URL.
-        # urlparse handles both; extract the `after` param either way. Passing the
-        # whole string through as `after` yields HTTP 400 "Invalid cursor".
         cursor = urllib.parse.parse_qs(urllib.parse.urlparse(nxt).query).get(
             "after", [None]
         )[0]
@@ -140,7 +134,6 @@ def fetch_all_transactions(account_id, api_key, days):
     return rows, pages, truncated
 
 
-# ----------------------------------------------------------------- analysis
 
 
 def summarise_account(rows):
@@ -221,7 +214,6 @@ def report(item, accounts, per_account):
         print(f"  category non-null  {stats['category_non_null']}")
         print(f"  updatedAt present  {stats['updatedAt_present']}")
 
-    # ---- the four verdicts
     credit_stats = [per_account[i] for i in credit_ids]
     total_posted_credit = sum(s["posted"] for s in credit_stats)
     total_credit_rows = sum(s["total"] for s in credit_stats)
@@ -279,7 +271,6 @@ def report(item, accounts, per_account):
     print()
 
 
-# ----------------------------------------------------------------- main
 
 
 def main():

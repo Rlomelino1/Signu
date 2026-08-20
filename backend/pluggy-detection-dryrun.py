@@ -73,28 +73,27 @@ def meta(r): return r.get('creditCardMetadata') or {}
 def bn(r):
     m=r.get('merchant') or {}
     v=m.get('businessName')
-    return v if v else None                      # '' -> None  (v21)
+    return v if v else None
 def cnpj(r):
     m=r.get('merchant') or {}
     return m.get('cnpj') or None
 
-AGGREGATORS={'PAYPAL'}                            # v21 aggregator list
+AGGREGATORS={'PAYPAL'}
 def is_aggregator(r):
     b=(bn(r) or '').upper()
     return any(a in b for a in AGGREGATORS)
 
-def merchant_key(r):                              # v21 derivation
+def merchant_key(r):
     c=cnpj(r)
     if c:
         if is_aggregator(r):
             return f"{c}:{re.sub(r'[^A-Z0-9 ]',' ',desc(r)).strip()}"
         return c
-    return re.sub(r'\s+',' ',desc(r)).strip()     # case+whitespace only
+    return re.sub(r'\s+',' ',desc(r)).strip()
 
 rows=[(a,r) for a in ACCTS for r in d['transactions'][a]]
 
-# ---- v21 candidate filter ----
-NOT_A_FEE={None,'','NA','N/A'}   # v21: 'NA' is the institution's not-applicable sentinel
+NOT_A_FEE={None,'','NA','N/A'}
 def is_fee(r):
     v=meta(r).get('feeTypeAdditionalInfo')
     return v not in NOT_A_FEE
@@ -123,7 +122,6 @@ print(f"  input rows: {len(rows)}")
 for k in sorted(excl): print(f"    excluded by {k:<24} {excl[k]:>4}")
 print(f"  candidates: {len(cand)}")
 
-# ---- did the known offenders get removed? ----
 print("\n  targeted checks:")
 for label, test in [("PAGAMENTO RECEBIDO  (card, CREDIT)", lambda r:'PAGAMENTO RECEBIDO' in desc(r)),
                     ("PAGAMENTO DE FATURA (checking, DEBIT)", lambda r:'PAGAMENTO DE FATURA' in desc(r)),
@@ -131,7 +129,6 @@ for label, test in [("PAGAMENTO RECEBIDO  (card, CREDIT)", lambda r:'PAGAMENTO R
     tot=sum(1 for a,r in rows if test(r)); left=sum(1 for a,r in cand if test(r))
     print(f"    {label:<40} {tot:>3} in data -> {left} surviving  {'OK' if left==0 else '*** LEAK ***'}")
 
-# ---- R1 under v21 keying ----
 print("\n"+"="*70); print("  R1 UNDER v21 merchant_key (CNPJ where present)"); print("="*70)
 g=defaultdict(list)
 for a,r in cand: g[merchant_key(r)].append(r)
@@ -149,7 +146,6 @@ for k,v in sorted(g.items(), key=lambda x:-len(x[1])):
                 fires+=1
 print(f"\n  R1 anchors: {fires}   (was 0 under descriptor keying)")
 
-# ---- R3 with the v21 alignment definition ----
 def circ_aligned(v):
     doms=[dt(x).day for x in v]
     med=statistics.median(doms)
@@ -169,7 +165,6 @@ for k,v in sorted(((k,v) for k,v in g.items() if len(v)>=3), key=lambda x:-len(x
         print(f"  rejected   {nm[:32]:<32} n={len(v)} aligned={frac:.0%}")
 print(f"\n  R3 suggestions: {r3}   (was 1 false positive under the loose reading)")
 
-# ---- merchant_key collapse effect ----
 print("\n"+"="*70); print("  merchant_key EFFECT"); print("="*70)
 dk=len({re.sub(r'\s+',' ',desc(r)).strip() for a,r in cand})
 print(f"  distinct descriptors among candidates : {dk}")
