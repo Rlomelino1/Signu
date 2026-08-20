@@ -8,7 +8,28 @@ final class RowTapTargetUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func tapCentre(_ element: XCUIElement) {
+    private func chromeTop(_ app: XCUIApplication) -> CGFloat {
+        let tops = ["Home", "Subs", "Settings"]
+            .map { app.buttons[$0] }
+            .filter { $0.isHittable }
+            .map { $0.frame.minY }
+        return tops.min() ?? .greatestFiniteMagnitude
+    }
+
+    private func centreIsInChromeBand(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+        element.frame.midY >= chromeTop(app) - 4
+    }
+
+    private func tapCentre(_ app: XCUIApplication, _ element: XCUIElement) {
+        var scrolls = 0
+        while centreIsInChromeBand(app, element), scrolls < 8 {
+            app.swipeUp()
+            scrolls += 1
+        }
+        XCTAssertFalse(centreIsInChromeBand(app, element),
+                       "the row's middle stayed inside the floating tab bar's band after "
+                       + "\(scrolls) swipes, so a centre tap would hit the chrome and "
+                       + "prove nothing about the row")
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
@@ -23,7 +44,7 @@ final class RowTapTargetUITests: XCTestCase {
 
         let row = button(app, containing: "Spotify")
         XCTAssertTrue(row.waitForExistence(timeout: 15), "Home must list subscriptions")
-        tapCentre(row)
+        tapCentre(app, row)
 
         XCTAssertTrue(app.buttons["Mark cancelled"].waitForExistence(timeout: 10),
                       "the middle of a Home row is dead — SignuRow needs its content shape")
@@ -36,7 +57,7 @@ final class RowTapTargetUITests: XCTestCase {
 
         let row = button(app, containing: "Netflix")
         XCTAssertTrue(row.waitForExistence(timeout: 15), "the Subs tab must list subscriptions")
-        tapCentre(row)
+        tapCentre(app, row)
 
         XCTAssertTrue(app.buttons["Mark cancelled"].waitForExistence(timeout: 10),
                       "the middle of a Subs group row is dead")
@@ -50,7 +71,7 @@ final class RowTapTargetUITests: XCTestCase {
 
         let row = button(app, containing: "ChatGPT Plus")
         XCTAssertTrue(row.waitForExistence(timeout: 15), "the Subs tab must list suggestions")
-        tapCentre(row)
+        tapCentre(app, row)
 
         XCTAssertTrue(app.buttons["Track it"].firstMatch.waitForExistence(timeout: 10),
                       "the middle of a suggested row is dead")
@@ -65,7 +86,7 @@ final class RowTapTargetUITests: XCTestCase {
             NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@", "Ended", "Cancelled")
         ).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 15), "the inactive filter must list rows")
-        tapCentre(row)
+        tapCentre(app, row)
 
         XCTAssertTrue(app.buttons["Back"].firstMatch.waitForExistence(timeout: 10),
                       "the middle of an inactive row is dead")
@@ -78,7 +99,7 @@ final class RowTapTargetUITests: XCTestCase {
 
         let row = button(app, containing: "Mock Bank")
         XCTAssertTrue(row.waitForExistence(timeout: 15), "Settings must list banks")
-        tapCentre(row)
+        tapCentre(app, row)
 
         XCTAssertTrue(app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS[c] %@", "Cards on this link")
@@ -93,12 +114,7 @@ final class RowTapTargetUITests: XCTestCase {
 
         let row = button(app, containing: "Delete account")
         XCTAssertTrue(row.waitForExistence(timeout: 15), "Settings must offer Delete account")
-        var scrolls = 0
-        while !row.isHittable, scrolls < 8 {
-            app.swipeUp()
-            scrolls += 1
-        }
-        tapCentre(row)
+        tapCentre(app, row)
 
         XCTAssertTrue(app.staticTexts["Delete your account?"].waitForExistence(timeout: 10),
                       "the delete-account row did not open 14a")
@@ -110,7 +126,7 @@ final class RowTapTargetUITests: XCTestCase {
 
         let pill = button(app, containing: "Possible subscriptions detected")
         XCTAssertTrue(pill.waitForExistence(timeout: 15), "Home must offer the review pill")
-        tapCentre(pill)
+        tapCentre(app, pill)
 
         XCTAssertTrue(app.buttons["Track it"].firstMatch.waitForExistence(timeout: 10),
                       "the middle of the review pill is dead")
@@ -127,7 +143,7 @@ final class RowTapTargetUITests: XCTestCase {
 
         let summary = button(app, containing: "subscriptions found via this bank")
         XCTAssertTrue(summary.waitForExistence(timeout: 10), "12b must offer the summary row")
-        tapCentre(summary)
+        tapCentre(app, summary)
 
         XCTAssertTrue(app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS[c] %@", "Removing this bank link decides")
@@ -152,7 +168,7 @@ final class RowTapTargetUITests: XCTestCase {
 
         let deleteToo = button(app, containing: "Delete them too")
         XCTAssertTrue(deleteToo.waitForExistence(timeout: 5))
-        tapCentre(deleteToo)
+        tapCentre(app, deleteToo)
 
         XCTAssertTrue(app.buttons["Remove link and history"].waitForExistence(timeout: 5),
                       "the middle of the history choice is dead — the radio did not move")

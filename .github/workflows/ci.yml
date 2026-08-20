@@ -83,6 +83,32 @@ jobs:
             exit 1
           fi
 
+      - name: Vocabularies agree across SQL, TypeScript and Swift
+        working-directory: backend
+        run: |
+          set -eo pipefail
+
+          python3 check-vocabularies.py --selftest
+
+          DB_URL=$(supabase status -o env | grep '^DB_URL=' | cut -d= -f2- | tr -d '"')
+          if [ -z "$DB_URL" ]; then
+            echo "::error::could not read DB_URL from supabase status"
+            exit 1
+          fi
+
+          psql "$DB_URL" -At -F$'\t' <<'SQL' | python3 check-vocabularies.py
+          select rel.relname, att.attname, pg_get_constraintdef(con.oid)
+          from pg_constraint con
+          join pg_class rel on rel.oid = con.conrelid
+          join pg_namespace nsp on nsp.oid = rel.relnamespace
+          join pg_attribute att
+            on att.attrelid = rel.oid and att.attnum = con.conkey[1]
+          where con.contype = 'c'
+            and nsp.nspname = 'public'
+            and array_length(con.conkey, 1) = 1
+          order by rel.relname, att.attname;
+          SQL
+
       - name: Database tests
         working-directory: backend
         env:

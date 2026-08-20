@@ -269,6 +269,14 @@ an independently scheduled detection run can wake mid-sync and interpret a half-
 raw chain. Both stay independently invokable, which is what replay needs.
 `send-reminders` runs at **16:30 UTC**.
 
+**`today` is a parameter of the engine, not of the API.** `run-detection` and
+`send-reminders` accept it in the body on purpose: they sit behind the shared secret, and
+an operator replaying a past day is the affordance that makes the engine replayable.
+`cancel-subscription` does not, even though it once did. It is reached by an ordinary
+authenticated user, and the value it would set — `cancelled_date` — is an *assertion the
+engine preserves and never recomputes*, so a wrong date there is permanent in a way that
+ordinary client input is not. It now reads the clock itself.
+
 **Every call to Pluggy's data endpoints is a GET** — `/items/{id}`, `/accounts`,
 `/v2/transactions` — and the sync never issues `PATCH /items/{id}`. So it reads
 whatever Pluggy already holds and cannot make Pluggy look again. The transactions
@@ -281,6 +289,14 @@ layer 3. Measured end-to-end latency from charge date to the row existing locall
 **median +1 day, max +8**. A charge taking more than four days to surface shows the
 subscription as overdue while the money has already left the card — upstream latency made
 visible, not a defect, and it self-heals next pass.
+
+**A failed `POST /auth` reports its status and withholds its body.** Every other Pluggy
+failure interpolates up to 400 characters of the upstream response into the thrown
+message, which is logged; `/auth` is the one request whose *own* body carries
+`PLUGGY_CLIENT_SECRET`, and a gateway that echoes the request it rejected would put that
+secret in the log. So that one call keeps the upstream status — the actual diagnostic —
+and drops the text. `PluggyError.upstreamStatus` exists to make that possible: `status`
+is what Signu returns to its caller and is always 502, which is not the same fact.
 
 **Webhooks are deliberately not built.** They fire when *Pluggy* updates an item, and an
 item can update with nothing new — so a webhook would deliver an empty event on time.
@@ -390,7 +406,7 @@ the caller is a machine and the function gates on `x-sync-secret` itself.
 | `connect-token` | true | The app, to mint a Pluggy connect token for the widget. |
 | `register-connection` | true | The app, after the widget succeeds: creates the `connection` row and refuses duplicates. |
 | `confirm-suggestion` | true | The app — *Track it* on an R3/R4 suggestion. |
-| `cancel-subscription` | true | The app — *Mark cancelled*. |
+| `cancel-subscription` | true | The app — *Mark cancelled*. Ignores a caller-supplied `today`. |
 | `remove-connection` | true | The app — delete a bank link, preserving history via the frozen region. |
 | `delete-account` | true | The app — delete the account and all its data. |
 
@@ -463,6 +479,16 @@ user picks a bank in the widget, so it cannot be scoped by connector.
   post-mortem starts with what ran.
 - **Migrations run before functions**, and the job fails fast between them: a writer must
   never ship ahead of the column or data it depends on.
+- **`Schema applies` also gates the vocabularies.** Every value a `check (... in (...))`
+  permits must be a value both the engine and the client can name, and neither may name a
+  value the database forbids. `backend/check-vocabularies.py` asserts that both ways from
+  the *applied* schema, read out of `pg_get_constraintdef` — not from the migration text,
+  because constraints arrive in `create table` blocks and in later `alter table ... add
+  column ... check` alike, and tables get renamed (`merchant_catalog` → `brand_catalog`),
+  so a parser over the history grows a blind spot with every migration. A vocabulary with
+  no entry in the script's `KNOWN` map fails the job: adding one is a decision about who
+  else has to learn the value, not a detail. The script's `--selftest` runs first and
+  proves its own red is still reachable, so it cannot quietly stop guarding.
 - **Some steps are deliberately one-off and manual** because they do not belong in a
   migration: creating Vault secrets, and uploading the email mark to the public `brand`
   bucket (a binary in a migration is the wrong shape).
@@ -721,7 +747,8 @@ cp frontend/Signu/Config.example.plist frontend/Signu/Config.plist
 Three required checks, plus a deploy that runs on `main` only and is gated on all three:
 **`iOS build`** (the app compiles and the whole Swift suite passes on a simulator),
 **`Detection tests`** (`deno check` per named file, `deno lint`, every `_shared/` suite),
-and **`Schema applies`** (all migrations apply to an empty database).
+and **`Schema applies`** (all migrations apply to an empty database, the pgTAP suites
+pass, and the SQL/TypeScript/Swift vocabularies agree — see section 8).
 
 **Third-party actions are pinned to commit SHAs, not tags.** `@v4` is a tag the owner
 can move and `@v1` is a *branch*, so both can gain new code without this file changing —
