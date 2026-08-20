@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-20** (v83) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-20** (v84) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1851,6 +1851,27 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v84** — THE ROW LAYS OUT IN ROWS, NOT COLUMNS (2026-08-20). **No migration.**
+  `SignuRow`.
+  **Reported from the app**: sorted by cost, `Monthly · Master 2049` wrapped onto two lines
+  and the trailing `100% of total` no longer lined up with it.
+  **The cause was the structure, not a width.** `SignuRow` was two side-by-side `VStack`s —
+  title+subtitle on the left, amount+secondary on the right — so the width each column got
+  was *emergent*. A wider trailing subtitle (`100% of total` against `Aug 19`) claimed more
+  room, the left column got less, and the subtitle wrapped. The two subtitles lining up at
+  all was an accident of both columns happening to be the same height, which is why the
+  by-date view looked fine and the by-cost view did not.
+  **Now it is two HStack rows** inside one leading-aligned `VStack`: title with its amount,
+  subtitle with its secondary text, each pair sharing a `.firstTextBaseline`. Alignment is
+  stated rather than emergent, and the subtitle row gets the full width minus the trailing
+  text, which is what unwraps it. The trailing items are `.fixedSize()` so an amount can
+  never be compressed — the standing rule that a number is never cropped.
+  **Side effect, and it is the wanted one**: the amount now aligns to the title's FIRST
+  line rather than floating vertically centred against a two-line name.
+  **Verified by screenshot, not by reading the code** — by-cost, by-date, Home and Settings
+  before and after, per the v45 lesson that a layout claim is worth what the screenshot
+  says. 201 iOS tests pass, including the row tap-target suite.
 
 - **v83** — THE FAILURE-HONESTY FAMILY IS CLOSED (2026-08-20). **No migration.** The five
   screens v82 named: `SettingsView`, `CalendarView`, `SearchView`, `ReviewView`,

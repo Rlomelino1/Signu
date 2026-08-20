@@ -43,27 +43,34 @@ struct SignuRow<Leading: View>: View {
         HStack(spacing: 12) {
             leading
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.signuRowTitle)
-                    .foregroundStyle(SignuColor.textPrimary)
-                if let subtitle {
-                    subtitle
-                        .font(SignuFont.font(14))
-                        .foregroundStyle(SignuColor.textSecondary)
-                        .multilineTextAlignment(.leading)
-                }
-            }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 3) {
-                if let trailingTitle {
-                    trailingTitle
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(title)
                         .font(.signuRowTitle)
                         .foregroundStyle(SignuColor.textPrimary)
+                    Spacer(minLength: 8)
+                    if let trailingTitle {
+                        trailingTitle
+                            .font(.signuRowTitle)
+                            .foregroundStyle(SignuColor.textPrimary)
+                            .fixedSize()
+                    }
                 }
-                if let trailingSubtitle {
-                    trailingSubtitle
-                        .font(.signuSubtitle)
-                        .foregroundStyle(SignuColor.textSecondary)
+                if subtitle != nil || trailingSubtitle != nil {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        if let subtitle {
+                            subtitle
+                                .font(SignuFont.font(14))
+                                .foregroundStyle(SignuColor.textSecondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer(minLength: 8)
+                        if let trailingSubtitle {
+                            trailingSubtitle
+                                .font(.signuSubtitle)
+                                .foregroundStyle(SignuColor.textSecondary)
+                                .fixedSize()
+                        }
+                    }
                 }
             }
         }
