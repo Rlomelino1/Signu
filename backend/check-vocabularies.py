@@ -41,6 +41,9 @@ KNOWN = {
     # and the engine compares these as bare literals rather than a named union.
     ('transaction', 'status'): (None, None),
     ('transaction', 'type'): (None, None),
+    # Written and read only by the scheduled SQL that dispatches to the machine
+    # functions. Neither runtime ever sees a sync_dispatch row.
+    ('sync_dispatch', 'kind'): (None, None),
 }
 
 
@@ -148,6 +151,7 @@ profiles\treminder_channels\tCHECK ((reminder_channels = ANY (ARRAY['push'::text
 brand_catalog\tkind\tCHECK ((kind = ANY (ARRAY['service'::text, 'institution'::text])))
 transaction\tstatus\tCHECK ((status = ANY (ARRAY['pending'::text, 'posted'::text])))
 transaction\ttype\tCHECK ((type = ANY (ARRAY['DEBIT'::text, 'CREDIT'::text])))
+sync_dispatch\tkind\tCHECK ((kind = ANY (ARRAY['pluggy_sync'::text, 'send_reminders'::text])))
 charge\tamount\tCHECK ((amount > (0)::numeric))
 """
 

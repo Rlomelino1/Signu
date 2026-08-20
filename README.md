@@ -385,6 +385,36 @@ Two guards came out of it, and neither closes the whole hole:
   local value can be confirmed against production by hashing it, never by printing it.
   That read-back is what covers the wrong-but-plausible case.
 
+**The hole is now closed by watching the status, not by comparing the copies.** The
+database already receives the outcome — `net.http_post` returns a request id and the
+response lands in `net._http_response` — but the trigger discarded the id, so the only
+evidence was thrown away. It now records each dispatch in `sync_dispatch`, and three
+scheduled jobs resolve and judge it: `record_sync_dispatch_results` copies the status
+across, `expire_stale_sync_dispatches` marks anything unanswered after 30 minutes as
+failed rather than assuming it was fine, and `assert_sync_dispatches_healthy` **raises**
+when the newest resolved dispatch for a kind failed. Raising is the point: it turns a
+rejected call into a *failed* `pg_cron` run, which is the signal that was missing.
+
+They are three jobs rather than one because an exception rolls back its own transaction:
+recording and complaining in one transaction would undo the record and repeat the
+complaint forever. And only the **newest** dispatch is judged, so the alarm self-clears
+the moment a rotation works — there is no acknowledgement to forget.
+
+The same assertion also catches a schedule that has **stopped firing** (nothing dispatched
+in 26 hours), which the outcome check structurally cannot see: a call that never happened
+leaves no failing row. It is checked only for a kind that has dispatched before, so a
+fresh database stays quiet.
+
+**Why not compare the two copies in CI.** That was the obvious fix and it is the least
+safe one available. CI cannot read the Vault copy without a database password, so the
+check would cost a standing credential that can decrypt *every* production Vault secret —
+trading a silent-failure risk for a permanent high-privilege secret in CI. Watching the
+status needs no new credential, adds no endpoint, moves the secret nowhere, and publishes
+no digest of it; `sync_dispatch` holds request ids and status codes and nothing else. It
+also catches more: any rejection or failure, not only a mismatch. The manual
+`secrets list` read-back above remains the right tool at rotation time, when a human is
+already holding the value.
+
 The cron HTTP timeout is **150 s**, matched to the platform's ceiling rather than to a
 measurement: an Edge Function request is cut off around 150 s, so a POST outstanding then
 means the function is gone and "timeout" is honest. The default 5 s was shorter than the
@@ -748,7 +778,19 @@ Three required checks, plus a deploy that runs on `main` only and is gated on al
 **`iOS build`** (the app compiles and the whole Swift suite passes on a simulator),
 **`Detection tests`** (`deno check` per named file, `deno lint`, every `_shared/` suite),
 and **`Schema applies`** (all migrations apply to an empty database, the pgTAP suites
-pass, and the SQL/TypeScript/Swift vocabularies agree — see section 8).
+pass, and the SQL/TypeScript/Swift vocabularies agree — see section 8). `iOS build` runs
+on `macos-26` against the newest iOS simulator on the image, and refuses to run on an
+iOS runtime older than 26.
+
+**The iOS job runs on `macos-26` and asserts its simulator is iOS 26 or newer.** It used
+to run on `macos-15`, and took that image's default Xcode — which meant Xcode 16 and an
+**iOS 18.5** simulator while the app is developed against iOS 26. The old Test step also
+took the *first* iPhone `simctl` listed, with no assertion about the runtime, so nothing
+would ever have said so. That gap is not academic: a row tap-target test fails on iOS 26
+and passes on iOS 18.5, so CI was structurally unable to see a whole class of layout
+regression. The step now picks the **newest** available iOS runtime and fails if it is
+older than 26, because a runner-image change must not be able to quietly return us to a
+runtime the app does not ship on.
 
 **Third-party actions are pinned to commit SHAs, not tags.** `@v4` is a tag the owner
 can move and `@v1` is a *branch*, so both can gain new code without this file changing —
