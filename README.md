@@ -463,6 +463,16 @@ user picks a bank in the widget, so it cannot be scoped by connector.
   post-mortem starts with what ran.
 - **Migrations run before functions**, and the job fails fast between them: a writer must
   never ship ahead of the column or data it depends on.
+- **`Schema applies` also gates the vocabularies.** Every value a `check (... in (...))`
+  permits must be a value both the engine and the client can name, and neither may name a
+  value the database forbids. `backend/check-vocabularies.py` asserts that both ways from
+  the *applied* schema, read out of `pg_get_constraintdef` — not from the migration text,
+  because constraints arrive in `create table` blocks and in later `alter table ... add
+  column ... check` alike, and tables get renamed (`merchant_catalog` → `brand_catalog`),
+  so a parser over the history grows a blind spot with every migration. A vocabulary with
+  no entry in the script's `KNOWN` map fails the job: adding one is a decision about who
+  else has to learn the value, not a detail. The script's `--selftest` runs first and
+  proves its own red is still reachable, so it cannot quietly stop guarding.
 - **Some steps are deliberately one-off and manual** because they do not belong in a
   migration: creating Vault secrets, and uploading the email mark to the public `brand`
   bucket (a binary in a migration is the wrong shape).
@@ -721,7 +731,8 @@ cp frontend/Signu/Config.example.plist frontend/Signu/Config.plist
 Three required checks, plus a deploy that runs on `main` only and is gated on all three:
 **`iOS build`** (the app compiles and the whole Swift suite passes on a simulator),
 **`Detection tests`** (`deno check` per named file, `deno lint`, every `_shared/` suite),
-and **`Schema applies`** (all migrations apply to an empty database).
+and **`Schema applies`** (all migrations apply to an empty database, the pgTAP suites
+pass, and the SQL/TypeScript/Swift vocabularies agree — see section 8).
 
 **Third-party actions are pinned to commit SHAs, not tags.** `@v4` is a tag the owner
 can move and `@v1` is a *branch*, so both can gain new code without this file changing —
