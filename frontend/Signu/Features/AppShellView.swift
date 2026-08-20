@@ -104,7 +104,7 @@ struct AppShellView: View {
                         onEditProfile: { editingProfile = true },
                         onConnectBank: { connectTarget = ConnectTarget(connectionId: nil) },
                         onRestore: { id in
-                            Task { try? await provider.setIgnored(subscriptionId: id, ignored: false) }
+                            act { try await provider.setIgnored(subscriptionId: id, ignored: false) }
                         },
                         onDeleteAccount: {
                             Task {
@@ -169,10 +169,10 @@ struct AppShellView: View {
                         act { try await provider.confirmSuggestion(runId: runId, billingInterval: interval) }
                     },
                     onDismiss: { id in
-                        Task { try? await provider.setIgnored(subscriptionId: id, ignored: true) }
+                        act { try await provider.setIgnored(subscriptionId: id, ignored: true) }
                     },
                     onRemind: { id in
-                        Task { try? await provider.setReminder(subscriptionId: id, remindBeforeDays: 2) }
+                        act { try await provider.setReminder(subscriptionId: id, remindBeforeDays: 2) }
                     }
                 ),
                 autoPresentIntervalForR4: reviewAutoR4
@@ -185,16 +185,24 @@ struct AppShellView: View {
                 actions: DetailActions(
                     onBack: { detailSubscriptionId = nil },
                     onRename: { name in
-                        try? await provider.setNickname(subscriptionId: id, nickname: name)
-                        dataVersion += 1
+                        do {
+                            try await provider.setNickname(subscriptionId: id, nickname: name)
+                            dataVersion += 1
+                        } catch {
+                            actionError = error.localizedDescription
+                        }
                     },
                     onChangeCategory: { category in
-                        try? await provider.setCategory(subscriptionId: id, category: category)
-                        dataVersion += 1
+                        do {
+                            try await provider.setCategory(subscriptionId: id, category: category)
+                            dataVersion += 1
+                        } catch {
+                            actionError = error.localizedDescription
+                        }
                     },
                     onToggleReminder: { on in
-                        Task {
-                            try? await provider.setReminder(
+                        act {
+                            try await provider.setReminder(
                                 subscriptionId: id,
                                 remindBeforeDays: on ? 2 : nil
                             )
