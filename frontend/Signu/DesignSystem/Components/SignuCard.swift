@@ -43,7 +43,7 @@ struct SignuRow<Leading: View>: View {
         HStack(spacing: 12) {
             leading
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
                     Text(title)
                         .font(.signuRowTitle)
                         .foregroundStyle(SignuColor.textPrimary)

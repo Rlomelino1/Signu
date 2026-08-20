@@ -269,21 +269,17 @@ struct SettingsView: View {
     private func bankRow(_ bank: SettingsPayload.BankRow) -> some View {
         HStack(spacing: 10) {
             ServiceAvatar(name: bank.name, kind: .institution)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(bank.name)
-                        .font(.signuRowTitle)
-                        .foregroundStyle(SignuColor.textPrimary)
-                    Spacer(minLength: 8)
-                    StatusChip(text: bank.chipText, tone: bank.chipTone, compact: true)
-                        .fixedSize()
-                }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(bank.name)
+                    .font(.signuRowTitle)
+                    .foregroundStyle(SignuColor.textPrimary)
                 Text(bank.subtitle)
                     .font(SignuFont.font(14))
                     .foregroundStyle(subtitleColor(bank.chipTone))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            StatusChip(text: bank.chipText, tone: bank.chipTone, compact: true).fixedSize()
             chevron
         }
         .padding(.horizontal, 16)
