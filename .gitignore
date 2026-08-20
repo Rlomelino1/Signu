@@ -11,3 +11,7 @@ frontend/DerivedData/
 frontend/build/
 pluggy-probe-raw.json
 frontend/Signu/Config.plist
+
+# Python bytecode
+__pycache__/
+*.pyc

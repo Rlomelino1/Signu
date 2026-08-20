@@ -21,7 +21,10 @@ Deno.serve(async (req: Request) => {
   const db = serviceClient()
 
   const { error } = await db.auth.admin.deleteUser(who.caller.id)
-  if (error) return json({ error: `delete user: ${error.message}` }, 500)
+  if (error) {
+    console.log(`delete-account deleteUser failed: ${error.message}`)
+    return json({ error: 'could not delete the account' }, 500)
+  }
 
   return json({ ok: true, userId: who.caller.id, deleted: true })
 })
