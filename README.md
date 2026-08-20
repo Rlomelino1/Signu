@@ -529,7 +529,7 @@ user whose data would not load got a blank page with a tab bar and nothing namin
 problem, on screen or in a log. "Renders nothing" tells the user nothing and tells us
 nothing.
 
-The rule both list screens now follow:
+The rule Home, Subs and the subscription detail screen all follow:
 
 | On screen | A failed read does |
 |---|---|
@@ -538,6 +538,13 @@ The rule both list screens now follow:
 
 The second row is the one worth stating: a failure view there would say **less** than
 the data already displayed supports.
+
+Detail earns its own note. Its loader was typed `() async -> Payload?`, so the error was
+destroyed at the call site before the screen could see it — a nil arrived and rendered as
+`Color.clear`, identical to still-loading. Making the loader **throwing** is what let the
+rule apply at all: the type was the bug. The two Settings sub-screens
+(`ConnectionDetailScreen`, `AttributedSubsScreen`) still carry the old shape and are the
+remainder of this family.
 
 **Messages are the underlying error's own words**, not a paraphrase. The reader of this
 deployment is also its developer, and "Something went wrong" deletes the only useful

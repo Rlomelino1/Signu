@@ -2,22 +2,39 @@ import SwiftUI
 
 struct DetailScreen: View {
     var payload: DetailPayload?
-    var loader: (() async -> DetailPayload?)?
+    var loader: (() async throws -> DetailPayload?)?
     var actions = DetailActions()
     var scrollAnchor: UnitPoint = .top
 
     @State private var loaded: DetailPayload?
+    @State private var failure: String?
 
     var body: some View {
         Group {
             if let payload = payload ?? loaded {
                 DetailView(payload: payload, actions: editing(actions), scrollAnchor: scrollAnchor)
+            } else if let failure {
+                LoadFailureView(message: failure) { await load() }
             } else {
                 Color.clear
             }
         }
-        .task {
-            if payload == nil { loaded = await loader?() }
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard payload == nil, let loader else { return }
+        do {
+            loaded = try await loader()
+            failure = nil
+        } catch {
+            switch LoadFailureRoute.of(hasPayload: loaded != nil) {
+            case .replaceScreen:
+                loaded = nil
+                failure = error.localizedDescription
+            case .reportOnly:
+                actions.onLoadFailed(error.localizedDescription)
+            }
         }
     }
 
@@ -25,17 +42,18 @@ struct DetailScreen: View {
         var wrapped = actions
         wrapped.onRename = { name in
             await actions.onRename(name)
-            loaded = await loader?()
+            await load()
         }
         wrapped.onChangeCategory = { category in
             await actions.onChangeCategory(category)
-            loaded = await loader?()
+            await load()
         }
         return wrapped
     }
 }
 
 struct DetailActions {
+    var onLoadFailed: (String) -> Void = { _ in }
     var onBack: () -> Void = {}
     var onRename: (String?) async -> Void = { _ in }
     var onChangeCategory: (String?) async -> Void = { _ in }
