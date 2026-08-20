@@ -38,7 +38,10 @@ Deno.serve(async (req: Request) => {
     .eq('id', runId)
     .eq('subscription.user_id', who.caller.id)
     .maybeSingle()
-  if (error) return json({ error: `select subscription_run: ${error.message}` }, 500)
+  if (error) {
+    console.log(`confirm-suggestion select subscription_run failed: ${error.message}`)
+    return json({ error: 'could not read the suggestion' }, 500)
+  }
   if (!data) return json({ error: 'not found' }, 404)
 
   const row = data as unknown as Row
