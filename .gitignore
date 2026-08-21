@@ -15,3 +15,6 @@ frontend/Signu/Config.plist
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Device-install derived data (frontend/Tools/install-to-phone.sh)
+frontend/.build-device/
