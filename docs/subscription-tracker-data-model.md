@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-20** (v86) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-21** (v87) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -1885,6 +1885,34 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v87** — THE BUNDLE IDENTIFIER DROPS THE COMPANY THAT NO LONGER OWNS IT
+  (2026-08-21). **No migration.** No schema, no engine, no contract — recorded because a
+  bundle identifier is the one string an iOS app cannot change once it has shipped, so the
+  window in which this is a rename rather than a migration is worth marking.
+  `pro.sinatra.signu` → **`pro.signu`**, and with it `….tests`, `….uitests`, and the
+  `CFBundleURLName` label `….auth`. Three files: the six `PRODUCT_BUNDLE_IDENTIFIER`
+  assignments in `project.pbxproj` (Debug and Release for all three targets), the URL-type
+  entry in `Info.plist`, and the hard-coded Keychain service string in
+  `KeychainAvailabilityTests`.
+  **Safe only because nothing has shipped.** There is no App Store Connect or TestFlight
+  configuration in the repo and no `.entitlements` file, so no provisioning profile or app
+  record was pinned to the old identifier. Had a build ever reached a user, this would have
+  been a *new app* to Apple with no upgrade path, and the correct answer would have been to
+  keep the name.
+  **The `signu://` scheme is untouched**, so the Supabase redirect whitelist needs no
+  change — only the `CFBundleURLName` label moved, and iOS routes on the scheme, not on
+  that label. The auth deep-link contract is unaffected.
+  **The Keychain service string mattered more than it looks.** Supabase stores the session
+  in the Keychain and nowhere else, so that literal is the one place a bundle rename could
+  have silently broken persistence. Verified by running the suite **with signing enabled
+  rather than `CODE_SIGNING_ALLOWED=NO`**, which is the whole point: under the CI flag the
+  Keychain probe exits early on `-34018` and reports success without touching a Keychain.
+  **207 tests pass, 0 failures, 0 skipped** — the probe ran for real against the new
+  `pro.signu.tests` service, and the UI tests confirm the runtime target too (`Wait for
+  pro.signu to idle`).
+  **Left for outside the repo**: registering `pro.signu` as an App ID before the first
+  signed device build, which needs `signu.pro` to be ours.
 
 - **v86** — THE 2026-08-20 HEALTH-CHECK AUDIT, CLOSED (2026-08-20). **No migration.**
   Nine findings with one cause: an audit read the whole system at once and asked what

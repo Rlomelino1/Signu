@@ -11,7 +11,7 @@ struct KeychainAvailabilityTests {
 
     @Test("the app can write and read back a keychain item")
     func roundTrip() throws {
-        let service = "pro.sinatra.signu.tests"
+        let service = "pro.signu.tests"
         let secret = Data("probe".utf8)
 
         let base: [String: Any] = [
