@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-21** (v87) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-21** (v88) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -80,7 +80,7 @@ Managed entirely by Supabase Auth — not part of our schema.
 | `id` | uuid PK | |
 | `account_id` | uuid FK | |
 | `provider_tx_id` | string | `UNIQUE(account_id, provider_tx_id)`; idempotent sync |
-| `status` | string | pending / posted; only posted feeds detection; no default |
+| `status` | string | pending / posted; no default. **Both feed detection**: the loader in `run-detection` applies no status predicate and `filterCandidates` never reads the column, so a `pending` row can anchor a run and be claimed by one. *Corrected v88 — this line read "only posted feeds detection" from v1 through v87 and no code ever implemented it. The rule was invented by the spec, and the divergence stayed invisible because nothing tested it. Both of the August charges in the v88 incident were `pending`, so the stated rule would have changed that outcome — which is why the correction is recorded rather than the code being bent to match a sentence nobody had implemented.* |
 | `type` | string | DEBIT / CREDIT; Pluggy's direction signal; **detection keys off this, never off sign** |
 | `date` | date | When the purchase happened; drives interval detection |
 | `amount` | numeric | Exactly as sent; sign varies by account type (cards: positive = charge) |
@@ -199,7 +199,7 @@ Replayable over full history, date granularity only. **Strict to create, generou
 
 | Rule | Mode | What it does |
 |---|---|---|
-| **R1 — anchor** | auto | 2 charges, same merchant+amount, one cadence apart (monthly = 28–33d, ±3d window). Continuation is amount-flexible (price hikes never split a run). **Amended v20**: a row carrying `installment_number` or `total_installments` is disqualified — see [Pluggy reality contract](#pluggy-reality-contract). |
+| **R1 — anchor** | auto | 2 charges, same merchant+amount, one cadence apart (monthly = 28–33d, ±3d window). Continuation is amount-flexible (price hikes never split a run). **Amended v88 — which charge the continuation takes.** When more than one unclaimed charge sits inside the ±3d window, the continuation takes the one **matching the run's own amount**, and failing that the one **nearest the expected date**. It previously took whichever came first in date order, so an unrelated same-merchant charge landing a day or two earlier than the real renewal would silently become the run's price, orphaning the renewal. Amount-flexibility is unchanged: with a single candidate, any amount is still claimed. **Amended v20**: a row carrying `installment_number` or `total_installments` is disqualified — see [Pluggy reality contract](#pluggy-reality-contract). |
 | **R2 — backfill** | auto | On confirmation, claim an unclaimed same-merchant charge ~1 interval before run start, any amount; fix `start_date`. |
 | **R3 — cadence-beats-amount** | suggest-only | 3+ date-aligned charges, varying amounts (FX-priced subs, utilities). User confirms/ignores. **Amended v24, the prediction was wrong.** It assumed an FX-priced sub arrives converted, with `currency` reading BRL and a fluctuating amount, so only R3 could catch it. Live data through connector 200 is the opposite: `currency` reads **USD**, `amount` is the **stable foreign amount** (6.45 every month), and the fluctuating BRL figure sits in Pluggy's `amountInAccountCurrency` — which **sync does not store**. So **R1 catches FX-priced subs directly**, on an amount that does not move. 57 of 258 rows are USD. Consequence recorded under [scope limits](#scope-limits-stated): totals cannot be summed across currencies until the BRL amount is stored. **Amended v20**: the IOF line accompanying such a charge is itself varying-amount and date-aligned — excluded via `fee_type_additional_info`, see [Pluggy reality contract](#pluggy-reality-contract). |
 | **R4 — catalog fast path** | suggest-only | 1 charge from a known subscription-only merchant ⇒ "possible" immediately. Interval is asked, not guessed — see [R4 billing interval](#r4-billing-interval-locked-2026-07-15). |
@@ -1885,6 +1885,46 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v88** — AN UNRELATED CHARGE STOPS STEALING THE RENEWAL'S SLOT (2026-08-21). **No
+  migration.** `anchorR1`'s continuation, and the two spec sentences this exposed.
+  **Reported from the live app**: the one tracked subscription showed its August charge as
+  **R$ 24,34** when the real renewal was **R$ 35,52**. The displayed charge was a Steam game
+  purchase — right merchant, wrong transaction. Correct the day before, wrong that morning,
+  with no deploy in between.
+  **The cause is candidate SELECTION, not matching.** R1 seeds on two exactly-equal amounts
+  and then extends by walking forward one cadence at a time. The extension asked
+  `group.find` for a charge inside the ±3-day window — and `find` returns the **first in
+  date order**, not the best. Two charges sat in that window: the stranger at
+  expected − 3 (USD 4.48) and the renewal at expected − 1 (USD 6.34). The stranger won on
+  array position alone, and the renewal — nearer the date *and* nearer the run's price —
+  was left unclaimed. `next_expected_date` then followed the wrong charge, so the
+  prediction was wrong too.
+  **It is R1 and not R3 because the amounts are USD**, which is v24's amendment doing
+  exactly what it predicted: the foreign amount is the stable one (`6.45` twice), and the
+  BRL figures the screen shows (34,51 / 34,33) differ only by FX. Reading the BRL amounts
+  as the matching key made this look like an R3 run for the first hour of diagnosis — the
+  spec had already recorded the truth and it went unread.
+  **Now the continuation prefers the run's own amount, then the nearest date.**
+  Amount-flexibility is deliberately intact: a lone candidate is still claimed at any
+  price, so a genuine price rise never splits a run (the v20 rule, still tested).
+  **Not caused by any recent change, and that was checked before it was claimed**:
+  `anchorR1`'s logic last changed in **v25**; the v79 touch deleted a comment.
+  `pluggy-sync` and `run-detection` were last deployed **2026-08-20 11:48 UTC**, and the
+  v85–v87 deploy bumped no function. The trigger was **data** — the stranger was imported
+  by the 2026-08-20 15:30 sync, and detection is deterministic, so the same code produced a
+  different answer the moment a second candidate existed. **A latent selection bug is
+  invisible until two candidates compete**, which is why three months of correct runs
+  proved nothing.
+  **Both August charges are `pending`, which is how the second spec error surfaced.**
+  `transaction.status` claimed "only posted feeds detection" — a rule **no code has ever
+  implemented**, from v1 to v87. Corrected in the [table](#transaction) rather than
+  enforced, per the standing preference for describing what runs; enforcing it would have
+  hidden this bug behind a delay instead of fixing it.
+  **Falsified before trusted**: both regression tests fail against the pre-fix engine
+  (`65 passed | 2 failed`) and pass after. **160 Deno tests pass** (was 158). The first
+  test carries the real transaction values, so the incident is now a fixture rather than a
+  story.
 
 - **v87** — THE BUNDLE IDENTIFIER DROPS THE COMPANY THAT NO LONGER OWNS IT
   (2026-08-21). **No migration.** No schema, no engine, no contract — recorded because a
