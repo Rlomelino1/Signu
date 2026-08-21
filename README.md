@@ -772,6 +772,38 @@ are read at launch from a `Config.plist` that is **not committed** — copy the 
 cp frontend/Signu/Config.example.plist frontend/Signu/Config.plist
 ```
 
+### On a real phone, on a free Apple ID
+
+```sh
+frontend/Tools/install-to-phone.sh
+```
+
+There is no paid Developer Program here, so the provisioning profile a free Apple ID
+issues is valid for **seven days**. On day eight the app stops launching with *"Unable to
+Verify App"* — that is the licence expiring, not a crash and not data loss. Re-running the
+script re-signs and reinstalls, which resets the clock. Reinstalling keeps the app's data
+container and its Keychain item, so the session survives and there is no weekly re-login.
+
+**It builds Release, and that is not a preference.** Per the DEBUG paragraph above, the
+session and data providers both return mocks under `#if DEBUG` unless `--live-auth` /
+`--live-data` are passed — and an app launched by tapping its icon gets no launch
+arguments. A Debug build on a phone shows fixture data with no route to the real account.
+
+The script refuses to build when `Config.plist` is absent or missing keys, since that file
+is gitignored and a build without it compiles cleanly and then cannot reach Supabase at
+all. It reads the Team ID from the **`OU` field of the Apple Development certificate**
+rather than from `security find-identity`, which reports *"0 valid identities"* on recent
+Xcode for a setup that signs perfectly well — the private key is not always somewhere that
+CLI enumerates. Whether signing actually works is settled by the build, not by that check.
+
+First run on a new phone needs three things this script cannot do: an Apple ID added in
+**Xcode → Settings → Apple Accounts** *and* a certificate minted there via **Manage
+Certificates… → +** (adding the account alone mints nothing), **Developer Mode** enabled on
+the phone, and the certificate trusted once under **Settings → General → VPN & Device
+Management**. The device registers itself with the team on first build via
+`-allowProvisioningUpdates`. After the initial USB pairing, ticking *Connect via network*
+in Xcode → Devices and Simulators lets later installs go over Wi-Fi.
+
 ### CI
 
 Three required checks, plus a deploy that runs on `main` only and is gated on all three:
