@@ -149,6 +149,41 @@ Deno.test('R1 continuation is amount-flexible so a price rise never splits a run
   assertEquals(d.subscriptions[0].runs[0].charges.length, 3)
 })
 
+Deno.test('v88 regression: R1 continuation takes the NEAREST charge, not the first', () => {
+  const rows = [
+    row({ date: '2026-06-19', amount: 6.45, currency: 'USD', amount_in_account_currency: 34.51 }),
+    row({ date: '2026-07-19', amount: 6.45, currency: 'USD', amount_in_account_currency: 34.33 }),
+    row({ date: '2026-08-16', amount: 4.48, currency: 'USD', amount_in_account_currency: 24.34 }),
+    row({ date: '2026-08-18', amount: 6.34, currency: 'USD', amount_in_account_currency: 35.52 }),
+  ]
+  const d = detect({ today: '2026-08-21', rows, ...EMPTY })
+  const run = d.subscriptions[0].runs[0]
+  assertEquals(run.detected_by, 'R1')
+  assertEquals(run.charges.length, 3)
+  assertEquals(
+    run.charges[2].date,
+    '2026-08-18',
+    'the renewal is 1 day from expected; the stranger is 3 — nearest wins, not first-in-date-order',
+  )
+  assertEquals(run.next_expected_date, '2026-09-18', 'and the next date follows the right charge')
+})
+
+Deno.test('v88: an amount that matches the run beats a nearer stranger', () => {
+  const rows = [
+    row({ date: '2026-01-10', amount: 39.9 }),
+    row({ date: '2026-02-09', amount: 39.9 }),
+    row({ date: '2026-03-10', amount: 12.0 }),
+    row({ date: '2026-03-12', amount: 39.9 }),
+  ]
+  const d = detect({ today: '2026-03-20', rows, ...EMPTY })
+  const run = d.subscriptions[0].runs[0]
+  assertEquals(
+    run.charges[2].date,
+    '2026-03-12',
+    "the run's own price outranks date proximity when both sit in the window",
+  )
+})
+
 Deno.test('installment rows never reach R1 (Padrao B false positive)', () => {
   const rows = [
     row({ date: '2026-01-10', amount: 50, installment_number: 1, total_installments: 12 }),

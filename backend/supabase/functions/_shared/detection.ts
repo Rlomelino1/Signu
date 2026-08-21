@@ -227,13 +227,20 @@ function anchorR1(group: TxRow[]): ProtoRun[] {
       for (;;) {
         const last = run.charges[run.charges.length - 1]
         const expected = addInterval(last.date, run.interval)
-        const next = group.find(
+        const inWindow = group.filter(
           (c) =>
             !claimed.has(c.id) &&
             c.date > last.date &&
             Math.abs(daysBetween(expected, c.date)) <= MATCH_WINDOW,
         )
-        if (!next) break
+        if (inWindow.length === 0) break
+        const priced = inWindow.filter((c) => sameMoney(c, run.charges[0]))
+        const pool = priced.length > 0 ? priced : inWindow
+        const next = pool.reduce((best, c) =>
+          Math.abs(daysBetween(expected, c.date)) < Math.abs(daysBetween(expected, best.date))
+            ? c
+            : best
+        )
         run.charges.push(next)
         claimed.add(next.id)
       }
