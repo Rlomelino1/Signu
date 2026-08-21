@@ -1,6 +1,6 @@
 # Signu — Data Model
 
-> **Living document** · Last updated **2026-08-20** (v84) · See [changelog](#changelog) at the bottom.
+> **Living document** · Last updated **2026-08-20** (v86) · See [changelog](#changelog) at the bottom.
 >
 > **Name locked 2026-07-15**: the app is **Signu** (from *assinatura* — subscriptions are things you signed). Verified unused: no app, no Brazilian trademark (INPI classes checked empty), no active brand on the string. With the project now personal-only, domains/trademark/App Store availability are moot — the name was chosen clean anyway, on principle.
 
@@ -260,7 +260,7 @@ R4 creates a run from a **single charge** — cadence cannot be measured, so the
 - **At creation**: the engine writes a provisional `billing_interval = 'monthly'`. Keeps the column NOT NULL, keeps the pre-confirmation "renews ~\<date\>" prediction renderable (`next_expected_date` computable), and monthly is the overwhelmingly common case. Same shape as `detected_by` re-stamping: a provisional engine write, overwritten by better information at confirmation.
 - **At confirmation ("Track it")**: the confirm flow asks *monthly or annual?* — the user's answer overwrites `billing_interval`. This is the authoritative write.
 - **R3 confirmations never ask**: 3+ date-aligned charges already *measure* the cadence; asking would be the system pretending not to know something it proved. The extra step is R4-only.
-- **Engine test case (flagged for implementation)**: a confirmed R4 run that never receives a second charge must die quietly through the normal machinery — expected date passes ⇒ overdue ⇒ ended at +10. No special casing; the lifecycle already covers it, but it warrants an explicit test.
+- **Engine test case (flagged for implementation)**: a confirmed R4 run that never receives a second charge must die quietly through the normal machinery — expected date passes ⇒ overdue at +4 ⇒ ended at +14 (see [run lifecycle](#run-lifecycle) for why it is not +10). No special casing; the lifecycle already covers it, but it warrants an explicit test.
 
 ### Possible state
 
@@ -586,6 +586,39 @@ against the real item: 1 connection, 2 accounts, 258 transactions.*
     for the *queueing*, so a 200, a 403 and a DNS failure all read identically
     there. `net._http_response` is the only record of what actually happened.
   - Idempotent: pg_cron upserts on jobname, so a reset yields exactly one entry.
+- **The dispatch outcome is recorded, so a rejected call is a red cron run (Migration
+  #19, locked v85).** The paragraph above says `net._http_response` is the only record of
+  what actually happened — and until v85 nothing read it. `trigger_pluggy_sync()` took the
+  request id `net.http_post` returns and **threw it away**, which discarded the sole piece
+  of evidence the database ever had. Both triggers now insert `(request_id, kind)` into
+  **`sync_dispatch`**, and three separate scheduled jobs resolve and judge it: one copies
+  the status out of `net._http_response`, one expires an unanswered dispatch as **failed**
+  after 30 minutes rather than assuming it was fine, and one **raises** when the newest
+  resolved dispatch for a kind did not return 2xx.
+  - **The raise is the entire point.** pg_cron reports the *queueing*, so a 403 read as
+    "succeeded" for three days in v42. An assertion that raises turns that into a failed
+    cron run — the signal that was missing.
+  - **Three jobs rather than one, because an exception rolls back its own transaction.**
+    Recording and complaining in one function would undo the record and then repeat the
+    complaint forever.
+  - **Only the newest dispatch per kind is judged**, so a successful rotation clears the
+    alarm by itself — there is no acknowledgement to forget.
+  - **A second assertion catches a schedule that stopped firing**, which the outcome check
+    structurally cannot see: a call that never happened leaves no failing row. It triggers
+    at 26 hours and is guarded on prior history, so a database that has never dispatched
+    stays quiet.
+  - **Deliberately not a digest comparison in CI**, which the audit report itself had
+    called the smaller fix. CI cannot read the Vault copy without a database password, so
+    that check would cost a standing credential able to decrypt every production Vault
+    secret — trading a silent-failure risk for a permanent high-privilege one. This moves
+    no secret, publishes no digest, and adds no endpoint: `sync_dispatch` holds request ids
+    and status codes only. It also catches strictly more, since any failure counts and not
+    just a mismatch.
+  - **Machine-only**: RLS on, `revoke all` from `anon` and `authenticated`, and every
+    function `security definer` with a pinned `search_path`. `kind` is in the vocabulary
+    gate's `KNOWN` map as deliberately runtime-absent — no TypeScript or Swift code ever
+    sees a `sync_dispatch` row.
+  - Covered by `backend/supabase/tests/sync_dispatch_test.sql` — **34 pgTAP assertions**.
 - **`connection` was seeded by hand** via `supabase/seed/seed-connection.sql`,
   with the itemId passed in rather than committed. Committed as a parameterized
   script rather than an `INSERT` typed once, because a manual step living only in
@@ -888,7 +921,8 @@ Documented in the database itself by **Migration #18** (comment only), because
 ## Run lifecycle
 
 - **Asymmetric matching window** around the expected date: −3/+3 days = normal charge matching.
-- Expected date passes with no charge ⇒ **overdue**. Overdue lingers to **+10 days** (documented payment retry window) before flipping to **ended**, with `end_date` set. A late charge within +10 (same merchant+amount) still claims the run.
+- Expected date passes with no charge ⇒ **overdue**, and the run goes overdue on the **fourth** day past expected, not the first — the ±3 matching window has to lapse before a missing charge means anything. The **10-day retry grace runs from the end of that window**, so overdue lingers through **expected + 13** and the run flips to **ended** on **expected + 14**, with `end_date` set to paid-through. A late charge arriving anywhere inside that span (same merchant+amount) still claims the run.
+  **The composition is the contract, not either number**: `deadAfterDays = matchWindowDays + overdueGraceDays` (3 + 10), stated once in the engine and mirrored by `RunLifecycle` in the client. *Corrected in v86 — this line read "+10 days" through v85, which is the window's length mistaken for its end, and the client had shipped that reading to users as a promised deadline three days early (H1). The +3 is the part everyone missed, which is why the composition is named rather than the total written out.*
 - **No reopening after ended**: any later matching charge starts a **new run**, always. (Applies to `ended`; `cancelled` runs have the narrow one-charge R5 trailing exception.)
 - **`end_date` semantics**: paid-through (last charge + 1 `billing_interval`), not last-charge date (which stays derivable from charges). Holds for cancelled runs too.
 
@@ -915,7 +949,7 @@ The user can assert "I cancelled this" from the detail screen.
   - 3+ distinct currencies ⇒ *"+N charges in other currencies"*.
   - In v1 the footnote simply never renders.
 - **Prediction confidence**: "Coming up" amounts are predictions from the last charge. The endpoint must flag each as **expected-exact** (R1-stable) or **expected-approximate** (R3 cadence-matched, FX-priced); the UI renders approximate amounts with a tilde ("~R$ 21,90"). Backing column: `SUBSCRIPTION_RUN.detected_by` (R1 / R3 / R4; text + CHECK, engine-stated, no default — writer-states-everything). R1 ⇒ exact; R3 ⇒ approximate; R4 runs are possible-only until confirmed (a confirming charge pattern re-stamps them R1/R3). Note R2 is backfill, not creation — it never appears in `detected_by`.
-- **Overdue surfacing**: overdue runs render as standalone tinted rows above "Coming up" (subtitle "Overdue · N days" = days past expected date, i.e. depth into the +10 retry window). Multiple simultaneous overdue subs **stack** as separate rows — no "+1 more" collapse; rare but must stay visible (payment failures are never summarized away).
+- **Overdue surfacing**: overdue runs render as standalone tinted rows above "Coming up" (subtitle "Overdue · N days" = days past the **expected date**, so it starts at 4 and the run dies after 13 — it is not depth into the 10-day grace, which is measured from the end of the match window). Multiple simultaneous overdue subs **stack** as separate rows — no "+1 more" collapse; rare but must stay visible (payment failures are never summarized away).
 - **Connection problems and overdue runs are separate severity channels**: connection issues get the top banner (data is stale — structural), overdue never does (payment may have failed — transactional; lives in subtitle count + tinted rows only). The banner slot always means "plumbing problem".
 
 ### Suggestions on Home (22a, locked v34, 2026-08-12)
@@ -1851,6 +1885,145 @@ implementations back to the 21-series rendering.*
 ---
 
 ## Changelog
+
+- **v86** — THE 2026-08-20 HEALTH-CHECK AUDIT, CLOSED (2026-08-20). **No migration.**
+  Nine findings with one cause: an audit read the whole system at once and asked what
+  nothing was checking. Kept as a single entry because splitting one review into nine
+  versions would make the ledger less legible, not more; **v85** is carved out only because
+  it carries Migration #19. PRs #84–#88. The report itself is deliberately not committed.
+  **H1, the only high, and the reason the ledger exists.** An overdue run's detail footer
+  promised *"If no charge arrives by \<date\>, we'll mark this run ended"* — **three days
+  before the engine would act**. The engine starts its 10-day grace at
+  `expected + MATCH_WINDOW`; the client added 10 to the expected date in three places. The
+  three sites now derive from one named composition, `deadAfterDays = matchWindowDays +
+  overdueGraceDays`, because **a bare 13 would have rebuilt the exact fragility that hid
+  this** — a number duplicating an engine rule with nothing tying the two together. The
+  spec sentence was the other half and is corrected in this version (see
+  [run lifecycle](#run-lifecycle)).
+  **The old tests permitted the bug, which is the durable lesson.** The TS lifecycle test
+  was *titled* "ended at +10" while asserting only that a run 23 days past expected was
+  dead — true under either rule. **The title documented one contract and the assertions
+  allowed the other.** Every boundary day is now pinned: active at +3, overdue at +4,
+  overdue at +13, ended at +14. And the regression test was **falsified before being
+  trusted** — with `deadAfterDays` set back to 10 it fails on the footer assertion. A
+  regression test that passes against the old behaviour is worthless.
+  **M6 was H1's real cause**: `PayloadSource+Detail` — the most conditional assembly in the
+  client, three hero labels and per-status footers — had **no test at all**. Six now cover
+  it, in the same change as the fix, because the test that would have caught it is the test
+  that proves it.
+  **M1, the vocabulary gate.** SQL, TypeScript and Swift each hard-code the same eight
+  value lists and nothing compared them. They agreed; the finding is that nothing would
+  notice the day they stopped. It reads the **applied** schema via `pg_get_constraintdef`,
+  and the first draft — parsing migration text — is the instructive part: constraints
+  arrive in `create table` *and* in later `alter table … add column … check`, on tables
+  that get renamed (`merchant_catalog` → `brand_catalog`), so it silently skipped
+  `subscription_run.status` and would have grown a fresh blind spot per migration. Exact
+  and both ways. A new vocabulary with no `KNOWN` entry fails, because adding one is a
+  decision about who else has to learn the value. **`--selftest` tampers six ways to prove
+  the red is still reachable** — a guard whose failure path has rotted is worse than none,
+  and proving it needs no database.
+  **M5 found a real leak by writing the test, not by reading.** Every `pluggy.ts` failure
+  interpolated the upstream body into a thrown-and-logged message, and **`POST /auth` is
+  the one request whose own body carries `PLUGGY_CLIENT_SECRET`** — an upstream that echoes
+  the request it rejected writes the secret to the log. That call now keeps the status and
+  drops the body; `PluggyError.upstreamStatus` exists so the diagnostic survives the
+  redaction, since `status` is always our own 502 and a different fact from what Pluggy
+  said. Ten tests, credentials injectable with the env read as the default.
+  **L5, `cancel-subscription` reads the clock itself.** It took `today` from the request
+  body and stored it as `cancelled_date`. Bounded — the caller is authenticated and the row
+  ownership-checked — but `cancelled_date` is an **assertion the engine preserves and never
+  recomputes**, so a wrong value there is permanent in a way ordinary client input is not.
+  The parameter stays on `run-detection` and `send-reminders`, machine functions where
+  operator replay is the affordance that makes the engine replayable.
+  **L4, the transitive closure was unverified.** Both Deno specifiers were already
+  version-pinned, so the finding was never about floating direct dependencies: the 56
+  remote modules and 9 redirects esm.sh actually serves were resolved fresh at deploy and
+  recorded nowhere. `backend/deno.lock` now carries an integrity hash per module. It lives
+  in `backend/` rather than beside the functions so the Supabase bundler cannot pick it up
+  and disagree with its own resolution during a deploy — it is **for CI's verification, not
+  for the deploy**. Enforcement was checked rather than assumed, and the check moved:
+  tampering every hash makes `deno test` exit 10, while **`deno check` still passes**,
+  because it only pulls type declarations and never executes the module.
+  **M4/L2/L3, the no-decision batch.** Three tracked `.pyc` files, swept in by `git add -A`
+  after a `py_compile` check, untracked with an ignore rule naming the *class*. Raw Postgres
+  and GoTrue messages returned verbatim to callers, naming tables and constraints — the
+  audit listed two sites and there were **three**, because the report's own grep had been
+  truncated to eight hits. The two that return provider wording deliberately are untouched
+  (v68: Pluggy's own words are the only thing that tells the user what to do). And a logged
+  Pluggy item id, from v79, now names the source and not the value.
+  **M2 was half wrong, and both halves are recorded.** It claimed two views hand-rolled the
+  row v84 fixed; only `SettingsView.bankRow` did. `ReviewView.confirmationCard`'s trailing
+  element is a glyph, not text, so there is no baseline pair to align and centring against
+  the block is correct — **filed in error**. Neither is forced into `SignuRow`: making them
+  fit needs an arbitrary trailing view plus per-caller colour and line-limit policy, which
+  turns a component serving 8 correct callers into a config bag. That widening stays an
+  open design decision. The screenshot also caught what v79's redaction pass missed — two
+  fixtures still reading real-looking addresses under a fictional display name, now neutral
+  at `@example.test` across 11 occurrences in 7 files. **Redacting HEAD does not remove
+  either from git history, and no rewrite is attempted.**
+  **Then the bankRow half was reverted on sight, and that is the honest record.** Moved to
+  the title's baseline on the strength of the finding, it read as *floating* against a
+  two-line subtitle in the running app. The original centring was right. The subscription
+  row's **amount** moved the other way in the same pass — centred against the name, because
+  a wrapping "TRUELINE VALVE CORPORATION" left it stranded at the top of a three-line row.
+  Deliberately unchanged: the trailing *subtitle* still shares the subtitle's baseline, so
+  v84's explicitly requested alignment survives; only the amount moved, and for a
+  single-line title the two positions are identical. **An audit finding is a hypothesis
+  about a layout; the running app is the evidence** (the v45 lesson, third time).
+  **The CI runtime change is the finding the audit did not file.** The iOS job ran on
+  `macos-15` and never selected an Xcode, so it inherited **iOS 18.5** while the app is
+  developed against iOS 26 — and the Test step took the *first* simulator `simctl` listed,
+  with no assertion about the runtime, so nothing would ever have reported the gap. Not
+  academic: a row tap-target test **fails on iOS 26 and passes on 18.5**, so CI was
+  structurally unable to see that class of layout regression. **A green iOS build was
+  evidence about a runtime no user has.** Pinned to `macos-26` rather than `macos-latest`
+  for the same reason the actions are pinned to SHAs, and the step now picks the *newest*
+  runtime and **fails below 26** — a floor, so iOS 27 satisfies it.
+  **And on the iOS-26-only failure, two reasoned guesses were both wrong.** A nine-line
+  diagnostic printing real frames settled it in one run: the chrome is a band, and
+  `hittable` was the wrong condition. **Recurring lesson, third time in this project: a
+  check that shares the transformation's blind spot is not a check** — the test title that
+  allowed either contract, the migration-text parser blind to renamed tables, the lockfile
+  `deno check` never enforces.
+
+- **v85** — A REJECTED SCHEDULED CALL IS NO LONGER A GREEN CRON RUN (2026-08-20).
+  **Migration #19, additive** — one machine-only table (`sync_dispatch`), two
+  `create or replace` on the existing triggers, three new functions, three cron entries.
+  The one finding of the 2026-08-20 health check that carries a schema change, and it gets
+  its own version for that reason: a migration buried inside a ten-item audit entry is a
+  migration nobody can find.
+  **It closes the v42 class of failure, three days of which is what this cost.** Two copies
+  of `SYNC_SECRET` have to match — the function's env and the Vault row the cron trigger
+  reads. A wrong-but-plausible value is rejected with **403 before any per-connection error
+  path**, so `last_sync_error` stays null, `last_synced_at` never advances, pg_cron records
+  "succeeded" because it reports the *queueing* rather than the HTTP result, and **every
+  indicator in the system reads healthy**. There was no surface on which the outage was
+  visible.
+  **The fix watches the status instead of comparing the copies**, and the evidence was
+  already arriving. `net.http_post` returns a request id and the response lands in
+  `net._http_response` — the trigger simply discarded the id. Full mechanics are now in the
+  [sync contract](#deliberate-gaps); what belongs here is the shape of the decision.
+  **The smallest fix was refused on purpose.** The audit report — mine — named a CI digest
+  comparison as the cheap answer. CI cannot read the Vault copy without a database
+  password, so that check would have bought a silent-failure guard with a **permanent
+  standing credential able to decrypt every production Vault secret**. Watching the status
+  the database already receives moves no secret, publishes no digest, adds no endpoint, and
+  catches strictly more: any failure, not only a mismatch.
+  **Three jobs rather than one, and the reason is a Postgres fact rather than taste**: an
+  exception rolls back its own transaction, so recording the outcome and complaining about
+  it cannot share one — the complaint would undo the record and then repeat forever.
+  **Judging only the newest dispatch is what makes it self-clearing**: a successful
+  rotation ends the noise with no acknowledgement to forget, which is the failure mode of
+  every alarm that needs muting.
+  **A second assertion catches the case the first structurally cannot see** — a schedule
+  that stopped firing at all, which leaves no failing row because the call never happened.
+  26 hours, guarded on prior history so a fresh database stays quiet.
+  **Verified against a real Postgres, and that is not a formality.** Running the stack
+  locally caught a bug that reading could not: the staleness query nested `string_agg` over
+  `max()`, which fails at runtime *whatever the data*, and it took five tests down with it
+  — including two whose whole job was to stay quiet. After the fix, **34 pgTAP assertions
+  pass**, and on the real `pg_net` path a synthetic 403 resolves and the assertion raises
+  with the v42 message. **A guard proven only by reading is not proven.**
 
 - **v84** — THE ROW LAYS OUT IN ROWS, NOT COLUMNS (2026-08-20). **No migration.**
   `SignuRow`.
