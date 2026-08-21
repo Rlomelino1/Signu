@@ -153,13 +153,36 @@ fi
 # ------------------------------------------------------------------ expiry
 
 step "Done"
-expires="$(date -v+7d '+%a %d %b' 2>/dev/null || date -d '+7 days' '+%a %d %b')"
+
+# Read the real expiry out of the profile that was just embedded, rather than
+# adding 7 days to today. It is an exact instant -- 7x24h from when the profile
+# was issued, not a date boundary and not a fixed weekday -- so it slides to
+# whenever this script was last run.
+expires="unknown (could not read the embedded profile)"
+if security cms -D -i "$app/embedded.mobileprovision" >/tmp/signu-profile.plist 2>/dev/null; then
+  raw="$(plutil -extract ExpirationDate raw -o - /tmp/signu-profile.plist 2>/dev/null || true)"
+  # Parse as UTC (-u) into epoch, THEN render in local time. Without -u, BSD
+  # date reads the Z-suffixed string as though it were already local and the
+  # printed deadline is off by the UTC offset -- three hours, here.
+  if [ -n "$raw" ]; then
+    epoch="$(date -jf '%Y-%m-%dT%H:%M:%SZ' -u "$raw" '+%s' 2>/dev/null || true)"
+    if [ -n "$epoch" ]; then
+      expires="$(date -r "$epoch" '+%a %d %b at %H:%M %Z')"
+    else
+      expires="$raw (UTC)"
+    fi
+  fi
+  rm -f /tmp/signu-profile.plist
+fi
+
 cat <<EOF
 Installed $bundle_id on ${name//_/ }.
 
-This signature expires around $expires. On that day the app stops launching
-with "Unable to Verify App" — that is the free-account 7-day limit, not a bug,
-and not data loss. Re-run this script to reset the clock:
+This signature expires $expires — an exact instant 7x24h after the build, not
+midnight and not a fixed weekday. iOS checks it when the app LAUNCHES, so an
+already-running app keeps working and the next cold start is what fails, with
+"Unable to Verify App". That is the free-account limit, not a bug and not data
+loss. Re-run this script to reset the clock:
 
     frontend/Tools/install-to-phone.sh
 
