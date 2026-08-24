@@ -214,6 +214,7 @@ private struct AuthDebugView: View {
     let name: String
     var body: some View {
         switch name {
+        case "splash": SplashView()
         case "create": CreateAccountView()
         case "confirm": ConfirmEmailView(email: "sam.taylor@example.test")
         case "forgot": ForgotPasswordView()

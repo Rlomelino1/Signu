@@ -7,6 +7,9 @@ enum SignuColor {
     static let sunken = Color(hex: 0xE7E4DA)
     static let hairline = Color(hex: 0xE2DFD4)
 
+    static let bootBackdrop = Color(hex: 0x26221C)
+    static let bootMark = Color(hex: 0xF0EEE9)
+
     static let ink = Color(hex: 0x2E2924)
     static let inkTile = Color.white.opacity(0.07)
     static let onInk = Color(hex: 0xF6F4EE)
