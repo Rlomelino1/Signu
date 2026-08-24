@@ -18,3 +18,6 @@ __pycache__/
 
 # Device-install derived data (frontend/Tools/install-to-phone.sh)
 frontend/.build-device/
+
+# Documentation is local-only (spec, screen mockups, README archive)
+docs/
