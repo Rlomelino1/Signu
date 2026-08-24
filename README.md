@@ -75,14 +75,3 @@ deno lint backend/supabase/functions
 
 The app reads its project URL and keys at launch from `frontend/Signu/Config.plist`,
 which is not committed — copy `frontend/Signu/Config.example.plist` and fill it in.
-
-## Where the design reasoning lives
-
-This README is an overview and nothing more. The specification is the source of
-truth: a living document with a changelog, carrying the full schema, the detection
-doctrine, every screen contract, and the reasoning behind the decisions — including
-the ones that were rejected and why. It is kept alongside the design references and
-the archive of everything this README used to say, outside version control. Where
-this README and the specification disagree, the specification wins.
-
-Anything not covered there is answered by the code.
