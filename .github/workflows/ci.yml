@@ -22,15 +22,6 @@ jobs:
             -project frontend/Signu.xcodeproj \
             -scheme Signu
 
-      - name: Build Debug
-        run: |
-          xcodebuild build \
-            -project frontend/Signu.xcodeproj \
-            -scheme Signu \
-            -configuration Debug \
-            -destination 'generic/platform=iOS' \
-            CODE_SIGNING_ALLOWED=NO
-
       - name: Test
         run: |
           set -eo pipefail
