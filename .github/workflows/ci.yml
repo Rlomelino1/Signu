@@ -52,7 +52,7 @@ jobs:
           echo "Testing on $(jq -r '"\(.name) iOS \(.major).\(.minor)"' <<<"$SEL")"
 
           if [ "$MAJOR" -lt 26 ]; then
-            echo "::error::the newest simulator here is iOS $MAJOR, but the app ships against iOS 26; a layout regression that only appears on the shipping runtime would pass unnoticed. See README section 13."
+            echo "::error::the newest simulator here is iOS $MAJOR, but the app ships against iOS 26; a layout regression that only appears on the shipping runtime would pass unnoticed. Do not lower this floor to match a runner image."
             exit 1
           fi
 
