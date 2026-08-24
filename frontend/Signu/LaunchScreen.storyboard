@@ -1,14 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Static twin of SplashView: paper background, wordmark pinned to safe-area
-  top + 14 (SignuWordmark.topPadding) and centred horizontally, so launch
-  image → SplashView → 16a keeps the mark in one fixed position throughout.
+  Static twin of SplashView: backdrop #26221C (SignuColor.bootBackdrop) and the
+  resting arcs mark, so launch image → SplashView shows one continuous frame
+  and a cold launch never flashes.
 
-  The wordmark is a rendered image, not storyboard views: ibtool rejects
-  user-defined runtime attributes in launch screens, which is exactly what the
-  tile's `layer.cornerRadius` would need. Tools/generate-wordmark-asset.sh
-  renders it from the real SignuWordmark — re-run it if that view changes, and
-  update the size constraints below if the printed size changes.
+  The mark is centred horizontally and sits 68pt ABOVE the view's centre. That
+  is not a nudge: SplashView centres the mark in what is left once the copy
+  strip (SplashView.copyHeight, 20) and its bottom inset
+  (SplashView.copyBottomInset, 116) are taken off the bottom, which raises the
+  centre by half their sum. Change either and this constant changes with them.
+
+  The mark is a rendered image, not storyboard views: ibtool rejects the
+  user-defined runtime attributes a stroked arc would need, the same reason the
+  wordmark was an image. Tools/generate-bootmark-asset.sh renders it from the
+  real SignuArcsMark — re-run it if that view changes, and update the size
+  constraints below if the printed size changes.
+
+  The size is stated as the image view's OWN constraints, with no second item.
+  The file this replaced sized its image against the superview's width with
+  multiplier="0.0" — Auto Layout does not honour that, so the image view is
+  left unsized and the mark renders at whatever size fills the screen. It is
+  invisible in a Debug build, because the debug route renders SplashView
+  directly and never loads this storyboard; it takes a Release launch to see
+  it. Do not restate a fixed size as a zero multiplier against another view.
 -->
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="22505" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
     <dependencies>
@@ -25,17 +39,19 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="Wordmark" translatesAutoresizingMaskIntoConstraints="NO" id="wMk-2n-Rp8" userLabel="Wordmark">
-                                <rect key="frame" x="151.5" y="73" width="90" height="111"/>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="BootMark" translatesAutoresizingMaskIntoConstraints="NO" id="bMk-2n-Rp8" userLabel="BootMark">
+                                <rect key="frame" x="146" y="278" width="148" height="264"/>
+                                <constraints>
+                                    <constraint firstAttribute="width" constant="148" id="bc3-aa-103"/>
+                                    <constraint firstAttribute="height" constant="264" id="bc4-aa-104"/>
+                                </constraints>
                             </imageView>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="6Tk-OE-BBY"/>
-                        <color key="backgroundColor" red="0.93725490196078431" green="0.92941176470588238" blue="0.90196078431372551" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <color key="backgroundColor" red="0.14901960784313725" green="0.13333333333333333" blue="0.10980392156862745" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
-                            <constraint firstItem="wMk-2n-Rp8" firstAttribute="top" secondItem="6Tk-OE-BBY" secondAttribute="top" constant="14" id="rc1-aa-101"/>
-                            <constraint firstItem="wMk-2n-Rp8" firstAttribute="centerX" secondItem="6Tk-OE-BBY" secondAttribute="centerX" id="rc2-aa-102"/>
-                            <constraint firstItem="wMk-2n-Rp8" firstAttribute="width" secondItem="Ze5-6b-2t3" secondAttribute="width" multiplier="0.0" constant="90" id="rc3-aa-103"/>
-                            <constraint firstItem="wMk-2n-Rp8" firstAttribute="height" secondItem="Ze5-6b-2t3" secondAttribute="height" multiplier="0.0" constant="111" id="rc4-aa-104"/>
+                            <constraint firstItem="bMk-2n-Rp8" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="bc1-aa-101"/>
+                            <constraint firstItem="bMk-2n-Rp8" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" constant="-68" id="bc2-aa-102"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -45,6 +61,6 @@
         </scene>
     </scenes>
     <resources>
-        <image name="Wordmark" width="90" height="111"/>
+        <image name="BootMark" width="148" height="264"/>
     </resources>
 </document>
