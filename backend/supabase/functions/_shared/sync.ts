@@ -32,3 +32,29 @@ export function withdrawalDecision(
   }
   return { kind: 'withdraw', ids }
 }
+
+export type ApplyDecision =
+  | { kind: 'apply' }
+  | { kind: 'refuse'; reason: string }
+
+// The same principle as withdrawalDecision, one stage later: an engine pass
+// that finds NOTHING where runs exist is more likely reporting degraded input
+// than a world where every subscription vanished at once. The 2026-08-31
+// incident is the proof: the Pluggy trial lapsed, merchant enrichment went
+// null, grouping shattered, and an all-green pipeline deleted every run.
+// Partial disappearance is still trusted — one run ending is ordinary; all of
+// them at once, with nothing detected to replace them, is refused.
+export function detectionApplyDecision(
+  desiredSubscriptions: number,
+  storedRuns: number,
+): ApplyDecision {
+  if (desiredSubscriptions === 0 && storedRuns > 0) {
+    return {
+      kind: 'refuse',
+      reason: `detection found nothing against ${storedRuns} stored run(s): ` +
+        `refusing to apply a total wipe, since degraded provider data reads ` +
+        `exactly like this (pass allowWipe to override)`,
+    }
+  }
+  return { kind: 'apply' }
+}

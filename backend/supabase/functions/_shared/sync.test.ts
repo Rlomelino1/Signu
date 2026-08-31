@@ -1,6 +1,6 @@
 
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
-import { type Held, withdrawalDecision } from './sync.ts'
+import { detectionApplyDecision, type Held, withdrawalDecision } from './sync.ts'
 
 function held(...ids: string[]): Held[] {
   return ids.map((p) => ({ id: `row-${p}`, provider_tx_id: p }))
@@ -44,4 +44,19 @@ Deno.test('DELIBERATE LIMIT: a nearly-empty feed is trusted', () => {
   assertEquals(d.kind, 'withdraw')
   if (d.kind !== 'withdraw') return
   assertEquals(d.ids.length, 199)
+})
+
+Deno.test('THE GUARD: zero detected against stored runs is refused, not applied', () => {
+  const d = detectionApplyDecision(0, 3)
+  assertEquals(d.kind, 'refuse')
+  if (d.kind !== 'refuse') return
+  assertEquals(d.reason.includes('3 stored run(s)'), true, 'the count is what makes the log useful')
+})
+
+Deno.test('zero detected with zero stored runs is an ordinary fresh account', () => {
+  assertEquals(detectionApplyDecision(0, 0).kind, 'apply')
+})
+
+Deno.test('DELIBERATE LIMIT: any nonzero detection is applied, even if runs shrink', () => {
+  assertEquals(detectionApplyDecision(1, 5).kind, 'apply')
 })

@@ -34,7 +34,11 @@ entry. Nothing is typed in by hand. You connect a bank, and the subscriptions ap
   allowed to write itself, Auth for sign-in (email + password and Google), and
   `pg_cron` for the daily sync and the reminder mail.
 - **Pluggy** — the Brazilian Open Finance aggregator that supplies the bank and card
-  data, reached through its Connect widget and its data API.
+  data, reached through its Connect widget and its data API. Signu runs on the free
+  tier: existing items keep syncing, but transactions arrive without Pluggy's
+  merchant enrichment (legal name + CNPJ), which detection's grouping is built on.
+  A small local table reproduces that enrichment for the merchants actually tracked —
+  see *Merchant enrichment is reconstructed locally* in `docs/readme-archive.md`.
 - **SwiftUI** — the iOS app, Swift 6 language mode, with its own small design system.
   Unit tests in Swift Testing, UI tests in XCTest.
 - **Deno / TypeScript** — the Edge Functions and the detection engine they run.

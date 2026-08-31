@@ -5,6 +5,7 @@ import {
 } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 import { accountType, lastFour } from '../_shared/accounts.ts'
 import { withdrawalDecision } from '../_shared/sync.ts'
+import { localEnrichmentFor } from '../_shared/enrichment.ts'
 import { writeApiKey } from '../_shared/auth.ts'
 
 const PLUGGY = 'https://api.pluggy.ai'
@@ -233,6 +234,14 @@ function toTransactionRow(accountRowId: string, t: PluggyTransaction): Transacti
   const ccm = t.creditCardMetadata ?? {}
   const merchant = t.merchant ?? {}
   const raw = String(t.description ?? '')
+  const normalized = normalizeMerchant(raw)
+
+  // The lapsed Pluggy trial serves `merchant: null` where it used to serve the
+  // enrichment detection groups by — see _shared/enrichment.ts for the story.
+  const local = blankToNull(merchant.businessName) === null &&
+      blankToNull(merchant.cnpj) === null
+    ? localEnrichmentFor(normalized)
+    : null
 
   return {
     account_id: accountRowId,
@@ -244,7 +253,7 @@ function toTransactionRow(accountRowId: string, t: PluggyTransaction): Transacti
     currency: String(t.currencyCode ?? '').toUpperCase(),
     amount_in_account_currency: t.amountInAccountCurrency ?? null,
     raw_description: raw,
-    normalized_merchant: normalizeMerchant(raw),
+    normalized_merchant: normalized,
     provider_category: t.category ?? null,
 
     withdrawn_at: null,
@@ -252,8 +261,8 @@ function toTransactionRow(accountRowId: string, t: PluggyTransaction): Transacti
     total_installments: ccm.totalInstallments ?? null,
     purchase_date: toSaoPauloDate(ccm.purchaseDate),
     fee_type_additional_info: ccm.feeTypeAdditionalInfo ?? null,
-    provider_merchant_name: blankToNull(merchant.businessName),
-    provider_merchant_cnpj: blankToNull(merchant.cnpj),
+    provider_merchant_name: blankToNull(merchant.businessName) ?? local?.name ?? null,
+    provider_merchant_cnpj: blankToNull(merchant.cnpj) ?? local?.cnpj ?? null,
   }
 }
 
