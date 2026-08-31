@@ -5,6 +5,7 @@ struct AppShellView: View {
     var homeScrollAnchor: UnitPoint = .top
     var subsScrollAnchor: UnitPoint = .top
     var initialSubsFilter: SubsFilter = .all
+    var initialHomeFailure: String?
     var onSignOut: () -> Void = {}
     var onSetPassword: () -> Void = {}
 
@@ -33,12 +34,14 @@ struct AppShellView: View {
          initialTab: SignuTab = .home,
          initialSubsFilter: SubsFilter = .all,
          subsScrollAnchor: UnitPoint = .top,
+         initialHomeFailure: String? = nil,
          onSignOut: @escaping () -> Void = {},
          onSetPassword: @escaping () -> Void = {}) {
         self.provider = provider
         self.homeScrollAnchor = homeScrollAnchor
         self.initialSubsFilter = initialSubsFilter
         self.subsScrollAnchor = subsScrollAnchor
+        self.initialHomeFailure = initialHomeFailure
         self.onSignOut = onSignOut
         self.onSetPassword = onSetPassword
         var tab = initialTab
@@ -71,7 +74,7 @@ struct AppShellView: View {
                         onSeeAll: { selectedTab = .subs },
                         onSelectSubscription: { detailSubscriptionId = $0 },
                         onConnectBank: { connectTarget = ConnectTarget(connectionId: nil) }
-                    ), scrollAnchor: effectiveHomeAnchor)
+                    ), scrollAnchor: effectiveHomeAnchor, initialFailure: initialHomeFailure)
                 case .subs:
                     #if DEBUG
                     SubsScreen(
