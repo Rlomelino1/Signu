@@ -4,6 +4,8 @@ struct RootView: View {
     var session: SessionStore
 
     @State private var provider: SignuDataProviding?
+    @State private var warmedUp = false
+    @State private var warmUpFailure: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(session: SessionStore) {
@@ -81,19 +83,35 @@ struct RootView: View {
 
             case .authenticated:
                 if let provider {
-                    AppShellView(
-                        provider: provider,
-                        onSignOut: { Task { await session.signOut() } },
-                        onSetPassword: {
-                            guard let address = session.email else { return }
-                            Task { await session.requestPasswordReset(email: address) }
-                        }
-                    )
-                    .transition(.opacity)
+                    if warmedUp {
+                        AppShellView(
+                            provider: provider,
+                            initialHomeFailure: warmUpFailure,
+                            onSignOut: { Task { await session.signOut() } },
+                            onSetPassword: {
+                                guard let address = session.email else { return }
+                                Task { await session.requestPasswordReset(email: address) }
+                            }
+                        )
+                        .transition(.opacity)
+                    } else {
+                        SplashView()
+                            .transition(.opacity)
+                            .task {
+                                do {
+                                    _ = try await provider.homePayload()
+                                    warmUpFailure = nil
+                                } catch {
+                                    warmUpFailure = error.localizedDescription
+                                }
+                                warmedUp = true
+                            }
+                    }
                 }
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: session.gateState)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: warmedUp)
         .task {
             await session.restore()
         }
@@ -102,6 +120,8 @@ struct RootView: View {
                 if provider == nil { provider = SignuDataProviderFactory.make() }
             } else {
                 provider = nil
+                warmedUp = false
+                warmUpFailure = nil
             }
         }
         #if DEBUG

@@ -8,6 +8,16 @@ struct HomeScreen: View {
     @State private var payload: HomePayload?
     @State private var failure: String?
 
+    init(provider: SignuDataProviding,
+         actions: HomeActions = HomeActions(),
+         scrollAnchor: UnitPoint = .top,
+         initialFailure: String? = nil) {
+        self.provider = provider
+        self.actions = actions
+        self.scrollAnchor = scrollAnchor
+        self._failure = State(initialValue: initialFailure)
+    }
+
     var body: some View {
         Group {
             if let payload {

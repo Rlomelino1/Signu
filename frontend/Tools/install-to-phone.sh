@@ -115,6 +115,13 @@ echo "udid:   $udid"
 
 step "Building Release (Debug would show mock data — see the header)"
 
+# A fresh CFBundleVersion per install, or iOS keeps the cached launch-screen
+# snapshot: the cache is invalidated by an app UPDATE, and reinstalling
+# version 1 over version 1 is not an update. A week of stale launch screens
+# (and one rebooted phone) traced back to exactly this.
+build_stamp="$(date +%Y%m%d.%H%M%S)"
+echo "build number: $build_stamp"
+
 xcodebuild build \
   -project "$project" \
   -scheme Signu \
@@ -124,6 +131,7 @@ xcodebuild build \
   -allowProvisioningUpdates \
   DEVELOPMENT_TEAM="$team" \
   CODE_SIGN_STYLE=Automatic \
+  CURRENT_PROJECT_VERSION="$build_stamp" \
   | tail -25
 
 app="$derived/Build/Products/Release-iphoneos/Signu.app"
