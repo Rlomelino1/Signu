@@ -61,7 +61,6 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => null)
   const onlyUserId: string | null = body?.userId ?? null
   if (typeof body?.today === 'string') today = body.today
-  // Operator replay only: skips the total-wipe guard for a deliberate teardown.
   const allowWipe = body?.allowWipe === true
 
   const { data: profiles, error: pErr } = onlyUserId

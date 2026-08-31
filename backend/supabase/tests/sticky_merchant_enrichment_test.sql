@@ -2,7 +2,6 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(6);
 
-
 insert into auth.users (id, email, raw_user_meta_data)
 values ('11111111-1111-1111-1111-11111111ee01', 'sticky@example.test', '{}'::jsonb);
 
@@ -22,7 +21,6 @@ values
    'p-sticky-1', 'posted', 'DEBIT', '2026-07-19', 6.45, 'USD', 'Steam Purchase',
    'TRUELINE VALVE CORPORATION', '08057063000196');
 
--- The incident's exact shape: a degraded provider re-sync writing nulls.
 update public.transaction
    set provider_merchant_name = null, provider_merchant_cnpj = null
  where id = '44444444-4444-4444-4444-44444444ee01';
@@ -41,7 +39,6 @@ select is(
   'nor a known merchant name'
 );
 
--- A genuine correction still lands: non-null over non-null updates normally.
 update public.transaction
    set provider_merchant_name = 'VALVE CORPORATION', provider_merchant_cnpj = '08057063000197'
  where id = '44444444-4444-4444-4444-44444444ee01';
@@ -60,8 +57,6 @@ select is(
   'same for the CNPJ'
 );
 
--- A row that never had enrichment can gain it later (the local-enrichment
--- backfill path relies on exactly this write).
 insert into public.transaction
   (id, account_id, provider_tx_id, status, type, date, amount, currency, raw_description)
 values
@@ -79,7 +74,6 @@ select is(
   'null -> value is how the backfill repairs history, and it flows freely'
 );
 
--- Unrelated columns are untouched by the trigger.
 update public.transaction set status = 'pending'
  where id = '44444444-4444-4444-4444-44444444ee01';
 

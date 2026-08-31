@@ -236,8 +236,6 @@ function toTransactionRow(accountRowId: string, t: PluggyTransaction): Transacti
   const raw = String(t.description ?? '')
   const normalized = normalizeMerchant(raw)
 
-  // The lapsed Pluggy trial serves `merchant: null` where it used to serve the
-  // enrichment detection groups by — see _shared/enrichment.ts for the story.
   const local = blankToNull(merchant.businessName) === null &&
       blankToNull(merchant.cnpj) === null
     ? localEnrichmentFor(normalized)
