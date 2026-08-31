@@ -1,6 +1,7 @@
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 import { detect, type EngineInput, type TxRow } from '../_shared/detection.ts'
+import { detectionApplyDecision } from '../_shared/sync.ts'
 import { writeApiKey } from '../_shared/auth.ts'
 
 async function secretsMatch(given: string, expected: string): Promise<boolean> {
@@ -60,6 +61,7 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => null)
   const onlyUserId: string | null = body?.userId ?? null
   if (typeof body?.today === 'string') today = body.today
+  const allowWipe = body?.allowWipe === true
 
   const { data: profiles, error: pErr } = onlyUserId
     ? await db.from('profiles').select('id').eq('id', onlyUserId)
@@ -113,6 +115,11 @@ Deno.serve(async (req: Request) => {
         accounts: (accounts ?? []) as unknown as EngineInput['accounts'],
         catalog,
       })
+
+      if (!allowWipe) {
+        const verdict = detectionApplyDecision(desired.subscriptions.length, (runs ?? []).length)
+        if (verdict.kind === 'refuse') throw new Error(verdict.reason)
+      }
 
       const { data: applied, error: aErr } = await db.rpc('apply_detection', {
         p_user_id: p.id,

@@ -32,3 +32,22 @@ export function withdrawalDecision(
   }
   return { kind: 'withdraw', ids }
 }
+
+export type ApplyDecision =
+  | { kind: 'apply' }
+  | { kind: 'refuse'; reason: string }
+
+export function detectionApplyDecision(
+  desiredSubscriptions: number,
+  storedRuns: number,
+): ApplyDecision {
+  if (desiredSubscriptions === 0 && storedRuns > 0) {
+    return {
+      kind: 'refuse',
+      reason: `detection found nothing against ${storedRuns} stored run(s): ` +
+        `refusing to apply a total wipe, since degraded provider data reads ` +
+        `exactly like this (pass allowWipe to override)`,
+    }
+  }
+  return { kind: 'apply' }
+}
